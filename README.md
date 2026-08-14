@@ -4,7 +4,7 @@ Contract-first, agent-native CRM platform for text and voice interaction. The ag
 
 ## Status
 
-`0.1.0` reference release candidate: deterministic mock providers, HTTP `/v1/ask`, ASR/TTS adapter contracts, CRM idempotency/review/outbox skeleton, OpenAPI/CloudEvents-style event contracts, tests, build manifest and release gates.
+`0.1.0` is a pre-alpha development baseline. It currently includes deterministic mock providers, HTTP `/v1/ask`, ASR/TTS adapter contracts, a CRM idempotency/review/outbox skeleton, OpenAPI/CloudEvents-style event contracts, tests, and build gates. It is not a release candidate and must not be used with production data or real customer audio.
 
 This is an owned implementation. It is inspired by the observed boundaries of Saathi CRM and the Northstar/CopilotKit Strands CRM showcase, but it is not a copy or a source projection.
 

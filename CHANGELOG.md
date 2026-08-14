@@ -10,4 +10,4 @@
 - Added a bounded Sumi Docs MCP projection with stable document identity, route metadata, converted OpenAPI JSON, and cross-project protocol verification.
 - Added versioned `.agent/` governance while isolating machine-local agent state and generated evidence from Git and delivery contexts.
 
-This is a reference release candidate. Real provider quality, production identity, infrastructure and SLO evidence remain release gates.
+This is a pre-alpha development baseline, not a release candidate. Real provider quality, production identity, infrastructure, and SLO evidence remain open development and release gates.

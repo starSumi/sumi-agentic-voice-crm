@@ -1,18 +1,20 @@
 ---
-title: Release readiness record
-description: Current candidate evidence, known production gaps, and the explicit release decision for version 0.1.0.
+title: Development and release readiness record
+description: Current pre-alpha evidence, known production gaps, and the explicit hold on releasing version 0.1.0.
 docId: crm.release-readiness
 locale: en
 audience: both
 contentVersion: 0.1.0
 ---
 
-## Candidate
+## Development baseline
 
 - Repository: `sumi-agentic-voice-crm`
-- Version: `0.1.0`
+- Working version: `0.1.0`
+- Lifecycle: pre-alpha; active development
 - Date: 2026-08-14
 - Provider mode: deterministic mock
+- Release candidate: **no**
 - Production status: **not approved**
 
 ## Evidence captured
@@ -45,6 +47,8 @@ contentVersion: 0.1.0
 
 ## Release decision
 
-`0.1.0` is suitable as an internal reference/contract release only. Promote to production only after C0–C6 in
-[CHECKPOINTS.md](CHECKPOINTS.md) are evidenced, especially identity/tenant isolation, real provider quality,
-Postgres/outbox integration, security scans, load/fault tests, signed artifact/provenance and rollback drill.
+There is no release approval for `0.1.0`. The current commit is suitable only for controlled source collaboration,
+local contract exploration, and deterministic mock verification. Do not create a release tag, publish a package,
+deploy the runtime to a public endpoint, or process production data. Release consideration starts only after C0–C6
+in [CHECKPOINTS.md](CHECKPOINTS.md) are evidenced, especially identity/tenant isolation, real provider quality,
+Postgres/outbox integration, security scans, load/fault tests, signed artifact/provenance, and a rollback drill.
