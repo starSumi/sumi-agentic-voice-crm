@@ -1,0 +1,15 @@
+specversion: "1.0"
+source: "urn:sumi:voice-crm/crm"
+types:
+  - voice.request.received.v1
+  - voice.transcript.created.v1
+  - voice.understanding.created.v1
+  - crm.command.committed.v1
+  - crm.review.requested.v1
+  - tts.asset.created.v1
+  - voice.request.failed.v1
+envelope:
+  required: [id, type, specversion, source, subject, time, tenant_id, request_id, data]
+  id: unique event id; consumers deduplicate by id
+  subject: aggregate reference
+  data: versioned JSON payload

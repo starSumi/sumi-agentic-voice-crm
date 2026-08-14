@@ -1,0 +1,22 @@
+import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+
+const required = ["README.md", "AGENTS.md", "LICENSE", "contracts/openapi.yaml", "contracts/events.yaml", "db/migrations/001_initial.sql", "docs/ADR-0001-agentic-crm.md", "docs/ARCHITECTURE.md", "docs/DATA-MODEL.md", "docs/EVENTS-AUDIT.md", "docs/LIFECYCLE.md", "docs/SECURITY.md", "docs/BUILD-RELEASE.md", "docs/CHECKPOINTS.md", "postman/voice-crm.postman_collection.json"];
+const missing = required.filter((p) => !existsSync(p));
+if (missing.length) throw new Error(`missing required files: ${missing.join(", ")}`);
+JSON.parse(await readFile("postman/voice-crm.postman_collection.json", "utf8"));
+const openapi = await readFile("contracts/openapi.yaml", "utf8");
+for (const marker of ["openapi: 3.1.0", "/v1/ask:", "/v1/tts/synthesize:", "bearerAuth"]) if (!openapi.includes(marker)) throw new Error(`OpenAPI marker missing: ${marker}`);
+const events = await readFile("contracts/events.yaml", "utf8");
+for (const marker of ["specversion: \"1.0\"", "crm.command.committed.v1", "voice.request.failed.v1"]) if (!events.includes(marker)) throw new Error(`event marker missing: ${marker}`);
+const sql = await readFile("db/migrations/001_initial.sql", "utf8");
+for (const marker of ["create table if not exists tenants", "create table if not exists outbox_events", "enable row level security"]) if (!sql.includes(marker)) throw new Error(`SQL safety marker missing: ${marker}`);
+const source = await readFile("src/server.mjs", "utf8");
+if (/(sk-[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9_-]{20,})/.test(source)) throw new Error("possible credential in source");
+const status = spawnSync(process.execPath, ["--check", "src/server.mjs"], { encoding: "utf8" });
+if (status.status !== 0) throw new Error(status.stderr);
+const store = await readFile("src/store.mjs", "utf8");
+for (const marker of ["specversion", "source:", "subject", "time:", "data", "IDEMPOTENCY_CONFLICT"]) if (!store.includes(marker)) throw new Error(`runtime contract marker missing: ${marker}`);
+if (!openapi.includes("AudioAskRequest") || !openapi.includes("oneOf:")) throw new Error("OpenAPI must describe text and audio JSON variants");
+console.log(`check passed: ${required.length} required files, OpenAPI markers, Postman JSON, server syntax`);

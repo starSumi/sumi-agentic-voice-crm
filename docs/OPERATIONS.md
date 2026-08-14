@@ -1,0 +1,20 @@
+# Operations runbook
+
+## Health
+
+- `/health/live`: process only.
+- `/health/ready`: database migration, object store and provider capability readiness.
+- `/v1/events`: reference-only diagnostic view; production requires authenticated operator scope and pagination.
+
+## Common incidents
+
+| Symptom | First checks | Safe action |
+| --- | --- | --- |
+| `ASR_TIMEOUT` | provider latency, queue, model load, trace | retry same request/idempotency key; preserve media |
+| `EMPTY_TRANSCRIPT` | audio bytes/duration/codec, microphone | ask user to record again; no CRM write |
+| `needs_review` spike | intent model version, locale WER, entity resolver | pause risky command rollout; inspect redacted samples |
+| duplicate CRM | idempotency store/outbox uniqueness | stop consumer, replay by key, never manual duplicate insert |
+| TTS failure | provider health/voice capability | keep text response; retry TTS job |
+| event lag | relay lease/dead-letter/DB | scale relay; preserve order and deduplicate |
+
+Every incident gets a timeline, affected tenant scope, trace/event IDs, decision, remediation and follow-up checkpoint.
