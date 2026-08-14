@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
-const required = ["README.md", "AGENTS.md", "LICENSE", "contracts/openapi.yaml", "contracts/events.yaml", "db/migrations/001_initial.sql", "docs/ADR-0001-agentic-crm.md", "docs/ARCHITECTURE.md", "docs/DATA-MODEL.md", "docs/EVENTS-AUDIT.md", "docs/LIFECYCLE.md", "docs/SECURITY.md", "docs/BUILD-RELEASE.md", "docs/CHECKPOINTS.md", "postman/voice-crm.postman_collection.json"];
+const required = ["README.md", "AGENTS.md", "LICENSE", "contracts/openapi.yaml", "contracts/events.yaml", "db/migrations/001_initial.sql", "docs/ADR-0001-agentic-crm.md", "docs/ARCHITECTURE.md", "docs/DATA-MODEL.md", "docs/EVENTS-AUDIT.md", "docs/LIFECYCLE.md", "docs/SECURITY.md", "docs/BUILD-RELEASE.md", "docs/CHECKPOINTS.md", "docs/SOURCE-EVIDENCE.md", "docs/TRACEABILITY.md", "postman/voice-crm.postman_collection.json"];
 const missing = required.filter((p) => !existsSync(p));
 if (missing.length) throw new Error(`missing required files: ${missing.join(", ")}`);
 JSON.parse(await readFile("postman/voice-crm.postman_collection.json", "utf8"));
