@@ -13,7 +13,7 @@
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | Syntax | PASS | `node --check src/*.mjs` via `npm run check` |
-| Contract/unit | PASS | `npm test`: 7/7 |
+| Contract/unit | PASS | `npm test`: 11/11 |
 | Repository invariants | PASS | `npm run check`: required files, OpenAPI markers, Postman JSON |
 | Build | PASS | `npm run build`: dist manifest generated |
 | Normal text ask | PASS | test `text ask returns CRM result and TTS asset` |
