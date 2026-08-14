@@ -41,6 +41,8 @@ The mock provider accepts base64 audio containing UTF-8 text prefixed with `MOCK
 - [BUILD-RELEASE](docs/BUILD-RELEASE.md): reproducible build, CI gates, SBOM/provenance and release.
 - [CHECKPOINTS](docs/CHECKPOINTS.md): stage gates, checklists and evidence requirements.
 - [INSPIRATION](docs/INSPIRATION.md): attribution and non-copying boundary.
+- [SOURCE-EVIDENCE](docs/SOURCE-EVIDENCE.md): pinned evidence, fact classes and rejected interpretations.
+- [TRACEABILITY](docs/TRACEABILITY.md): requirement-to-contract-to-checkpoint matrix.
 - [OpenAPI](contracts/openapi.yaml), [events](contracts/events.yaml), [Postman](postman/voice-crm.postman_collection.json).
 
 ## Non-negotiables
