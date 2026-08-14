@@ -40,7 +40,7 @@ The Dockerfile is a multi-stage build. Its runtime stage contains only the gener
 
 ## Branch and change policy
 
-- Protected `main`; PR required, CODEOWNERS review for contracts, security, database and release files.
+- Target policy: protected `main`, required PRs, and CODEOWNERS review for contracts, security, database, and release files. Current enforcement status is recorded in [Development and release readiness](RELEASE-READINESS.md).
 - Conventional commits; one bounded change per PR; ADR required for boundary/schema/lifecycle changes.
 - Contract changes are additive by default; breaking changes require major API/event version and migration plan.
 - No generated artifact or secret committed; no direct production mutation from a development shell.

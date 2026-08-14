@@ -31,6 +31,8 @@ contentVersion: 0.1.0
 | MCP partner integration | PASS | `npm run verify:mcp`: four tools, bilingual queries, OpenAPI, and all 36 human URLs |
 | Dependency audit | PASS | `npm run audit:deps`: 0 vulnerabilities against the official npm registry |
 | Package boundary | PASS | `npm pack --dry-run`: allowlisted runtime distribution plus repository metadata |
+| GitHub CI | PASS | Private `main` run `31800701837`: `verify` and dependency audit completed successfully |
+| Remote branch protection | BLOCKED | GitHub returned `403`: the current account plan does not expose branch protection for this private repository; visibility remains private |
 | Normal text ask | PASS | test `text ask returns CRM result and TTS asset` |
 | Mock audio path | PASS | test `mock audio exercises ASR to intent to TTS` |
 | No audio source | PASS | test `missing audio is a non-retryable boundary error` |
