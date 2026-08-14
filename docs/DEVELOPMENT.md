@@ -18,6 +18,7 @@ Use Node.js `24.18.0` or newer and npm `11.15.0`. The runtime itself is standard
 | `db/` | Production-target schema and row-level security migration. |
 | `docs/` | Single reviewed source for human Web and agent MCP documentation. |
 | `.agent/` | Versioned engineering governance and checkpoint routing. |
+| User state root selected by `npm run agent:resume` | Machine-local session identity, agent edges, locks, and retries; never committed. |
 | `test/` | Runtime and contract regression tests. |
 | `scripts/` | Deterministic checks, builds, and cross-product verification. |
 | `artifacts/docs-site/` | Generated documentation site and `_mcp` projection; ignored. |
@@ -27,6 +28,8 @@ Use Node.js `24.18.0` or newer and npm `11.15.0`. The runtime itself is standard
 
 ```powershell
 npm ci
+npm run agent:health
+npm run agent:resume
 npm run verify
 npm run verify:mcp
 ```
@@ -35,7 +38,7 @@ npm run verify:mcp
 
 ## Change sequence
 
-1. Read `AGENTS.md`, the owning contract or ADR, and the relevant checkpoint card.
+1. Read `AGENTS.md`, the reviewed agent cursor, the owning contract or ADR, and the relevant checkpoint card; then re-probe Git and CI.
 2. Add a failing test for an externally visible regression or contract change.
 3. Update normative types or contracts before adapters and transport code.
 4. Keep model output untrusted; validate authorization, schema, policy, idempotency, and transaction boundaries outside the model.

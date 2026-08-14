@@ -1,0 +1,61 @@
+{
+  "schema_version": "sumi.agent-cursor.v1",
+  "captured_at": "2026-08-14T21:26:46+08:00",
+  "captured_by": "continuity-supervisor",
+  "source": {
+    "repository": "starSumi/sumi-agentic-voice-crm",
+    "visibility": "private",
+    "branch": "main",
+    "commit": "0473b96124b8029074c551c94dee7c678e05d1e6"
+  },
+  "control_plane": {
+    "phase": "P4-crm-safety-and-persistence",
+    "checkpoint": "C2",
+    "state_updated_at": "2026-08-14T21:26:46+08:00"
+  },
+  "last_verified_ci": {
+    "workflow": "ci",
+    "run_id": 31801255280,
+    "head_sha": "0473b96124b8029074c551c94dee7c678e05d1e6",
+    "conclusion": "success",
+    "observed_at": "2026-08-14T21:26:46+08:00",
+    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31801255280"
+  },
+  "open_work": [
+    {
+      "id": "C2-postgres-rls",
+      "owner": "data-owner",
+      "status": "open",
+      "next_action": "Run real PostgreSQL transaction and row-level-security integration with two isolated tenants.",
+      "acceptance": ["two-tenant isolation", "atomic CRM/audit/outbox commit", "rollback evidence"]
+    },
+    {
+      "id": "remote-main-protection",
+      "owner": "platform-owner",
+      "status": "externally_blocked",
+      "next_action": "Enable a plan that supports private-repository rulesets or branch protection, then require the observed CI checks.",
+      "evidence": "GitHub returned 403 for protection APIs on the current private-repository plan."
+    }
+  ],
+  "next_session": {
+    "bootstrap_role": "continuity-supervisor",
+    "reading_order": [
+      "AGENTS.md",
+      ".agent/.agent.manifest.json",
+      ".agent/.agent.state.json",
+      ".agent/.agent.cursor.json",
+      ".agent/.agent.maintainers.json",
+      ".agent/roles/continuity-supervisor.agent.md"
+    ],
+    "first_commands": [
+      "git status --short --branch",
+      "git fetch --prune origin",
+      "npm run agent:resume",
+      "npm run check:agent"
+    ],
+    "rule": "Re-probe Git, GitHub Actions and runtime state; do not treat this cursor or a prior session transcript as live evidence."
+  },
+  "human_gate": "No agent or CI workflow may mark C6 complete, publish a release, or bypass the owner's manual acceptance.",
+  "refresh_rule": "Refresh after a phase/checkpoint transition, a changed blocker, or at least every 14 days. The recorded commit may be an ancestor of HEAD but must exist in repository history.",
+  "rollback_rule": "Revert the cursor change; runtime session history remains outside the repository and is never reconstructed from this file alone."
+}

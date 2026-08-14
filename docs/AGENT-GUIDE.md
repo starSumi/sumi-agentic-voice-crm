@@ -36,6 +36,8 @@ Loopback HTTP is for development only. A deployed corpus must use HTTPS.
 4. Call `get_openapi_spec` before changing request or response behavior.
 5. Confirm mutable implementation facts in `src/`, `contracts/`, migrations, and tests before editing.
 
+When a checkout is available, also run `npm run agent:health` and `npm run agent:resume`, then read `.agent/.agent.cursor.json` and the active checkpoint card. The cursor is a reviewed handoff, so verify its commit and CI facts before relying on them. Search for `continuity-supervisor` or fetch `maintenance.md` for the full current/next-session procedure.
+
 ## Evidence rules
 
 - `contracts/openapi.yaml` and `contracts/events.yaml` are normative for their protocols.
@@ -57,5 +59,6 @@ An effective project MCP should let a new agent answer these without broad repos
 - What remains unverified for production?
 - How should an operator respond to `ASR_TIMEOUT` without duplicating a command?
 - Where is the difference between current mock behavior and target provider configuration documented?
+- Which role owns the next-session handoff, where is live session state stored, and may CI approve a release?
 
 The repository script `npm run verify:mcp` turns these expectations into a real stdio protocol check rather than a documentation claim.

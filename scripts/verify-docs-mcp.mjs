@@ -91,6 +91,9 @@ const calls = [
   [6, "tools/call", { name: "search_docs", arguments: { query: "低置信度" } }],
   [7, "tools/call", { name: "fetch_doc", arguments: { path: "zh-cn/agent-guide.md" } }],
   [8, "tools/call", { name: "search_docs", arguments: { query: "ASR_TIMEOUT" } }],
+  [9, "tools/call", { name: "search_docs", arguments: { query: "continuity-supervisor" } }],
+  [10, "tools/call", { name: "fetch_doc", arguments: { path: "maintenance.md" } }],
+  [11, "tools/call", { name: "fetch_doc", arguments: { path: "zh-cn/maintenance.md" } }],
 ];
 
 try {
@@ -117,7 +120,7 @@ try {
   const parseToolResult = (id) =>
     JSON.parse(responses.get(id)?.result?.content?.[0]?.text ?? "null");
   const listed = parseToolResult(2);
-  assert.equal(listed.length, 36);
+  assert.equal(listed.length, 38);
   assert.equal(
     listed.find(({ path }) => path === "agent-guide.md")?.url,
     `${baseUrl}agent-guide`,
@@ -139,6 +142,12 @@ try {
       ),
     ),
   );
+  assert.ok(
+    parseToolResult(9).some(({ path }) => path === "maintenance.md"),
+    "continuity search should reach the maintenance contract",
+  );
+  assert.match(parseToolResult(10)?.content ?? "", /State ownership/);
+  assert.match(parseToolResult(11)?.content ?? "", /状态归属/);
 
   const routeMap = JSON.parse(
     await readFile(

@@ -10,6 +10,12 @@ const agentState = JSON.parse(
 const phaseRoleMatrix = JSON.parse(
   await readFile(`${agentRoot}/phase-role-matrix.json`, "utf8"),
 );
+const maintainers = JSON.parse(
+  await readFile(`${agentRoot}/.agent.maintainers.json`, "utf8"),
+);
+const cursor = JSON.parse(
+  await readFile(`${agentRoot}/.agent.cursor.json`, "utf8"),
+);
 
 for (const key of [
   "schema_version",
@@ -96,6 +102,25 @@ const roleIds = new Set(roleFiles.map((file) => file.replace(/\.agent\.md$/, "")
 for (const role of agentManifest.active_roles) {
   if (!roleIds.has(role)) throw new Error(`role card missing: ${role}`);
 }
+for (const role of [
+  "docs-maintainer",
+  "continuity-supervisor",
+  "ci-operations-agent",
+]) {
+  if (!roleIds.has(role)) throw new Error(`operations role card missing: ${role}`);
+}
+if (maintainers.schema_version !== "sumi.agent-maintainers.v1") {
+  throw new Error("agent maintainer registry schema mismatch");
+}
+if (cursor.schema_version !== "sumi.agent-cursor.v1") {
+  throw new Error("agent cursor schema mismatch");
+}
+if (
+  cursor.control_plane.phase !== agentManifest.current_phase ||
+  cursor.control_plane.checkpoint !== agentManifest.current_checkpoint
+) {
+  throw new Error("agent cursor and manifest control plane disagree");
+}
 
 const localPaths = [
   ".agent.local/",
@@ -137,6 +162,60 @@ for (const ignoreFile of buildOnlyIgnoreFiles) {
     if (!ignore.includes(buildOnlyPath)) {
       throw new Error(`${ignoreFile} is missing build-only agent path: ${buildOnlyPath}`);
     }
+  }
+}
+
+const operationsWorkflow = await readFile(
+  ".github/workflows/operations-agent.yml",
+  "utf8",
+);
+for (const marker of [
+  "workflow_run:",
+  "branches: [main]",
+  "github.event.workflow_run.event == 'push'",
+  "github.ref == 'refs/heads/main'",
+  "contents: read",
+  "actions: read",
+  "issues: write",
+  "Reject superseded observations",
+  "workflow_runs[0].id",
+  "retention-days: 30",
+]) {
+  if (!operationsWorkflow.includes(marker)) {
+    throw new Error(`operations workflow safety marker missing: ${marker}`);
+  }
+}
+const authorizeStart = operationsWorkflow.indexOf("\n  authorize-reconcile:");
+const reconcileStart = operationsWorkflow.indexOf("\n  reconcile:");
+if (authorizeStart < 0) throw new Error("operations freshness authorization job missing");
+if (reconcileStart < 0) throw new Error("operations reconcile job missing");
+const authorizeJob = operationsWorkflow.slice(authorizeStart, reconcileStart);
+for (const marker of [
+  "permissions:\n      actions: read\n      contents: read",
+  "git/ref/heads/main",
+  "OBSERVED_RUN_ID",
+  "current=$current",
+]) {
+  if (!authorizeJob.includes(marker)) {
+    throw new Error(`operations freshness guard missing: ${marker}`);
+  }
+}
+if (/actions\/checkout|\bnpm\s|node\s+scripts\//.test(authorizeJob)) {
+  throw new Error("freshness authorization job must not execute repository code");
+}
+const reconcileJob = operationsWorkflow.slice(reconcileStart);
+if (/actions\/checkout|\bnpm\s|node\s+scripts\//.test(reconcileJob)) {
+  throw new Error("issue-write reconciliation job must not execute repository code");
+}
+
+const codeowners = await readFile(".github/CODEOWNERS", "utf8");
+for (const ownedPath of [
+  "/.agent/ @starSumi",
+  "/docs/ @starSumi",
+  "/.github/workflows/ @starSumi",
+]) {
+  if (!codeowners.includes(ownedPath)) {
+    throw new Error(`CODEOWNERS mapping missing: ${ownedPath}`);
   }
 }
 

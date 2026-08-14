@@ -22,6 +22,7 @@
 
 - [ ] Human and agent documentation matches the implementation
 - [ ] English and Chinese core variants remain paired when applicable
+- [ ] `.agent/` cursor or maintainer facts were refreshed when ownership, phase, checkpoint, or next action changed
 
 ## Rollback
 

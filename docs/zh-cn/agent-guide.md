@@ -29,6 +29,8 @@ loopback HTTP 只用于开发，部署后必须使用 HTTPS。
 4. 修改请求或响应前先调用 `get_openapi_spec`。
 5. 写代码前回到 `src/`、`contracts/`、migration 和测试核实当前行为。
 
+有 checkout 时还应运行 `npm run agent:health` 和 `npm run agent:resume`，然后读取 `.agent/.agent.cursor.json` 与当前检查点卡。cursor 只是经过评审的交接信息，使用前仍要核实其中的 commit 与 CI 状态。搜索 `continuity-supervisor` 或获取 `zh-cn/maintenance.md` 可以看到完整的当前/下一会话流程。
+
 ## 证据优先级
 
 OpenAPI 与事件契约是协议权威；`RELEASE-READINESS` 决定哪些门真正通过；`SOURCE-EVIDENCE` 区分源码确认、运行观察、推断和未知；`.agent/` 负责任务和检查点路由，但不能替代源码或运行证据。

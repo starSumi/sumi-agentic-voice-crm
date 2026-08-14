@@ -2,5 +2,10 @@
 /contracts/ @starSumi
 /db/ @starSumi
 /.agent/ @starSumi
-/docs/SECURITY.md @starSumi
-/docs/BUILD-RELEASE.md @starSumi
+/docs/ @starSumi
+/astro.config.mjs @starSumi
+/src/content.config.ts @starSumi
+/integrations/ @starSumi
+/scripts/agent-ops.mjs @starSumi
+/scripts/agent-incident.mjs @starSumi
+/.github/workflows/ @starSumi

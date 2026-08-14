@@ -22,16 +22,17 @@ contentVersion: 0.1.0
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | Syntax | PASS | `node --check src/*.mjs` via `npm run check` |
-| Contract/unit | PASS | `npm test`: 14/14, including publisher contract and boundary tests |
-| Repository invariants | PASS | `npm run check`: 29 required files, OpenAPI markers, Postman JSON, server syntax |
-| Agent governance | PASS | `npm run check:agent`: 9 phases, 7 checkpoints, 22 roles, local state ignored |
+| Contract/unit | PASS | `npm test`: 19/19, including publisher, operations snapshot, incident reconciliation, and runtime boundary tests |
+| Repository invariants | PASS | `npm run check`: 31 required files, OpenAPI markers, Postman JSON, server syntax |
+| Agent governance | PASS | `npm run check:agent` and `npm run agent:health`: 9 phases, 7 checkpoints, 25 roles, maintainer registry and reviewed cursor current, live state external |
 | Runtime build | PASS | `npm run build`: 8 runtime files plus a deterministic hash manifest |
 | Runtime smoke | PASS | `npm run smoke:dist`: generated server reports ready in mock mode |
-| Documentation build | PASS | `npm run docs:build`: Astro 0 diagnostics, 45 pages, 36 machine documents, 14 Chinese variants |
-| MCP partner integration | PASS | `npm run verify:mcp`: four tools, bilingual queries, OpenAPI, and all 36 human URLs |
+| Documentation build | PASS | `npm run docs:build`: Astro 0 diagnostics, 47 pages, 38 machine documents, 15 Chinese variants |
+| MCP partner integration | PASS | `npm run verify:mcp`: four tools, bilingual queries, continuity discovery, OpenAPI, and all 38 human URLs |
 | Dependency audit | PASS | `npm run audit:deps`: 0 vulnerabilities against the official npm registry |
 | Package boundary | PASS | `npm pack --dry-run`: allowlisted runtime distribution plus repository metadata |
-| GitHub CI | PASS | Private `main` run `31800701837`: `verify` and dependency audit completed successfully |
+| GitHub CI baseline | PASS | Private `main` run `31801255280` at `0473b96124b8029074c551c94dee7c678e05d1e6`: `verify` and dependency audit completed successfully; the current maintenance change still requires its own remote run |
+| CI operations workflow | PENDING | Local schema, least-privilege boundary, snapshot, and incident tests pass; remote `workflow_run` evidence begins only after the workflow reaches `main` |
 | Remote branch protection | BLOCKED | GitHub returned `403`: the current account plan does not expose branch protection for this private repository; visibility remains private |
 | Normal text ask | PASS | test `text ask returns CRM result and TTS asset` |
 | Mock audio path | PASS | test `mock audio exercises ASR to intent to TTS` |

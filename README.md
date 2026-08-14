@@ -25,7 +25,7 @@ Invoke-RestMethod http://localhost:8080/health/ready
 
 The mock provider accepts base64 audio containing UTF-8 text prefixed with `MOCK_AUDIO:`. See the Postman collection and [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
-For source-level iteration without building `dist/`, use `npm run dev`. Machine-specific `.env`, caches, logs, sessions, reports, and generated evidence stay ignored; reviewed development guides, `.env.example`, `.agent/` governance, and version constraints stay in Git.
+For source-level iteration without building `dist/`, use `npm run dev`. Machine-specific `.env`, caches, logs, sessions, reports, and generated evidence stay ignored; reviewed development guides, `.env.example`, `.agent/` governance, and version constraints stay in Git. Live agent sessions stay outside the checkout under `CODEX_HOME`, `XDG_STATE_HOME`, or `LOCALAPPDATA`; `npm run agent:resume` prints the selected path.
 
 ## Documentation for people and agents
 
@@ -48,6 +48,8 @@ node E:\Zero_Base\playground\.sumi\Sumi-Docs-MCP\dist\index.js serve `
 
 The [agent development partner guide](docs/AGENT-GUIDE.md) defines discovery order, evidence priority, safety boundaries, and acceptance questions. `npm run verify:mcp` exercises all four MCP tools against the generated corpus and every published page URL.
 
+For ongoing maintenance, run `npm run agent:health` and `npm run agent:resume` at session start. The [maintainer and session continuity guide](docs/MAINTENANCE.md) defines the reviewed handoff cursor, external runtime state, CI operations agent, recovery, and human approval boundary.
+
 ## Architecture in one line
 
 `Gateway → Ask Orchestrator → ASR → Normalizer → Intent/Policy → CRM Command or Review → Outbox/Event Bus → Answer Composer → TTS → private media asset`.
@@ -66,6 +68,7 @@ The [agent development partner guide](docs/AGENT-GUIDE.md) defines discovery ord
 - [LIFECYCLE](docs/LIFECYCLE.md): request/job/agent/record/media lifecycles.
 - [SECURITY](docs/SECURITY.md): threat model, authorization and privacy controls.
 - [BUILD-RELEASE](docs/BUILD-RELEASE.md): reproducible build, CI gates, SBOM/provenance and release.
+- [MAINTENANCE](docs/MAINTENANCE.md): maintainers, current and next session continuity, CI operations, and recovery.
 - [CHECKPOINTS](docs/CHECKPOINTS.md): stage gates, checklists and evidence requirements.
 - [INSPIRATION](docs/INSPIRATION.md): attribution and non-copying boundary.
 - [SOURCE-EVIDENCE](docs/SOURCE-EVIDENCE.md): pinned evidence, fact classes and rejected interpretations.

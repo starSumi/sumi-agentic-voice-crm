@@ -45,6 +45,12 @@ The Dockerfile is a multi-stage build. Its runtime stage contains only the gener
 - Contract changes are additive by default; breaking changes require major API/event version and migration plan.
 - No generated artifact or secret committed; no direct production mutation from a development shell.
 
+## CI operations agent
+
+`.github/workflows/operations-agent.yml` observes completed `ci` runs on `main`, performs a weekly drift check, and supports manual inspection. The observation job has read-only repository permission and produces a 30-day JSON snapshot. Issue reconciliation is a separate job with only `issues: write`; it does not check out or execute repository code.
+
+The agent may open, update, or close the deterministic `[CI Operations] main requires attention` Issue. It may not modify source, change a checkpoint to complete, approve a release, create a tag, publish, or deploy. Its snapshot and Issue are operational signals, not release authorization.
+
 ## Release artifact
 
 Release contains OCI image digest, source commit, dependency lock hash, OpenAPI/event schema version, DB migration range,

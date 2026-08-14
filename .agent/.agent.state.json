@@ -1,7 +1,7 @@
 {
   "schema_version": "sumi.agent-state.v1",
-  "updated_at": "2026-08-14T20:12:00+08:00",
-  "updated_by": "supervisor",
+  "updated_at": "2026-08-14T21:26:46+08:00",
+  "updated_by": "continuity-supervisor",
   "phase_status": {
     "P0-discover-and-scope": "completed",
     "P1-adr-and-architecture": "completed",
@@ -27,5 +27,5 @@
   },
   "active_tasks": [],
   "waivers": [],
-  "next_action": "Implement real persistence/provider integration and attach C2-C5 evidence before reopening C6."
+  "next_action": "Implement real PostgreSQL transaction/RLS integration with a two-tenant test, then attach the result to C2 before advancing to C3-C5."
 }

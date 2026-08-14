@@ -1,11 +1,11 @@
 {
   "schema_version": "sumi.agent-control.v1",
   "repository": "sumi-agentic-voice-crm",
-  "source_commit": "0a274202221df9d5140f7faa08d5cef7c31d14a5",
+  "source_commit": "0473b96124b8029074c551c94dee7c678e05d1e6",
   "lifecycle": "versioned-governance",
   "current_phase": "P4-crm-safety-and-persistence",
   "current_checkpoint": "C2",
-  "release_status": "reference-release-not-production-approved",
+  "release_status": "pre-alpha-not-release-candidate",
   "status": "in_progress",
   "accountable_owner": "commander",
   "decision_owner": "platform-engineering",
@@ -43,7 +43,10 @@
     "worker",
     "product-owner",
     "platform-owner",
-    "operations-owner"
+    "operations-owner",
+    "docs-maintainer",
+    "continuity-supervisor",
+    "ci-operations-agent"
   ],
   "evidence_policy": {
     "labels": ["source-confirmed", "runtime-observed", "inferred", "unknown"],
@@ -56,6 +59,18 @@
     ".agent-artifacts/",
     ".agent-work/"
   ],
+  "continuity": {
+    "maintainers": ".agent/.agent.maintainers.json",
+    "cursor": ".agent/.agent.cursor.json",
+    "runtime_root_precedence": [
+      "${CODEX_HOME}/operations/sumi-agentic-voice-crm/${CODEX_THREAD_ID}",
+      "${XDG_STATE_HOME}/sumi-agent-operations/sumi-agentic-voice-crm/${CODEX_THREAD_ID}",
+      "${LOCALAPPDATA}/Sumi/agent-operations/sumi-agentic-voice-crm/${CODEX_THREAD_ID}"
+    ],
+    "repo_local_fallback": ".agent-runtime/",
+    "ci_snapshot": "artifacts/agent-ops/operations-snapshot.json",
+    "next_session_role": "continuity-supervisor"
+  },
   "refresh_rule": "Update this manifest only through a reviewed change that also updates the affected phase/checkpoint card.",
   "rollback_rule": "Revert the governance commit; never delete historical evidence. Expire local runtime artifacts through retention policy."
 }

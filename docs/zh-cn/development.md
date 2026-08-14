@@ -18,6 +18,7 @@ contentVersion: 0.1.0
 | `db/` | 生产目标 schema 与 RLS migration。 |
 | `docs/` | Web 与 MCP 共用的唯一评审内容源。 |
 | `.agent/` | 版本化工程治理和检查点路由。 |
+| `npm run agent:resume` 选择的用户状态根 | 机器本地的会话 ID、agent 关系、锁和重试，不能提交。 |
 | `test/` | 运行时和契约回归测试。 |
 | `artifacts/docs-site/` | 生成的站点和 `_mcp` 投影，不提交。 |
 | `dist/` | 生成的运行时候选制品，不提交。 |
@@ -26,8 +27,10 @@ contentVersion: 0.1.0
 
 ```powershell
 npm ci
+npm run agent:health
+npm run agent:resume
 npm run verify
 npm run verify:mcp
 ```
 
-变更公开行为前先增加失败测试；先改规范类型或契约，再改 adapter 和 transport；模型输出始终是不可信输入；行为或运维流程改变时同步核心中英文文档。无法运行的门必须明确报告，不能用状态文档代替证据。
+开始开发前读取评审后的 cursor 与当前检查点，并重新探测 Git 和 CI。变更公开行为前先增加失败测试；先改规范类型或契约，再改 adapter 和 transport；模型输出始终是不可信输入；行为或运维流程改变时同步核心中英文文档。无法运行的门必须明确报告，不能用状态文档代替证据。

@@ -16,6 +16,7 @@ const englishDocuments = [
   ["EVENTS-AUDIT.md", "events-audit.md", "/events-audit/"],
   ["SECURITY.md", "security.md", "/security/"],
   ["OPERATIONS.md", "operations.md", "/operations/"],
+  ["MAINTENANCE.md", "maintenance.md", "/maintenance/"],
   ["DEVELOPMENT.md", "development.md", "/development/"],
   ["CONTRIBUTING.md", "contributing.md", "/contributing/"],
   ["BUILD-RELEASE.md", "build-release.md", "/build-release/"],
@@ -42,6 +43,7 @@ const chineseDocuments = [
   ["architecture.md", "/zh-cn/architecture/"],
   ["security.md", "/zh-cn/security/"],
   ["operations.md", "/zh-cn/operations/"],
+  ["maintenance.md", "/zh-cn/maintenance/"],
   ["development.md", "/zh-cn/development/"],
   ["contributing.md", "/zh-cn/contributing/"],
   ["troubleshooting.md", "/zh-cn/troubleshooting/"],
@@ -122,6 +124,7 @@ export default defineConfig({
           translations: { "zh-CN": "运维与交付" },
           items: [
             { slug: "operations", label: "Operations", translations: { "zh-CN": "运维" } },
+            { slug: "maintenance", label: "Maintenance", translations: { "zh-CN": "维护与交接" } },
             { slug: "build-release", label: "Build and release", translations: { "zh-CN": "构建与发布" } },
             { slug: "release-readiness", label: "Release readiness", translations: { "zh-CN": "发布就绪" } },
             { slug: "checkpoints", label: "Checkpoints", translations: { "zh-CN": "检查点" } },
