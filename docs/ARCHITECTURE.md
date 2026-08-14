@@ -1,4 +1,11 @@
-# Architecture, patterns and ownership
+---
+title: Architecture, patterns and ownership
+description: System boundaries, bounded contexts, design patterns, ownership rules, agent contracts, and failure isolation.
+docId: crm.architecture
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 ## System map
 

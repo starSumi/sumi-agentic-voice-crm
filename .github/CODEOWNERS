@@ -1,5 +1,6 @@
-* @sumi/platform
-/contracts/ @sumi/api @sumi/platform
-/db/ @sumi/data @sumi/security
-/docs/SECURITY.md @sumi/security
-/docs/BUILD-RELEASE.md @sumi/release
+* @starSumi
+/contracts/ @starSumi
+/db/ @starSumi
+/.agent/ @starSumi
+/docs/SECURITY.md @starSumi
+/docs/BUILD-RELEASE.md @starSumi

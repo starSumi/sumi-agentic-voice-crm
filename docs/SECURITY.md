@@ -1,4 +1,11 @@
-# Security and trust boundaries
+---
+title: Security and trust boundaries
+description: Tenant isolation, prompt and media threats, authorization, privacy, audit, idempotency, and human confirmation controls.
+docId: crm.security
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 ## Threats
 

@@ -1,10 +1,17 @@
-# 灵感来源与非抄袭声明
+---
+title: Inspiration and non-copying boundary
+description: Pinned comparative projects, the evidence taken from them, and the boundary between inspiration and owned implementation.
+docId: crm.inspiration
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
-本实现的设计灵感来自两个已研究的开源项目：
+The design was informed by two pinned open-source projects:
 
-- `JagadeepPortfolio/saathi-crm`：语音录入、whisper.cpp ASR、结构化客户/访问记录、媒体签名 URL、provider adapter。
-- `CopilotKit/CopilotKit/examples/showcases/strands-crm`（Northstar）：CRM 工具边界、Strands agent、AG-UI 事件、SQLite 状态投影、HITL 和测试组织。
+- `JagadeepPortfolio/saathi-crm`: voice capture, whisper.cpp ASR, structured customer and visit records, signed media URLs, and provider adapters.
+- `CopilotKit/CopilotKit/examples/showcases/strands-crm` (Northstar): CRM tool boundaries, a Strands agent, AG-UI events, a SQLite state projection, HITL, and test organization.
 
-参考方式是阅读源码后重新抽象问题边界；本仓库没有复制其源码、文档段落、截图、seed 数据、提示词或密钥。目标契约、命名、事件模型、所有权、审计、检查点和发布链由 Sumi 重新设计。
+The source was studied to reframe the problem boundaries. This repository does not copy source code, documentation passages, screenshots, seed data, prompts, or secrets from either project. Sumi owns and redesigned the target contracts, naming, event model, ownership, audit model, checkpoints, and release path.
 
-证据固定：Saathi `693ec2bd20e546a06238559cc4cb20e342080af2`；Northstar checkout `2328062960a1e9b4b8bc2eb2817724fc624f8785`。它们是比较证据，不是 Sumi 运行时依赖。
+Evidence is pinned to Saathi commit `693ec2bd20e546a06238559cc4cb20e342080af2` and Northstar checkout `2328062960a1e9b4b8bc2eb2817724fc624f8785`. These are comparative evidence, not Sumi runtime dependencies.

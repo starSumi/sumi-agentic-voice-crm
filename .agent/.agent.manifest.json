@@ -1,0 +1,61 @@
+{
+  "schema_version": "sumi.agent-control.v1",
+  "repository": "sumi-agentic-voice-crm",
+  "source_commit": "0a274202221df9d5140f7faa08d5cef7c31d14a5",
+  "lifecycle": "versioned-governance",
+  "current_phase": "P4-crm-safety-and-persistence",
+  "current_checkpoint": "C2",
+  "release_status": "reference-release-not-production-approved",
+  "status": "in_progress",
+  "accountable_owner": "commander",
+  "decision_owner": "platform-engineering",
+  "phase_order": [
+    "P0-discover-and-scope",
+    "P1-adr-and-architecture",
+    "P2-domain-and-contract-hardening",
+    "P3-service-and-provider-implementation",
+    "P4-crm-safety-and-persistence",
+    "P5-integration-observability-and-resilience",
+    "P6-verification-security-and-quality",
+    "P7-release-and-operations",
+    "P8-closeout-and-learning"
+  ],
+  "checkpoint_order": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],
+  "active_roles": [
+    "commander",
+    "supervisor",
+    "discover",
+    "delegate",
+    "architect",
+    "adr-owner",
+    "contract-owner",
+    "domain-owner",
+    "agent-runtime-owner",
+    "asr-owner",
+    "tts-owner",
+    "crm-owner",
+    "data-owner",
+    "security-owner",
+    "qa-owner",
+    "sre-owner",
+    "release-owner",
+    "reviewer",
+    "worker",
+    "product-owner",
+    "platform-owner",
+    "operations-owner"
+  ],
+  "evidence_policy": {
+    "labels": ["source-confirmed", "runtime-observed", "inferred", "unknown"],
+    "minimum_for_completed_checkpoint": ["owner", "timestamp", "command_or_artifact", "result", "rollback"]
+  },
+  "generated_paths": [
+    ".agent.local/",
+    ".agent-runtime/",
+    ".agent-cache/",
+    ".agent-artifacts/",
+    ".agent-work/"
+  ],
+  "refresh_rule": "Update this manifest only through a reviewed change that also updates the affected phase/checkpoint card.",
+  "rollback_rule": "Revert the governance commit; never delete historical evidence. Expire local runtime artifacts through retention policy."
+}

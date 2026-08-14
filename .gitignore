@@ -1,8 +1,10 @@
 node_modules/
+.astro/
 .env
 .env.*
 !.env.example
 dist/
+artifacts/
 coverage/
 *.db
 *.sqlite
@@ -11,3 +13,17 @@ logs/
 tmp/
 secrets/
 media/
+
+# Agent development environment: keep versioned .agent/ governance, ignore
+# local runners, caches, logs, reports and generated evidence.
+.agent.local/
+.agent-runtime/
+.agent-cache/
+.agent-artifacts/
+.agent-work/
+.agent-*.log
+.agent-*.jsonl
+# Ad-hoc agent files at repository root are local-only; the versioned
+# governance directory remains intentionally tracked.
+.agent-*.json
+.agent-*.tmp

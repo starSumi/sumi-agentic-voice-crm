@@ -1,0 +1,19 @@
+# Governance source is for repository review, not the published runtime package.
+.agent/
+.agent.local/
+.agent-runtime/
+.agent-cache/
+.agent-artifacts/
+.agent-work/
+.agent-*.log
+.agent-*.jsonl
+.agent-*.json
+.agent-*.tmp
+.astro/
+artifacts/
+docs/
+test/
+scripts/
+db/
+postman/
+.github/

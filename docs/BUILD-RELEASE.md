@@ -1,4 +1,11 @@
-# Build chain, CI/CD and release governance
+---
+title: Build chain, CI/CD and release governance
+description: Local gates, continuous integration, artifact provenance, progressive delivery, rollback, and release ownership.
+docId: crm.build-release
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 ## Pipeline
 
@@ -20,12 +27,16 @@ flowchart LR
 ## Local gates
 
 ```powershell
-npm test
-npm run check
-npm run build
+npm ci
+npm run verify
+npm run verify:mcp
+npm run audit:deps
+npm pack --dry-run
 ```
 
-`build` produces `dist/BUILD-MANIFEST.json` with artifact version, sorted file list and digest. Production CI must additionally run a lockfile install, Node version pin, dependency audit, secret scan, SBOM and image/provenance tooling.
+`build` produces a dependency-free runtime candidate and `dist/BUILD-MANIFEST.json` with artifact version, sorted file list and digest. `smoke:dist` starts that generated candidate, probes readiness, and stops it. `docs:build` produces the human site and MCP projection under `artifacts/docs-site/`. `verify:mcp` is a cross-repository gate and requires a built Sumi-Docs-MCP entry. `audit:deps` names the official npm registry because some package mirrors do not implement the audit API. Production CI must additionally run a secret scan, SBOM, container scan, image provenance, and signature tooling.
+
+The Dockerfile is a multi-stage build. Its runtime stage contains only the generated `dist/` candidate and runs as the unprivileged `node` user. A Docker build remains an explicit failed or not-run gate when the validation host has no Docker CLI or daemon.
 
 ## Branch and change policy
 

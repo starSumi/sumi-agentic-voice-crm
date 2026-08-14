@@ -1,4 +1,11 @@
-# Requirement traceability
+---
+title: Requirement traceability
+description: Mapping from product requirements to owned contracts, implementation artifacts, tests, and release checkpoints.
+docId: crm.traceability
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 | Requirement | Sumi artifact | Verification / gate |
 | --- | --- | --- |

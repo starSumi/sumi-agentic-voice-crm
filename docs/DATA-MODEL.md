@@ -1,4 +1,11 @@
-# Database, fields, invariants and retention
+---
+title: Database, fields, invariants and retention
+description: CRM tables, field ownership, tenant and idempotency invariants, indexes, and data retention expectations.
+docId: crm.data-model
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 The production target is PostgreSQL 16+ with migrations. The reference runtime uses an in-memory store so contract tests are deterministic; it is not a production database.
 

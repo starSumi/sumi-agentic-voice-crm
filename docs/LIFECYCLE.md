@@ -1,4 +1,11 @@
-# Lifecycle and state ownership
+---
+title: Lifecycle and state ownership
+description: Request, agent run, job, media, CRM aggregate, shutdown, and recovery state machines and their owners.
+docId: crm.lifecycle
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 ## Request lifecycle
 

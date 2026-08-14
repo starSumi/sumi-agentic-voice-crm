@@ -1,4 +1,11 @@
-# Operations runbook
+---
+title: Operations runbook
+description: Health signals, common voice and CRM incidents, safe operator actions, and evidence-preserving recovery steps.
+docId: crm.operations
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 ## Health
 

@@ -1,12 +1,19 @@
 {
+  "extends": "astro/tsconfigs/strict",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "noEmit": true,
     "allowJs": true,
     "checkJs": false
   },
-  "include": ["src/**/*.mjs", "scripts/**/*.mjs"]
+  "include": [".astro/types.d.ts", "src/**/*", "scripts/**/*", "integrations/**/*"],
+  "exclude": [
+    ".agent",
+    "dist",
+    "artifacts",
+    ".agent/**",
+    ".agent.local/**",
+    ".agent-runtime/**",
+    ".agent-cache/**",
+    ".agent-artifacts/**",
+    ".agent-work/**"
+  ]
 }

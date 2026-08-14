@@ -1,4 +1,11 @@
-# Source evidence and traceability basis
+---
+title: Source evidence and traceability basis
+description: Pinned comparative sources, connected architecture map, evidence classes, unknowns, and rejected interpretations.
+docId: crm.source-evidence
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 This document separates comparative evidence from Sumi-owned design. It is
 reproducible against the pinned local checkouts observed on 2026-08-14.

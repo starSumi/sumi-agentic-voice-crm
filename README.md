@@ -12,9 +12,8 @@ This is an owned implementation. It is inspired by the observed boundaries of Sa
 
 ```powershell
 cd E:\Zero_Base\playground\sumi-agentic-voice-crm
-npm test
-npm run check
-npm run build
+npm ci
+npm run verify
 npm start
 ```
 
@@ -26,12 +25,40 @@ Invoke-RestMethod http://localhost:8080/health/ready
 
 The mock provider accepts base64 audio containing UTF-8 text prefixed with `MOCK_AUDIO:`. See the Postman collection and [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
+For source-level iteration without building `dist/`, use `npm run dev`. Machine-specific `.env`, caches, logs, sessions, reports, and generated evidence stay ignored; reviewed development guides, `.env.example`, `.agent/` governance, and version constraints stay in Git.
+
+## Documentation for people and agents
+
+`docs/` is the single reviewed source. Astro and Starlight render it for people; the same build publishes bounded Markdown, route metadata, and OpenAPI under `/_mcp/` for Sumi Docs MCP.
+
+```powershell
+npm run docs:build
+npm run docs:preview -- --host 127.0.0.1 --port 4321
+```
+
+Open `http://127.0.0.1:4321/` for English or `http://127.0.0.1:4321/zh-cn/` for Simplified Chinese. The site includes light, dark, and automatic themes.
+
+Connect an MCP client locally with:
+
+```powershell
+node E:\Zero_Base\playground\.sumi\Sumi-Docs-MCP\dist\index.js serve `
+  http://127.0.0.1:4321/_mcp/ `
+  --base-url http://127.0.0.1:4321/
+```
+
+The [agent development partner guide](docs/AGENT-GUIDE.md) defines discovery order, evidence priority, safety boundaries, and acceptance questions. `npm run verify:mcp` exercises all four MCP tools against the generated corpus and every published page URL.
+
 ## Architecture in one line
 
 `Gateway → Ask Orchestrator → ASR → Normalizer → Intent/Policy → CRM Command or Review → Outbox/Event Bus → Answer Composer → TTS → private media asset`.
 
 ## Documents
 
+- [Overview](docs/index.md): implemented scope, production gaps, and reading routes.
+- [Quickstart](docs/QUICKSTART.md): run the reference API and documentation surfaces.
+- [Configuration](docs/CONFIGURATION.md): effective environment variables and promotion boundaries.
+- [API](docs/API.md): identity, tenancy, idempotency, endpoint, and error contract.
+- [Agent guide](docs/AGENT-GUIDE.md): use the corpus as a development partner.
 - [ADR-0001](docs/ADR-0001-agentic-crm.md): decision, alternatives, ownership and rollback.
 - [ARCHITECTURE](docs/ARCHITECTURE.md): boundaries, design patterns, lifecycle and failure paths.
 - [DATA-MODEL](docs/DATA-MODEL.md): tables, fields, indexes, invariants and retention.
@@ -43,6 +70,7 @@ The mock provider accepts base64 audio containing UTF-8 text prefixed with `MOCK
 - [INSPIRATION](docs/INSPIRATION.md): attribution and non-copying boundary.
 - [SOURCE-EVIDENCE](docs/SOURCE-EVIDENCE.md): pinned evidence, fact classes and rejected interpretations.
 - [TRACEABILITY](docs/TRACEABILITY.md): requirement-to-contract-to-checkpoint matrix.
+- [Development](docs/DEVELOPMENT.md), [contributing](docs/CONTRIBUTING.md), [troubleshooting](docs/TROUBLESHOOTING.md), and [localization](docs/LOCALIZATION.md).
 - [OpenAPI](contracts/openapi.yaml), [events](contracts/events.yaml), [Postman](postman/voice-crm.postman_collection.json).
 
 ## Non-negotiables

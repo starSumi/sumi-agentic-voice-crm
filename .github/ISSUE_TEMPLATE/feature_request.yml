@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a bounded product, contract, provider, documentation, or agent capability.
+title: "proposal: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and user outcome
+      description: Describe the current limitation and the measurable result users need.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Contract and architecture impact
+      description: Identify affected API, event, data, lifecycle, trust, provider, Web, or MCP boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: List tests, quality measures, security checks, docs, and rollback evidence.
+    validations:
+      required: true

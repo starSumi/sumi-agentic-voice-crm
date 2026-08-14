@@ -1,4 +1,11 @@
-# Engineering checkpoints and checklists
+---
+title: Engineering checkpoints and checklists
+description: Evidence-based stage gates from scope and contract freeze through security verification and release approval.
+docId: crm.checkpoints
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 ## C0 — Scope and evidence freeze
 

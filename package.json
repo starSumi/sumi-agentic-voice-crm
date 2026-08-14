@@ -4,12 +4,38 @@
   "private": true,
   "description": "Contract-first agentic CRM reference platform with ASR, intent extraction and TTS.",
   "type": "module",
-  "engines": {"node": ">=20.11"},
+  "main": "./dist/src/server.mjs",
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=24.18.0"
+  },
+  "packageManager": "npm@11.15.0",
   "scripts": {
-    "start": "node src/server.mjs",
+    "start": "node dist/src/server.mjs",
+    "dev": "node src/server.mjs",
     "test": "node --test",
     "check": "node scripts/check.mjs",
-    "build": "node scripts/build.mjs"
+    "check:agent": "node scripts/check-agent.mjs",
+    "build": "node scripts/build.mjs",
+    "smoke:dist": "npm run build && node scripts/smoke-dist.mjs",
+    "docs:dev": "astro dev",
+    "docs:check": "astro check",
+    "docs:build": "astro check && astro build && node scripts/verify-docs-dist.mjs",
+    "docs:preview": "astro preview",
+    "verify:mcp": "node scripts/verify-docs-mcp.mjs",
+    "verify": "npm test && npm run check && npm run check:agent && npm run smoke:dist && npm run docs:build",
+    "audit:deps": "npm audit --audit-level=high --registry=https://registry.npmjs.org",
+    "prepack": "npm run build"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@astrojs/starlight": "^0.41.7",
+    "astro": "^7.2.2",
+    "sharp": "^0.35.3",
+    "typescript": "^5.9.3",
+    "yaml": "^2.9.0"
+  }
 }

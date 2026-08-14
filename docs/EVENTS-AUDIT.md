@@ -1,4 +1,11 @@
-# Eventing, audit and observability
+---
+title: Eventing, audit and observability
+description: CloudEvents-compatible envelopes, audit records, trace correlation, service indicators, replay, and incident evidence.
+docId: crm.events-audit
+locale: en
+audience: both
+contentVersion: 0.1.0
+---
 
 ## Event envelope
 

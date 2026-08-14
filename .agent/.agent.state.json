@@ -1,0 +1,31 @@
+{
+  "schema_version": "sumi.agent-state.v1",
+  "updated_at": "2026-08-14T20:12:00+08:00",
+  "updated_by": "supervisor",
+  "phase_status": {
+    "P0-discover-and-scope": "completed",
+    "P1-adr-and-architecture": "completed",
+    "P2-domain-and-contract-hardening": "completed",
+    "P3-service-and-provider-implementation": "completed",
+    "P4-crm-safety-and-persistence": "in_progress",
+    "P5-integration-observability-and-resilience": "planned",
+    "P6-verification-security-and-quality": "planned",
+    "P7-release-and-operations": "planned",
+    "P8-closeout-and-learning": "planned"
+  },
+  "checkpoint_status": {
+    "C0": {"status": "completed", "evidence": ["docs/SOURCE-EVIDENCE.md", "docs/ADR-0001-agentic-crm.md"]},
+    "C1": {"status": "completed", "evidence": ["contracts/openapi.yaml", "contracts/events.yaml", "postman/voice-crm.postman_collection.json", "npm run check"]},
+    "C2": {"status": "in_progress", "evidence": ["db/migrations/001_initial.sql", "src/store.mjs", "test/contract.test.mjs"], "gap": "real PostgreSQL transaction/RLS and two-tenant integration not run"},
+    "C3": {"status": "planned", "evidence": ["src/providers.mjs", "test/contract.test.mjs"], "gap": "real ASR/TTS quality and media security not run"},
+    "C4": {"status": "planned", "gap": "staging telemetry, fault and restore drills"},
+    "C5": {"status": "planned", "gap": "OIDC, SAST/SCA, secret, load and prompt-injection reports"},
+    "C6": {"status": "planned", "evidence": ["docs/RELEASE-READINESS.md"], "reason": "reference release only; production evidence incomplete"}
+  },
+  "phase_notes": {
+    "P3-service-and-provider-implementation": "The deterministic reference providers are complete; real provider quality remains a C3 prerequisite."
+  },
+  "active_tasks": [],
+  "waivers": [],
+  "next_action": "Implement real persistence/provider integration and attach C2-C5 evidence before reopening C6."
+}
