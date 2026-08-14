@@ -213,7 +213,9 @@ export async function createOperationsSnapshot({
   agents = [],
 } = {}) {
   const inspection = await inspectControlPlane({ root, now, includeFreshness: true });
-  const branch = runGit(inspection.root, ["branch", "--show-current"]);
+  const branch = environment.SUMI_OPS_BRANCH ||
+    runGit(inspection.root, ["branch", "--show-current"]) ||
+    null;
   const status = runGit(inspection.root, ["status", "--porcelain=v1"]);
   return {
     schema_version: "sumi.agent-operations-snapshot.v1",

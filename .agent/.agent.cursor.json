@@ -1,12 +1,12 @@
 {
   "schema_version": "sumi.agent-cursor.v1",
-  "captured_at": "2026-08-14T21:26:46+08:00",
+  "captured_at": "2026-08-14T22:48:11+08:00",
   "captured_by": "continuity-supervisor",
   "source": {
     "repository": "starSumi/sumi-agentic-voice-crm",
     "visibility": "private",
     "branch": "main",
-    "commit": "0473b96124b8029074c551c94dee7c678e05d1e6"
+    "commit": "e51fc7e927c4526381687e75351cb253ea7650ab"
   },
   "control_plane": {
     "phase": "P4-crm-safety-and-persistence",
@@ -15,11 +15,21 @@
   },
   "last_verified_ci": {
     "workflow": "ci",
-    "run_id": 31801255280,
-    "head_sha": "0473b96124b8029074c551c94dee7c678e05d1e6",
+    "run_id": 31811208140,
+    "head_sha": "e51fc7e927c4526381687e75351cb253ea7650ab",
     "conclusion": "success",
-    "observed_at": "2026-08-14T21:26:46+08:00",
-    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31801255280"
+    "observed_at": "2026-08-14T22:47:32+08:00",
+    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31811208140"
+  },
+  "last_verified_operations": {
+    "workflow": "operations-agent",
+    "run_id": 31811267636,
+    "head_sha": "e51fc7e927c4526381687e75351cb253ea7650ab",
+    "conclusion": "success",
+    "observed_at": "2026-08-14T22:48:11+08:00",
+    "artifact": "operations-snapshot-31811267636",
+    "artifact_expires_at": "2026-09-13T22:47:50+08:00",
+    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31811267636"
   },
   "open_work": [
     {

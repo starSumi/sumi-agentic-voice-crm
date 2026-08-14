@@ -22,7 +22,7 @@ contentVersion: 0.1.0
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | Syntax | PASS | `node --check src/*.mjs` via `npm run check` |
-| Contract/unit | PASS | `npm test`: 19/19, including publisher, operations snapshot, incident reconciliation, and runtime boundary tests |
+| Contract/unit | PASS | `npm test`: 20/20, including publisher, operations snapshot, incident reconciliation, and runtime boundary tests |
 | Repository invariants | PASS | `npm run check`: 31 required files, OpenAPI markers, Postman JSON, server syntax |
 | Agent governance | PASS | `npm run check:agent` and `npm run agent:health`: 9 phases, 7 checkpoints, 25 roles, maintainer registry and reviewed cursor current, live state external |
 | Runtime build | PASS | `npm run build`: 8 runtime files plus a deterministic hash manifest |
@@ -31,8 +31,8 @@ contentVersion: 0.1.0
 | MCP partner integration | PASS | `npm run verify:mcp`: four tools, bilingual queries, continuity discovery, OpenAPI, and all 38 human URLs |
 | Dependency audit | PASS | `npm run audit:deps`: 0 vulnerabilities against the official npm registry |
 | Package boundary | PASS | `npm pack --dry-run`: allowlisted runtime distribution plus repository metadata |
-| GitHub CI baseline | PASS | Private `main` run `31801255280` at `0473b96124b8029074c551c94dee7c678e05d1e6`: `verify` and dependency audit completed successfully; the current maintenance change still requires its own remote run |
-| CI operations workflow | PENDING | Local schema, least-privilege boundary, snapshot, and incident tests pass; remote `workflow_run` evidence begins only after the workflow reaches `main` |
+| GitHub CI baseline | PASS | Private `main` run `31811208140` at `e51fc7e927c4526381687e75351cb253ea7650ab`: `verify` and dependency audit completed successfully |
+| CI operations workflow | PASS | `workflow_run` `31811267636` completed the read-only observation, freshness authorization, and issue reconciliation jobs; artifact `operations-snapshot-31811267636` expires 2026-09-13 |
 | Remote branch protection | BLOCKED | GitHub returned `403`: the current account plan does not expose branch protection for this private repository; visibility remains private |
 | Normal text ask | PASS | test `text ask returns CRM result and TTS asset` |
 | Mock audio path | PASS | test `mock audio exercises ASR to intent to TTS` |

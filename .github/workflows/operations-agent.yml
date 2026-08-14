@@ -126,7 +126,8 @@ jobs:
           SUMI_OPS_CONCLUSION: ${{ steps.result.outputs.conclusion }}
           SUMI_OPS_REASON: ${{ steps.result.outputs.reason }}
           SUMI_OPS_RUN_URL: ${{ steps.result.outputs.run_url }}
-        run: node scripts/agent-ops.mjs snapshot --output artifacts/agent-ops/operations-snapshot.json
+          SUMI_OPS_BRANCH: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}
+        run: node scripts/agent-ops.mjs snapshot --session-id "github-actions-${GITHUB_RUN_ID}" --output artifacts/agent-ops/operations-snapshot.json
 
       - name: Upload the operations snapshot
         if: always() && steps.snapshot.outcome == 'success'

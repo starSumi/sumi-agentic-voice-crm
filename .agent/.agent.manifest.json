@@ -1,7 +1,7 @@
 {
   "schema_version": "sumi.agent-control.v1",
   "repository": "sumi-agentic-voice-crm",
-  "source_commit": "0473b96124b8029074c551c94dee7c678e05d1e6",
+  "source_commit": "e51fc7e927c4526381687e75351cb253ea7650ab",
   "lifecycle": "versioned-governance",
   "current_phase": "P4-crm-safety-and-persistence",
   "current_checkpoint": "C2",

@@ -13,16 +13,16 @@
         "integrations/sumi-docs-publisher.mjs"
       ],
       "review_interval_days": 30,
-      "last_reviewed_at": "2026-08-14T21:26:46+08:00",
-      "last_reviewed_commit": "0473b96124b8029074c551c94dee7c678e05d1e6"
+      "last_reviewed_at": "2026-08-14T22:48:11+08:00",
+      "last_reviewed_commit": "e51fc7e927c4526381687e75351cb253ea7650ab"
     },
     "continuity": {
       "accountable_role": "continuity-supervisor",
       "github_owners": ["@starSumi"],
       "paths": [".agent/", "AGENTS.md", "scripts/agent-ops.mjs"],
       "review_interval_days": 14,
-      "last_reviewed_at": "2026-08-14T21:26:46+08:00",
-      "last_reviewed_commit": "0473b96124b8029074c551c94dee7c678e05d1e6"
+      "last_reviewed_at": "2026-08-14T22:48:11+08:00",
+      "last_reviewed_commit": "e51fc7e927c4526381687e75351cb253ea7650ab"
     },
     "ci_operations": {
       "accountable_role": "ci-operations-agent",
@@ -33,8 +33,8 @@
         "scripts/agent-ops.mjs"
       ],
       "review_interval_days": 30,
-      "last_reviewed_at": "2026-08-14T21:26:46+08:00",
-      "last_reviewed_commit": "0473b96124b8029074c551c94dee7c678e05d1e6"
+      "last_reviewed_at": "2026-08-14T22:48:11+08:00",
+      "last_reviewed_commit": "e51fc7e927c4526381687e75351cb253ea7650ab"
     }
   },
   "refresh_rule": "The accountable human owner reviews each surface before its interval expires and updates both review fields in the same reviewed change.",
