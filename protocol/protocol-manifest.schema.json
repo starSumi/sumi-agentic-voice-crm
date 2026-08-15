@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumi.invalid/schemas/protocol-manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol_version", "owner", "sources", "generated", "commands", "breaking_change_policy", "rollback"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "sumi.protocol-manifest.v1" },
+    "protocol_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "owner": { "const": "protocol-owner" },
+    "compatibility": { "enum": ["additive-by-default"] },
+    "sources": { "type": "object", "required": ["http", "events", "database"], "additionalProperties": { "type": "string" } },
+    "generated": { "type": "object", "required": ["json_schema_bundle", "event_schema_bundle", "typescript_client"], "additionalProperties": { "type": "string" } },
+    "commands": { "type": "object", "required": ["generate", "drift_check", "consumer_check"], "additionalProperties": { "type": "string" } },
+    "breaking_change_policy": { "type": "string", "minLength": 1 },
+    "rollback": { "type": "string", "minLength": 1 }
+  }
+}

@@ -29,6 +29,8 @@
     "architect",
     "adr-owner",
     "contract-owner",
+    "protocol-owner",
+    "frontend-owner",
     "domain-owner",
     "agent-runtime-owner",
     "asr-owner",

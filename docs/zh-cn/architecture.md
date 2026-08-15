@@ -13,4 +13,4 @@ Gateway 拥有身份、租户、限流、request ID 和幂等入口。ASR、Inte
 
 关键模式包括 Ports and Adapters、CQRS、transactional outbox、state machine、policy-as-code、幂等 consumer 和受控补偿。TTS 失败可以降级为文本；ASR 失败不能生成转写；意图不明确不能写数据；已提交 CRM 事务不会因为后续通知失败而静默回滚。
 
-当前 `src/` 是确定性参考实现，使用内存存储和 mock provider。PostgreSQL、对象存储、OIDC 与真实 provider 是待验证的生产晋级工作，不是当前能力声明。完整图、bounded context 和 ownership rule 见英文 [Architecture](/architecture/)。
+当前 `src/` 同时提供确定性开发适配器和生产边界：PostgreSQL/RLS、OIDC/JWKS、私有 S3 兼容存储、加密 interaction、OpenAI 兼容 provider 与独立 outbox worker。真实环境连通性、模型质量、安全专项、staging 与人工发布批准仍需独立证据。完整图、bounded context 和 ownership rule 见英文 [Architecture](/architecture/)。

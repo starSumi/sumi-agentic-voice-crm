@@ -56,7 +56,10 @@ contentVersion: 0.1.0
 - [ ] Unit, contract, integration, E2E, fault, load and security reports green or waived by named owner.
 - [ ] Normal voice, silence, no-source, low-confidence and TTS-fallback records include request IDs and timestamps.
 - [ ] Staging smoke and rollback drill pass on release digest.
+- [ ] `dist/BUILD-MANIFEST.json` binds every payload path, byte count and SHA-256 digest; a clean rebuild has the same content-set digest.
+- [ ] Runtime SPDX SBOM, dependency audit and repository secret scan are attached; provenance is signed or the release is explicitly held.
+- [ ] Manual release-candidate workflow checks the exact reviewed main commit, package version and completed C6 before packaging.
 - [ ] Migration compatibility, dashboards, on-call and customer communication ready.
 - [ ] Product/security/platform/operations approvals recorded.
 
-No checkpoint is complete because code “looks finished”; it requires reproducible evidence and an explicit owner.
+No checkpoint is complete because code “looks finished”; it requires reproducible evidence and an explicit owner. Ordinary CI and the CI Operations Agent cannot mark C6 complete or publish a release.

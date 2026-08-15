@@ -21,5 +21,27 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - run: echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
       - run: npm run verify
+      - name: Run bounded load and dependency-fault drills
+        run: |
+          npm run drill:load
+          npm run drill:fault
+      - name: Build and smoke-test the production container
+        run: npm run smoke:docker
+      - name: Generate the runtime SPDX SBOM
+        run: npm run sbom
+      - name: Validate the SPDX SBOM
+        run: node -e "const s=require('./artifacts/release/sbom.spdx.json');if(s.spdxVersion!=='SPDX-2.3')process.exit(1)"
+      - name: Upload reviewed build evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-evidence-${{ github.sha }}
+          path: |
+            dist/BUILD-MANIFEST.json
+            artifacts/release/sbom.spdx.json
+            artifacts/release/load-drill.json
+            artifacts/release/fault-drill.json
+          if-no-files-found: error
+          retention-days: 30
       - run: npm run audit:deps

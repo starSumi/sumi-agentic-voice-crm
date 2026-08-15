@@ -61,6 +61,13 @@ test("short idempotency keys fail at the boundary", async () => {
   assert.equal(r.status, 400); assert.equal(r.body.error.code, "INVALID_REQUEST");
 });
 
+test("JSON ask variants enforce the published oneOf and locale constraints", async () => {
+  const unknown = await ask({ input: { type: "text", text: "hello" }, output_mode: "text", unsupported: true }, "schema-unknown-1");
+  assert.equal(unknown.status, 400); assert.equal(unknown.body.error.code, "INVALID_REQUEST");
+  const locale = await ask({ input: { type: "text", text: "hello" }, output_mode: "text", locale: "fr-FR" }, "schema-locale-1");
+  assert.equal(locale.status, 400); assert.equal(locale.body.error.code, "INVALID_REQUEST");
+});
+
 test("events require tenant auth and use the canonical envelope", async () => {
   const denied = await fetch(`${base}/v1/events`); assert.equal(denied.status, 401);
   const res = await fetch(`${base}/v1/events`, { headers: { authorization: "Bearer test-actor", "x-tenant-id": "tenant_demo" } });
@@ -75,4 +82,18 @@ test("TTS requires tenant identity and idempotency policy", async () => {
   assert.equal(ok.status, 201);
   const replay = await fetch(`${base}/v1/tts/synthesize`, { method: "POST", headers: { authorization: "Bearer test-actor", "x-tenant-id": "tenant_demo", "idempotency-key": "tts-key-001", "content-type": "application/json" }, body: JSON.stringify({ text: "hello", language: "en-US", format: "mp3" }) });
   assert.equal(replay.status, 201); assert.equal((await replay.json()).idempotency_replay, true);
+});
+
+test("TTS response and request remain closed under the contract", async () => {
+  const response = await fetch(`${base}/v1/tts/synthesize`, { method: "POST", headers: { authorization: "Bearer test-actor", "x-tenant-id": "tenant_demo", "idempotency-key": "tts-schema-1", "content-type": "application/json" }, body: JSON.stringify({ text: "hello", language: "fr-FR", format: "mp3" }) });
+  assert.equal(response.status, 400); assert.equal((await response.json()).error.code, "INVALID_REQUEST");
+});
+
+test("low-confidence review can be approved or rejected through the durable boundary", async () => {
+  const first = await ask({ input: { type: "text", text: "ambiguous customer" }, output_mode: "text" }, "review-http-001");
+  assert.equal(first.status, 202);
+  const reviewId = first.body.review_task.id;
+  const decision = await fetch(`${base}/v1/reviews/${reviewId}/decision`, { method: "POST", headers: { authorization: "Bearer test-actor", "x-tenant-id": "tenant_demo", "idempotency-key": "review-decision-001", "content-type": "application/json" }, body: JSON.stringify({ decision: "reject" }) });
+  assert.equal(decision.status, 503);
+  assert.equal((await decision.json()).error.code, "UPSTREAM_UNAVAILABLE");
 });

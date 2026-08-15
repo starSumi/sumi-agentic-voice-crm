@@ -4,7 +4,7 @@
     "allowJs": true,
     "checkJs": false
   },
-  "include": [".astro/types.d.ts", "src/**/*", "scripts/**/*", "integrations/**/*"],
+  "include": [".astro/types.d.ts", "src/**/*", "scripts/**/*", "integrations/**/*", "packages/api-client/src/**/*"],
   "exclude": [
     ".agent",
     "dist",

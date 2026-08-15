@@ -25,14 +25,14 @@ try {
   assert.ok(response?.ok, `readiness failed: ${stderr.join("")}`);
   const readiness = await response.json();
   assert.equal(readiness.status, "ready");
-  assert.equal(readiness.mode, "mock");
-  assert.deepEqual(readiness.providers, {
-    asr: "mock",
-    intent: "mock",
-    tts: "mock",
-  });
+  assert.equal(readiness.dependencies.database.provider, "memory");
+  assert.equal(readiness.dependencies.objects.provider, "memory");
+  for (const provider of ["asr", "intent", "tts"]) {
+    assert.equal(readiness.dependencies.providers?.[provider]?.provider, "mock");
+    assert.equal(readiness.dependencies.providers?.[provider]?.ready, true);
+  }
   console.log(
-    `dist smoke passed: readiness is ${readiness.status} in ${readiness.mode} mode`,
+    `dist smoke passed: readiness is ${readiness.status} with memory development dependencies`,
   );
 } finally {
   child.kill("SIGTERM");

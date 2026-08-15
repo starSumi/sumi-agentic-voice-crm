@@ -25,7 +25,7 @@ test("control-plane inspection verifies the reviewed cursor and maintainers", as
   assert.equal(inspection.manifest.current_phase, "P4-crm-safety-and-persistence");
   assert.equal(inspection.manifest.current_checkpoint, "C2");
   assert.equal(inspection.healthIssues.length, 0);
-  assert.equal(inspection.manifest.active_roles.length, 25);
+  assert.equal(inspection.manifest.active_roles.length, 27);
 });
 
 test("operations snapshot keeps runtime agent edges separate from the versioned cursor", async () => {

@@ -9,6 +9,16 @@
 .agent-*.jsonl
 .agent-*.json
 .agent-*.tmp
+.dist.staging-*/
+.dist.backup-*/
+.codex/
+.claude/
+.vscode/
+.idea/
+*.code-workspace
+protocol/.tmp/
+protocol/.cache/
+packages/api-client/.tmp/
 .astro/
 artifacts/
 docs/

@@ -1,0 +1,36 @@
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Sumi Voice CRM Workbench</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#07101d; color:#e8f0ff }
+      body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 10% 0%,#173765,#07101d 45%) }
+      main { width:min(920px,calc(100% - 32px)); display:grid; gap:18px; grid-template-columns:1.2fr .8fr }
+      section { padding:24px; border:1px solid #284467; border-radius:18px; background:#0b1728dd; box-shadow:0 22px 70px #0006 }
+      h1 { margin-top:0; font-size:clamp(1.8rem,5vw,3rem) } label { display:grid; gap:7px; margin:12px 0 }
+      textarea,input,select,button { font:inherit; border-radius:10px; border:1px solid #355477; padding:11px; background:#0a1321; color:inherit }
+      textarea { min-height:140px; resize:vertical } button { cursor:pointer; background:#2d6cdf; border:0; font-weight:700 }
+      button.secondary { background:#1a2b42 } button:disabled { opacity:.5; cursor:not-allowed }
+      .actions { display:flex; gap:10px; flex-wrap:wrap } pre { white-space:pre-wrap; word-break:break-word; min-height:180px; color:#a9c7f7 }
+      .status { color:#80dfc4; min-height:1.5em } @media(max-width:760px){ main{grid-template-columns:1fr} }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <p>Agent-centric CRM · generated client</p><h1>语音 / 文本工作台</h1>
+        <form id="ask-form">
+          <label>Tenant <input id="tenant" value="tenant_demo" /></label>
+          <label>Access token <input id="token" type="password" value="test-actor" /></label>
+          <label>Locale <select id="locale"><option>zh-CN</option><option>en-US</option><option>hi-IN</option><option>te-IN</option></select></label>
+          <label>问题或 CRM 指令 <textarea id="text">把 Acme renewal 移动到 negotiation 阶段</textarea></label>
+          <div class="actions"><button type="submit">文本 Ask</button><button type="button" class="secondary" id="record">开始录音</button></div>
+        </form>
+        <p class="status" id="status">就绪</p>
+      </section>
+      <section><h2>结构化结果</h2><pre id="result">等待输入…</pre><audio id="audio" controls hidden></audio></section>
+    </main>
+    <script src="../scripts/workbench.ts"></script>
+  </body>
+</html>

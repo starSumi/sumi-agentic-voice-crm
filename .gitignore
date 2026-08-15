@@ -4,6 +4,8 @@ node_modules/
 .env.*
 !.env.example
 dist/
+.dist.staging-*/
+.dist.backup-*/
 artifacts/
 coverage/
 *.db
@@ -13,6 +15,13 @@ logs/
 tmp/
 secrets/
 media/
+
+# Protocol projections are generated from contracts/ and never hand-edited.
+# Keep the checked-in projections under protocol/schema/json and
+# packages/api-client/src/generated for offline, version-pinned consumers.
+protocol/.tmp/
+protocol/.cache/
+packages/api-client/.tmp/
 
 # Agent development environment: keep versioned .agent/ governance, ignore
 # local runners, caches, logs, reports and generated evidence.
@@ -27,3 +36,10 @@ media/
 # governance directory remains intentionally tracked.
 .agent-*.json
 .agent-*.tmp
+
+# Local agent/client session and editor state is never project source.
+.codex/
+.claude/
+.vscode/
+.idea/
+*.code-workspace

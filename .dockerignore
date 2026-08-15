@@ -3,9 +3,14 @@ node_modules
 .astro
 .env*
 dist
+.dist.staging-*
+.dist.backup-*
 artifacts
 coverage
 media
+protocol/.tmp
+protocol/.cache
+packages/api-client/.tmp
 logs
 .agent/
 .agent.local/
@@ -17,3 +22,8 @@ logs
 .agent-*.jsonl
 .agent-*.json
 .agent-*.tmp
+.codex/
+.claude/
+.vscode/
+.idea/
+*.code-workspace

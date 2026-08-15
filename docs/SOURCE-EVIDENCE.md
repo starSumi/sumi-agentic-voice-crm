@@ -23,23 +23,23 @@ reproducible against the pinned local checkouts observed on 2026-08-14.
 confidence decision` → `CRM command or durable review` → `transactional outbox
 and audit` → `answer composer` → `TTS asset` → `scoped response`.
 
-The reference implementation confirms the control-flow seam with a deterministic
-in-memory store. PostgreSQL, object storage, verified OIDC and real providers
-are promotion targets, not runtime evidence for this commit.
+The runtime implements the connected path with deterministic development adapters plus PostgreSQL/RLS, OIDC/JWKS, S3-compatible objects, OpenAI-compatible providers, encrypted interaction checkpoints and an outbox worker. Local tests establish adapter behavior; they do not establish staging connectivity or provider quality.
 
 ## Fact classification
 
-- **source-confirmed:** the pinned comparative paths and the Sumi files linked
-  above exist at the recorded commits; Sumi contracts and docs are committed at
-  `5c27022e6a819b8f0957782014dcbe56eb317f33`.
-- **runtime-observed:** `npm test` 11/11, `npm run check`, and `npm run build`
-  passed locally on Node `v24.18.0` with mock providers.
+- **source-confirmed:** the pinned comparative paths exist at their recorded
+  commits. This implementation round is based on Sumi `main@c9e88d19bf9808205f05380cdcc7ea60a13e93b7`
+  plus an uncommitted working-tree candidate; it is not presented as upstream truth.
+- **runtime-observed:** `npm run verify:release` passed locally on Volta Node
+  `v24.18.0`: 50/50 tests, PostgreSQL 18.4 integration, deterministic 20-file
+  runtime payload, dependency audit, 250-request load drill and provider/outbox
+  fault drill. The exact reports remain under ignored `artifacts/release/`.
 - **inferred/design:** four-plane ownership, policy-as-code, transactional
   outbox, CloudEvents envelope, review gate and expand/migrate/contract are
   Sumi decisions documented in ADR-0001.
-- **unknown/not run:** production ASR/TTS quality, PostgreSQL/RLS integration,
-  OIDC verification, object-store malware scanning, load/fault/security scans,
-  signed provenance and rollback drill.
+- **unknown/not run:** production ASR/TTS quality, object-store malware scanning,
+  broad security/staging scans, OCI smoke on this Docker-less host, signed
+  provenance and staging rollback drill.
 
 ## Rejected interpretations
 

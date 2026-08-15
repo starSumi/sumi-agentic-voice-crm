@@ -13,7 +13,7 @@ contentVersion: 0.1.0
 
 `/v1/ask` 和 `/v1/tts/synthesize` 都要求：
 
-- `Authorization: Bearer ...`：参考实现只检查非空；生产必须验证 OIDC/JWT。
+- `Authorization: Bearer ...`：开发模式接受显式本地 token；生产模式通过远程 JWKS 验证 OIDC JWT 的签名、issuer、audience、subject、tenant 与配置 scope。
 - `X-Tenant-Id`：必须来自已授权身份边界，不能从模型文本推断。
 - `Idempotency-Key`：长度 8 到 128；同一个 key 配不同内容返回冲突。
 

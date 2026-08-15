@@ -18,13 +18,13 @@ contentVersion: 0.1.0
 
 ## Controls
 
-1. OIDC/JWT validation at Gateway; tenant comes from token/authorized header, never model text.
+1. The API verifies OIDC JWT signatures through a cached remote JWKS, restricts algorithms, and validates issuer, audience, subject, tenant binding and configured scope. Production rejects development bearer mode and non-HTTPS JWKS.
 2. CRM queries add mandatory tenant predicate; DB role has least privilege; service-to-service mTLS or workload identity.
 3. Tool allowlist and policy decision point; model output is untrusted JSON validated by schema, entity resolver and RBAC.
 4. Idempotency uniqueness and optimistic version checks; webhook/event consumers deduplicate by event ID.
-5. Magic-byte/codec/duration/size validation, malware scan and private object store; signed URL TTL; encrypted at rest/in transit.
+5. Size, content type and audio magic-byte validation precede private S3-compatible storage; server-side encryption and 15-900 second signed URLs are enforced. Malware scanning and codec-duration limits remain a C5 deployment gate.
 6. Structured redacted logs, secret manager, rotation, no prompts/audio/phone in telemetry by default.
 7. High-risk actions require explicit human confirmation; TTS answer cannot claim a commit before commit event.
 8. Supply chain: lockfile, dependency audit, SBOM, provenance, signed release artifact and protected main branch.
 
-Security verification includes tenant matrix, prompt-injection fixtures, malformed media, SSRF/provider URL allowlist, rate limits, secret scan and restore drill.
+Current automated evidence covers forged/mismatched JWTs, production fail-closed configuration, tenant RLS, MIME spoofing boundaries, private object behavior, dependency audit and repository secret patterns. Prompt-injection, malware, SSRF allowlist, rate-limit, retention/deletion and restore exercises remain C5 holds.

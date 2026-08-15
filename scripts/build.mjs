@@ -1,65 +1,217 @@
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import {
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
-const packageMetadata = JSON.parse(await readFile("package.json", "utf8"));
-const runtimePackage = {
-  name: packageMetadata.name,
-  version: packageMetadata.version,
-  private: true,
-  description: packageMetadata.description,
-  type: "module",
-  engines: packageMetadata.engines,
-  license: packageMetadata.license,
-  scripts: { start: "node src/server.mjs" },
-};
-const runtimeSources = [
+const DEFAULT_RUNTIME_SOURCES = [
+  "src/auth.mjs",
   "src/contracts.mjs",
+  "src/data-cipher.mjs",
+  "src/object-storage.mjs",
+  "src/observability.mjs",
+  "src/outbox-relay.mjs",
+  "src/outbox-worker.mjs",
   "src/providers.mjs",
+  "src/production-config.mjs",
+  "src/protocol-validation.mjs",
+  "src/postgres-store.mjs",
   "src/server.mjs",
   "src/store.mjs",
 ];
 
-await rm("dist", { recursive: true, force: true });
-await mkdir("dist/src", { recursive: true });
-await cp("contracts", "dist/contracts", { recursive: true });
-await cp("LICENSE", "dist/LICENSE");
-for (const source of runtimeSources) {
-  await cp(source, `dist/${source}`);
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
-await writeFile(
-  "dist/package.json",
-  `${JSON.stringify(runtimePackage, null, 2)}\n`,
-);
 
-const files = [];
-async function walk(directory) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = `${directory}/${entry.name}`;
-    if (entry.isDirectory()) await walk(path);
-    else files.push(path.replaceAll("\\", "/"));
+async function walkFiles(root, directory = root) {
+  const files = [];
+  const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  for (const entry of entries) {
+    const absolutePath = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await walkFiles(root, absolutePath));
+    else if (entry.isFile()) files.push(relative(root, absolutePath).replaceAll("\\", "/"));
+    else throw new Error(`release input must be a regular file: ${absolutePath}`);
+  }
+  return files;
+}
+
+async function createManifest(stageRoot, packageMetadata) {
+  const paths = await walkFiles(stageRoot);
+  const files = [];
+  for (const path of paths) {
+    const bytes = await readFile(join(stageRoot, path));
+    files.push({ path, bytes: bytes.length, sha256: sha256(bytes) });
+  }
+  const contentSet = files
+    .map(({ path, bytes, sha256: digest }) => `${path}\0${bytes}\0${digest}`)
+    .join("\n");
+  return {
+    schema_version: "sumi.runtime-build-manifest.v1",
+    artifact: packageMetadata.name,
+    version: packageMetadata.version,
+    hash_algorithm: "sha256",
+    content_set_sha256: sha256(contentSet),
+    files,
+    manifest_is_payload_metadata: true,
+    reproducibility: {
+      timestamps: "excluded",
+      paths: "artifact-relative-posix",
+      ordering: "lexicographic",
+    },
+  };
+}
+
+export async function verifyBuildManifest(root) {
+  const resolvedRoot = resolve(root);
+  const manifest = JSON.parse(
+    await readFile(join(resolvedRoot, "BUILD-MANIFEST.json"), "utf8"),
+  );
+  if (manifest.schema_version !== "sumi.runtime-build-manifest.v1") {
+    throw new Error("runtime build manifest schema mismatch");
+  }
+  const actualPaths = (await walkFiles(resolvedRoot)).filter(
+    (path) => path !== "BUILD-MANIFEST.json",
+  );
+  const expectedPaths = manifest.files.map((entry) => entry.path);
+  if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error("runtime build manifest file set mismatch");
+  }
+  for (const entry of manifest.files) {
+    if (
+      typeof entry.path !== "string" ||
+      entry.path.startsWith("/") ||
+      entry.path.includes("..") ||
+      entry.path.includes("\\")
+    ) {
+      throw new Error(`unsafe runtime manifest path: ${entry.path}`);
+    }
+    const bytes = await readFile(join(resolvedRoot, entry.path));
+    if (bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256) {
+      throw new Error(`runtime build manifest digest mismatch: ${entry.path}`);
+    }
+  }
+  const contentSet = manifest.files
+    .map(({ path, bytes, sha256: digest }) => `${path}\0${bytes}\0${digest}`)
+    .join("\n");
+  if (sha256(contentSet) !== manifest.content_set_sha256) {
+    throw new Error("runtime build aggregate digest mismatch");
+  }
+  return manifest;
+}
+
+async function promoteDirectory(stageRoot, outputRoot) {
+  const backupRoot = `${outputRoot}.backup-${process.pid}-${Date.now()}`;
+  let movedExistingOutput = false;
+  try {
+    try {
+      await stat(outputRoot);
+      await rename(outputRoot, backupRoot);
+      movedExistingOutput = true;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    try {
+      await rename(stageRoot, outputRoot);
+    } catch (error) {
+      if (movedExistingOutput) await rename(backupRoot, outputRoot);
+      throw error;
+    }
+    if (movedExistingOutput) await rm(backupRoot, { recursive: true, force: true });
+  } catch (error) {
+    await rm(stageRoot, { recursive: true, force: true });
+    throw error;
   }
 }
 
-await walk("dist");
-const sortedFiles = files.sort();
-const fileHashes = [];
-for (const file of sortedFiles) {
-  const digest = createHash("sha256")
-    .update(await readFile(file))
-    .digest("hex");
-  fileHashes.push(`${digest}  ${file}`);
-}
-const manifest = {
-  artifact: packageMetadata.name,
-  version: packageMetadata.version,
-  files: sortedFiles,
-  sha256: createHash("sha256").update(fileHashes.join("\n")).digest("hex"),
-  file_hashes: fileHashes,
-  reproducible: true,
-};
-await writeFile(
-  "dist/BUILD-MANIFEST.json",
-  `${JSON.stringify(manifest, null, 2)}\n`,
-);
+export async function buildRuntime({
+  root = process.cwd(),
+  output = "dist",
+  runtimeSources = DEFAULT_RUNTIME_SOURCES,
+} = {}) {
+  const resolvedRoot = resolve(root);
+  const outputRoot = resolve(resolvedRoot, output);
+  if (dirname(outputRoot) !== resolvedRoot || basename(outputRoot) !== output) {
+    throw new Error("build output must be one direct child of the repository root");
+  }
+  const stageRoot = resolve(
+    resolvedRoot,
+    `.${output}.staging-${process.pid}-${Date.now()}`,
+  );
+  const packageMetadata = JSON.parse(
+    await readFile(join(resolvedRoot, "package.json"), "utf8"),
+  );
+  const runtimePackage = {
+    name: packageMetadata.name,
+    version: packageMetadata.version,
+    private: true,
+    description: packageMetadata.description,
+    type: "module",
+    engines: packageMetadata.engines,
+    license: packageMetadata.license,
+    dependencies: packageMetadata.dependencies,
+    scripts: { start: "node src/server.mjs", "start:outbox": "node src/outbox-worker.mjs" },
+  };
 
-console.log(`build passed: ${files.length} runtime files staged in dist/`);
+  await rm(stageRoot, { recursive: true, force: true });
+  try {
+    await mkdir(join(stageRoot, "src"), { recursive: true });
+    await cp(join(resolvedRoot, "contracts"), join(stageRoot, "contracts"), {
+      recursive: true,
+    });
+    await cp(
+      join(resolvedRoot, "protocol", "schema", "json"),
+      join(stageRoot, "protocol", "schema", "json"),
+      { recursive: true },
+    );
+    await cp(
+      join(resolvedRoot, "protocol", "protocol.manifest.json"),
+      join(stageRoot, "protocol", "protocol.manifest.json"),
+    );
+    await cp(join(resolvedRoot, "LICENSE"), join(stageRoot, "LICENSE"));
+    for (const source of runtimeSources) {
+      await cp(join(resolvedRoot, source), join(stageRoot, source));
+    }
+    await writeFile(
+      join(stageRoot, "package.json"),
+      `${JSON.stringify(runtimePackage, null, 2)}\n`,
+    );
+
+    const manifest = await createManifest(stageRoot, packageMetadata);
+    await writeFile(
+      join(stageRoot, "BUILD-MANIFEST.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+    await verifyBuildManifest(stageRoot);
+    await promoteDirectory(stageRoot, outputRoot);
+    return manifest;
+  } catch (error) {
+    await rm(stageRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+const isMain = process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  try {
+    const manifest = await buildRuntime();
+    console.log(
+      `build passed: ${manifest.files.length} payload files, content set ${manifest.content_set_sha256}`,
+    );
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}

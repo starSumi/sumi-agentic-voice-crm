@@ -11,17 +11,18 @@ Copy `.env.example` only when a launcher or deployment system loads it. Node.js 
 
 ## Effective runtime settings
 
-The current runtime reads this small set directly:
+Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc`, `OBJECT_STORAGE_PROVIDER=s3`, all three providers set to `openai-compatible`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token.
 
-| Variable | Default | Current effect |
-| --- | --- | --- |
-| `PORT` | `8080` | HTTP listen port. |
-| `PROVIDER_MODE` | `mock` | Reported by readiness output. Only deterministic mock behavior is implemented. |
-| `ASR_PROVIDER` | `mock` | Reported by readiness output; no dynamic provider loading yet. |
-| `INTENT_PROVIDER` | `mock` | Reported by readiness output; no dynamic provider loading yet. |
-| `TTS_PROVIDER` | `mock` | Reported by readiness output; no dynamic provider loading yet. |
+| Boundary | Required production variables |
+| --- | --- |
+| Identity | `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URI`, `OIDC_REQUIRED_SCOPE`; optional tenant-claim, algorithm and JWKS cache controls |
+| Database/privacy | `DATABASE_URL`, base64 32-byte `DATA_ENCRYPTION_KEY`; interaction payloads use AES-256-GCM |
+| Media | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds |
+| Providers | OpenAI-compatible endpoint/key and ASR, intent and TTS model names |
+| Relay | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls |
+| Operations | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage and provider state |
 
-`APP_ENV`, database, object storage, JWT, and OpenAI variables in `.env.example` describe the intended promotion boundary. The reference runtime does not consume them yet. Do not infer that production integrations exist because placeholders are present.
+Run the API with `npm start` and the independent transactional-outbox worker with `npm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
 
 ## Documentation settings
 
@@ -35,15 +36,16 @@ Use `npm run docs:dev` for live authoring and `npm run docs:build` for the produ
 
 - Development may use loopback HTTP, deterministic providers, synthetic tenants, and the in-memory store.
 - Staging must use non-production credentials, durable backing services, representative media, and contract-compatible providers.
-- Production requires the open security, data, resilience, and release checkpoints to be completed. The repository currently says `not approved`.
+- Production requires the open security, staging, resilience, and release checkpoints to be completed. Fail-closed configuration is implementation evidence, not deployment approval.
 - Never put bearer tokens, API keys, customer audio, transcripts, or production connection strings in `.env.example`, Markdown, tests, or Git history.
 
 ## Startup example
 
 ```powershell
 $env:PORT = "8080"
-$env:PROVIDER_MODE = "mock"
-npm start
+$env:AUTH_MODE = "development"
+$env:STORE_PROVIDER = "memory"
+npm run dev
 ```
 
-Confirm effective behavior through `GET /health/ready`; do not treat the configured provider name alone as proof that a real provider was loaded.
+Confirm effective behavior through `GET /health/ready`; configured names alone are not proof of provider quality or production connectivity.

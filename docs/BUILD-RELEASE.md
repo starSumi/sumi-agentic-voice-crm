@@ -27,16 +27,30 @@ flowchart LR
 ## Local gates
 
 ```powershell
-npm ci
-npm run verify
-npm run verify:mcp
-npm run audit:deps
-npm pack --dry-run
+volta run npm ci
+volta run npm run protocol:generate
+volta run npm run verify:release
+volta run npm run smoke:docker
+volta run npm run verify:mcp
+volta run npm run sbom
+volta run npm pack --dry-run
 ```
 
-`build` produces a dependency-free runtime candidate and `dist/BUILD-MANIFEST.json` with artifact version, sorted file list and digest. `smoke:dist` starts that generated candidate, probes readiness, and stops it. `docs:build` produces the human site and MCP projection under `artifacts/docs-site/`. `verify:mcp` is a cross-repository gate and requires a built Sumi-Docs-MCP entry. `audit:deps` names the official npm registry because some package mirrors do not implement the audit API. Production CI must additionally run a secret scan, SBOM, container scan, image provenance, and signature tooling.
+The repository pins Node `24.18.0` and npm `11.15.0` through Volta. `build` first performs the clean temporary protocol drift check, then assembles a staging directory and atomically promotes it to `dist/` only after writing and re-reading `dist/BUILD-MANIFEST.json`. The manifest binds each artifact-relative POSIX path, byte count and SHA-256 digest to a sorted content-set digest; timestamps and host paths are excluded. A failed staging build leaves the previous `dist/` candidate intact. The candidate carries only the runtime source and its declared dependencies, not the development toolchain. `test:postgres` starts a disposable local PostgreSQL cluster and verifies repeatable migration, two-tenant RLS, encrypted interaction replay, durable CRM/media/review data, and outbox lease/retry/dead-letter behavior. `smoke:dist` starts the generated candidate, probes readiness, and stops it. `drill:load` records a bounded concurrent latency/error report; `drill:fault` records provider timeout/circuit/readiness and relay dead-letter behavior. Both JSON reports are written under ignored `artifacts/release/`. `smoke:docker` builds the OCI image, proves the declared production modules can be imported, starts the image's normal `dist/src/server.mjs` command as its unprivileged user, probes readiness, and removes its ephemeral image/container. `docs:build` produces the human site and MCP projection under `artifacts/docs-site/`. `verify:mcp` is a cross-repository gate and requires a built Sumi-Docs-MCP entry. `audit:deps` names the official npm registry because some package mirrors do not implement the audit API. `npm run sbom` writes a runtime SPDX document under `artifacts/release/`. Production CI and release-candidate acceptance require the drills and Docker smoke as well as repository secret-pattern checks, then upload the manifest, drill reports and SBOM as reviewed evidence; container scan, image provenance and signature tooling remain release gates.
 
-The Dockerfile is a multi-stage build. Its runtime stage contains only the generated `dist/` candidate and runs as the unprivileged `node` user. A Docker build remains an explicit failed or not-run gate when the validation host has no Docker CLI or daemon.
+The Dockerfile is a multi-stage build. The build stage runs `npm ci --omit=dev --ignore-scripts` against the committed lockfile, so the copied dependency closure excludes `devDependencies`; it then produces `dist/`. The runtime stage contains `/app/dist`, `/app/node_modules`, and runs `node dist/src/server.mjs` as the unprivileged `node` user. `smoke:docker` is mandatory in CI and release-candidate acceptance. On a local host without a usable Docker CLI/daemon it reports an explicit not-run/failure condition rather than treating the dist-only smoke as container evidence.
+
+## Release-candidate workflow
+
+`.github/workflows/release-candidate.yml` is manually dispatched with an exact
+reviewed `main` commit and package version. It refuses to package a stale branch,
+an uncompleted C6, or a mismatched version. The acceptance job runs the full
+verification, audit, SBOM and deterministic tarball checksum steps, then uploads
+an unprivileged candidate. A separate `production-release` environment gate
+attests the tarball and SBOM with pinned `actions/attest@v4`; it requires OIDC,
+attestation and artifact-metadata permissions. Private-repository attestation
+availability is plan-dependent, so an unavailable capability is a recorded
+release hold rather than a substituted unsigned artifact.
 
 ## Branch and change policy
 
@@ -66,4 +80,9 @@ SBOM, provenance/signature, test report, security report, SLO dashboard link, ro
 
 ## Supply-chain target
 
-Use pinned base image, lockfile, SBOM (CycloneDX/SPDX), signed image and provenance attestation. The repository does not pretend to generate these with unavailable local tools; CI ownership and evidence are explicit release gates.
+Use pinned base image, lockfile, SBOM (CycloneDX/SPDX), signed image and
+provenance attestation. Build and release Actions are pinned to full commit
+SHAs. The repository does not pretend to generate private-repository attestations
+when the GitHub plan cannot support them; the candidate remains held until the
+platform owner supplies that capability or records a time-bound waiver with a
+compensating control.

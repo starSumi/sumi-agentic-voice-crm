@@ -8,4 +8,11 @@
 /integrations/ @starSumi
 /scripts/agent-ops.mjs @starSumi
 /scripts/agent-incident.mjs @starSumi
+/scripts/build.mjs @starSumi
+/package.json @starSumi
+/package-lock.json @starSumi
+/.dockerignore @starSumi
+/.npmignore @starSumi
+/.vercelignore @starSumi
+/.gcloudignore @starSumi
 /.github/workflows/ @starSumi

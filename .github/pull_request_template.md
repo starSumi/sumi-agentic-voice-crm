@@ -12,6 +12,8 @@
 
 - [ ] `npm run verify`
 - [ ] `npm run verify:mcp` when docs, API, routing, or agent onboarding changed
+- [ ] `npm run sbom` and `npm run audit:deps` when dependencies or release inputs changed
+- [ ] `dist/BUILD-MANIFEST.json` verifies after any build-chain change
 - [ ] New or changed behavior has regression coverage
 
 ## Security and data
@@ -27,3 +29,7 @@
 ## Rollback
 
 <!-- Exact reversible action and any state that must not be deleted or rolled back. -->
+
+## Release acceptance
+
+<!-- Name the candidate commit/version, C6 evidence, SBOM/provenance status, approvers, and explicit approved/held/rejected decision. Ordinary PR approval is not release approval. -->

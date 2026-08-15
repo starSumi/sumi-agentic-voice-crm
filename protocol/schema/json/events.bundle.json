@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.sumi.invalid/events/v1/envelope.schema.json",
+  "title": "Sumi Voice CRM CloudEvents envelope",
+  "description": "Normative JSON Schema for Sumi domain events. It follows CloudEvents 1.0 attribute names and adds mandatory tenant/request correlation. Event data is versioned by the major suffix of the CloudEvents type and publishers must preserve the envelope exactly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "type",
+    "source",
+    "subject",
+    "time",
+    "datacontenttype",
+    "tenant_id",
+    "request_id",
+    "data"
+  ],
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^evt_[0-9a-fA-F-]{36}$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "voice.request.received.v1",
+        "voice.transcript.created.v1",
+        "voice.understanding.created.v1",
+        "crm.command.committed.v1",
+        "crm.review.requested.v1",
+        "tts.asset.created.v1",
+        "voice.request.failed.v1"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "const": "urn:sumi:voice-crm/crm",
+      "format": "uri"
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "datacontenttype": {
+      "const": "application/json"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "x-sumi-compatibility": {
+    "mode": "additive-by-default",
+    "event_type_versioning": "major-suffix",
+    "consumer_rule": "ignore-unknown-data-fields",
+    "envelope_rule": "reject-unknown-envelope-fields",
+    "partition_key": "tenant_id",
+    "deduplication_key": "id"
+  }
+}

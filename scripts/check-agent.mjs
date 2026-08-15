@@ -165,6 +165,19 @@ for (const ignoreFile of buildOnlyIgnoreFiles) {
   }
 }
 
+const workspaceOnlyPaths = [".codex/", ".claude/", ".vscode/", ".idea/", "*.code-workspace"];
+for (const ignoreFile of ignoreFiles) {
+  const ignore = await readFile(ignoreFile, "utf8");
+  for (const workspacePath of workspaceOnlyPaths) {
+    if (!ignore.includes(workspacePath)) {
+      throw new Error(`${ignoreFile} is missing local workspace path: ${workspacePath}`);
+    }
+  }
+  if (!ignore.includes(".dist.staging-") || !ignore.includes(".dist.backup-")) {
+    throw new Error(`${ignoreFile} is missing atomic build scratch paths`);
+  }
+}
+
 const operationsWorkflow = await readFile(
   ".github/workflows/operations-agent.yml",
   "utf8",
@@ -217,6 +230,50 @@ for (const ownedPath of [
   if (!codeowners.includes(ownedPath)) {
     throw new Error(`CODEOWNERS mapping missing: ${ownedPath}`);
   }
+}
+
+const releaseWorkflow = await readFile(
+  ".github/workflows/release-candidate.yml",
+  "utf8",
+);
+for (const marker of [
+  "workflow_dispatch:",
+  "expected_commit:",
+  "release_version:",
+  "github.ref == 'refs/heads/main'",
+  "manifest.release_status",
+  "C6 evidence",
+  "npm run verify",
+  "npm run smoke:docker",
+  "npm run audit:deps",
+  "npm run sbom",
+  "environment: production-release",
+  "id-token: write",
+  "attestations: write",
+  "artifact-metadata: write",
+  "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
+  "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+]) {
+  if (!releaseWorkflow.includes(marker)) {
+    throw new Error(`release workflow safety marker missing: ${marker}`);
+  }
+}
+const ciWorkflow = await readFile(".github/workflows/ci.yml", "utf8");
+if (!ciWorkflow.includes("npm run smoke:docker")) {
+  throw new Error("CI must run the Docker production-image smoke");
+}
+const workflowFiles = (await readdir(".github/workflows")).filter((file) =>
+  file.endsWith(".yml") || file.endsWith(".yaml"),
+);
+const unpinnedActions = [];
+for (const workflowFile of workflowFiles) {
+  const workflow = await readFile(`.github/workflows/${workflowFile}`, "utf8");
+  for (const match of workflow.matchAll(/^\s*uses:\s*([^\s#]+)/gm)) {
+    if (!/@[0-9a-f]{40}$/.test(match[1])) unpinnedActions.push(`${workflowFile}: ${match[1]}`);
+  }
+}
+if (unpinnedActions.length) {
+  throw new Error(`workflow action is not pinned to a full commit SHA: ${unpinnedActions.join(", ")}`);
 }
 
 console.log(

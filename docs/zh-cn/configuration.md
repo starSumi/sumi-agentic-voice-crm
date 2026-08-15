@@ -11,15 +11,7 @@ contentVersion: 0.1.0
 
 ## 当前真正生效的变量
 
-| 变量 | 默认值 | 当前作用 |
-| --- | --- | --- |
-| `PORT` | `8080` | HTTP 监听端口。 |
-| `PROVIDER_MODE` | `mock` | 出现在 readiness 响应中；目前只有 mock 行为。 |
-| `ASR_PROVIDER` | `mock` | 仅报告名称，尚无动态 provider 加载。 |
-| `INTENT_PROVIDER` | `mock` | 仅报告名称，尚无动态 provider 加载。 |
-| `TTS_PROVIDER` | `mock` | 仅报告名称，尚无动态 provider 加载。 |
-
-`.env.example` 中的 `APP_ENV`、数据库、对象存储、JWT 和 OpenAI 变量描述后续晋级边界，当前参考运行时尚未消费。占位符存在不等于生产集成已经完成。
+开发默认使用内存数据库、development bearer、内存对象和 mock provider。`APP_ENV=production` 会强制 PostgreSQL、32 字节数据密钥、OIDC/JWKS、S3 兼容私有存储、三个 `openai-compatible` provider、HTTPS 公网地址和指标令牌；缺项即拒绝启动。独立 outbox worker 还要求投递 URL、租户列表和 HMAC secret。完整变量见 `.env.example`；配置通过不等于 staging 或生产批准。
 
 文档构建使用 `DOCS_SITE_URL`，默认 `http://127.0.0.1:4321`。CI 部署时应设置为实际 HTTPS origin。`npm run docs:dev` 用于实时编写，`npm run docs:build` 把静态站和 `_mcp` 投影写入 `artifacts/docs-site/`。
 

@@ -15,7 +15,7 @@ Both mutation-capable endpoints require:
 
 | Input | Requirement |
 | --- | --- |
-| `Authorization` | Bearer actor identity. The reference accepts a non-empty local value; production requires verified OIDC/JWT. |
+| `Authorization` | Development accepts an explicit local bearer. Production verifies OIDC JWT signature, issuer, audience, subject, tenant and configured scope through remote JWKS. |
 | `X-Tenant-Id` | Non-empty tenant scope. It must come from an authorized identity boundary, never model text. |
 | `Idempotency-Key` | 8 to 128 characters. Reuse with different content returns a conflict. |
 

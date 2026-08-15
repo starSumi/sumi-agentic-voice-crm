@@ -7,7 +7,7 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-The production target is PostgreSQL 16+ with migrations. The reference runtime uses an in-memory store so contract tests are deterministic; it is not a production database.
+The production target is PostgreSQL 16+ with migrations. Development can use the deterministic in-memory adapter; `STORE_PROVIDER=postgres` selects the durable adapter and production rejects memory storage.
 
 ## Tables
 
@@ -29,7 +29,7 @@ The target CRM vocabulary includes these aggregates, each with `id`, `tenant_id`
 
 ### `voice_interactions`
 
-`id uuid PK`, `tenant_id`, `request_id UNIQUE`, `actor_id`, `input_type text`, `status`, `conversation_id NULL`, `transcript_id NULL`, `understanding_id NULL`, `crm_command_id NULL`, `answer_text_ciphertext NULL`, `model_versions jsonb`, `latency_ms jsonb`, `created_at`, `completed_at`.
+`id uuid PK`, tenant/request/actor/idempotency identity, request fingerprint, input type, status, encrypted input/transcript/understanding/response/error fields, input asset reference, provider invocation metadata, model versions, stage latency, HTTP result, and timestamps. Sensitive JSON uses tenant-bound AES-256-GCM envelopes; full audio bytes never enter this table.
 
 ### `media_assets`
 
@@ -57,7 +57,7 @@ Planned for the production persistence migration; the reference runtime keeps th
 
 ### `outbox_events`
 
-`id uuid PK`, `tenant_id`, `event_type`, `aggregate_type`, `aggregate_id`, `aggregate_version`, `request_id`, `payload jsonb`, `published_at NULL`, `attempts`, `next_attempt_at`, `created_at`; unique `(aggregate_type, aggregate_id, aggregate_version, event_type)`.
+`id uuid PK`, tenant/event/aggregate/request identity, payload, publish time, attempts, next attempt, lease owner/time, last error, dead-letter time, and creation time. The relay claims due rows with `FOR UPDATE SKIP LOCKED`, signs CloudEvents delivery, retries with bounded exponential backoff, and preserves exhausted rows as dead letters.
 
 ### `audit_records`
 

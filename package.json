@@ -12,34 +12,61 @@
     "node": ">=24.18.0"
   },
   "packageManager": "npm@11.15.0",
+  "volta": {
+    "node": "24.18.0",
+    "npm": "11.15.0"
+  },
   "scripts": {
     "start": "node dist/src/server.mjs",
+    "start:outbox": "node dist/src/outbox-worker.mjs",
     "dev": "node src/server.mjs",
     "test": "node --test",
+    "test:postgres": "node scripts/test-postgres.mjs",
+    "protocol:generate": "node scripts/generate-protocol.mjs",
+    "protocol:check": "node scripts/check-protocol-drift.mjs",
+    "protocol:typecheck": "tsc -p packages/api-client/tsconfig.json",
     "check": "node scripts/check.mjs",
     "check:agent": "node scripts/check-agent.mjs && node scripts/agent-ops.mjs check",
     "agent:health": "node scripts/agent-ops.mjs health",
     "agent:resume": "node scripts/agent-ops.mjs resume",
     "agent:snapshot": "node scripts/agent-ops.mjs snapshot",
     "agent:incident": "node scripts/agent-incident.mjs",
-    "build": "node scripts/build.mjs",
+    "build": "npm run protocol:check && node scripts/build.mjs",
+    "check:dist": "node -e \"import('./scripts/build.mjs').then(({verifyBuildManifest})=>verifyBuildManifest('dist'))\"",
+    "sbom": "node -e \"require('node:fs').mkdirSync('artifacts/release',{recursive:true})\" && npm sbom --sbom-format=spdx --omit=dev > artifacts/release/sbom.spdx.json",
     "smoke:dist": "npm run build && node scripts/smoke-dist.mjs",
+    "smoke:docker": "node scripts/smoke-docker.mjs",
     "docs:dev": "astro dev",
     "docs:check": "astro check",
     "docs:build": "astro check && astro build && node scripts/verify-docs-dist.mjs",
     "docs:preview": "astro preview",
     "verify:mcp": "node scripts/verify-docs-mcp.mjs",
-    "verify": "npm test && npm run check && npm run check:agent && npm run smoke:dist && npm run docs:build",
+    "verify": "npm run protocol:check && npm run protocol:typecheck && npm test && npm run test:postgres && npm run check && npm run check:agent && npm run smoke:dist && npm run check:dist && npm run docs:build",
     "audit:deps": "npm audit --audit-level=high --registry=https://registry.npmjs.org",
+    "drill:load": "node scripts/load-drill.mjs",
+    "drill:fault": "node scripts/fault-drill.mjs",
+    "verify:release": "npm run audit:deps && npm run verify && npm run drill:load && npm run drill:fault",
     "prepack": "npm run build"
   },
   "license": "Apache-2.0",
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
     "@astrojs/starlight": "^0.41.7",
+    "@hey-api/openapi-ts": "0.99.0",
     "astro": "^7.2.2",
     "sharp": "^0.35.3",
     "typescript": "^5.9.3",
     "yaml": "^2.9.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1111.0",
+    "@aws-sdk/s3-request-presigner": "3.1111.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "jose": "6.2.8",
+    "pg": "8.16.3"
+  },
+  "overrides": {
+    "js-yaml": "4.3.1"
   }
 }

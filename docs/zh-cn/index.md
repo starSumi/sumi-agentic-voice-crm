@@ -34,4 +34,4 @@ Sumi 智能语音 CRM 是一个自有的文本与语音 CRM 工作流参考实�
 
 ## 尚未完成的生产目标
 
-经过验证的 OIDC/JWT、PostgreSQL 与 RLS、私有对象存储、真实 ASR/Intent/TTS provider、持久队列、限流、SLO、签名制品、灾难恢复和生产批准仍是开放检查点。[发布就绪记录](/release-readiness/) 是当前状态的权威来源。
+OIDC/JWKS、PostgreSQL RLS、私有对象存储、加密交互重放、OpenAI 兼容 provider、outbox worker、HTTP 指标和本地负载/故障演练已经实现。真实 provider 质量、安全专项、staging、签名制品、灾难恢复和生产批准仍是开放检查点。[发布就绪记录](/release-readiness/) 是当前状态的权威来源。

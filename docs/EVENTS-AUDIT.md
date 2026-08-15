@@ -29,10 +29,7 @@ Events follow a CloudEvents 1.0-compatible shape. `contracts/events.yaml` is nor
 
 `id` is the deduplication key. `subject + aggregate_version` provides ordering; consumers reject a gap and re-read the aggregate rather than guessing state.
 
-The currently emitted reference events are `crm.command.committed.v1` and
-`crm.review.requested.v1`. The remaining lifecycle names in the registry are
-reserved for the durable worker implementation and must not be claimed as
-runtime evidence until C2/C4 integration tests observe them.
+The runtime emits `crm.command.committed.v1`, `crm.review.requested.v1`, and `tts.asset.created.v1` into the same PostgreSQL transaction as the corresponding durable state. `src/outbox-worker.mjs` delivers leased rows as structured CloudEvents with an event-ID idempotency header and optional bearer plus required production HMAC authentication.
 
 ## Audit trail
 
@@ -56,15 +53,15 @@ Required attributes: `sumi.request_id`, `sumi.tenant_id` (non-PII opaque ID), `s
 
 ## Metrics and SLOs
 
-- `ask_requests_total{input_type,status,intent}`
-- `ask_latency_ms{stage}` and P50/P95/P99
+- `sumi_http_requests_total{method,route,status}`
+- `sumi_http_request_duration_seconds` summary, with IDs normalized out of route labels
 - `asr_empty_total`, `asr_confidence`, `intent_confidence`
 - `crm_command_total{intent,status}`, `idempotency_replay_total`
 - `review_open_total`, `review_age_seconds`
 - `tts_success_total`, `tts_fallback_total`, `tts_latency_ms`
 - `outbox_pending`, `outbox_retry_total`, `event_consumer_lag`
 
-Initial target: 99.9% API availability, 99% CRM command success, 100% no-duplicate command under repeated key, warm voice P95 ≤8s.
+`GET /metrics` exposes the implemented HTTP metrics and requires `METRICS_BEARER_TOKEN` when configured; production startup requires it. Provider and queue-specific metric families above remain C4 work rather than current claims.
 
 ## Replay and incident response
 

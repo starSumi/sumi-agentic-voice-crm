@@ -9,6 +9,16 @@
 .astro/
 artifacts/
 dist/
+.dist.staging-*/
+.dist.backup-*/
 node_modules/
 .agent-*.json
 .agent-*.tmp
+.codex/
+.claude/
+.vscode/
+.idea/
+*.code-workspace
+protocol/.tmp/
+protocol/.cache/
+packages/api-client/.tmp/

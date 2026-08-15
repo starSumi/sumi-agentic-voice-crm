@@ -1,0 +1,24 @@
+{
+  "$schema": "./protocol-manifest.schema.json",
+  "schema_version": "sumi.protocol-manifest.v1",
+  "protocol_version": "1.0.0",
+  "owner": "protocol-owner",
+  "compatibility": "additive-by-default",
+  "sources": {
+    "http": "contracts/openapi.yaml",
+    "events": "contracts/events.yaml",
+    "database": "db/migrations"
+  },
+  "generated": {
+    "json_schema_bundle": "protocol/schema/json/openapi.bundle.json",
+    "event_schema_bundle": "protocol/schema/json/events.bundle.json",
+    "typescript_client": "packages/api-client/src/generated"
+  },
+  "commands": {
+    "generate": "npm run protocol:generate",
+    "drift_check": "npm run protocol:check",
+    "consumer_check": "npm run protocol:typecheck"
+  },
+  "breaking_change_policy": "major-version-and-migration-plan-required",
+  "rollback": "restore the previous compatible source and regenerated projections"
+}
