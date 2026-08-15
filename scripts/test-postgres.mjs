@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -42,6 +42,7 @@ function run(command, args, environment = {}, { inherit = false } = {}) {
 
 const root = await mkdtemp(join(tmpdir(), "sumi-postgres-"));
 const data = join(root, "data");
+const logPath = join(root, "postgres.log");
 const port = await freePort();
 const database = `sumi_test_${randomBytes(6).toString("hex")}`;
 const env = { PGHOST: "127.0.0.1", PGPORT: String(port), PGUSER: "postgres", PGDATABASE: database, DATA_ENCRYPTION_KEY: randomBytes(32).toString("base64") };
@@ -52,7 +53,13 @@ try {
   run("initdb", ["-D", data, "-U", "postgres", "--auth=trust", "--no-locale", "--encoding=UTF8"]);
   // The logfile prevents the detached postgres server from retaining the
   // spawnSync stdout/stderr pipe and keeping the Node process open on Windows.
-  run("pg_ctl", ["-D", data, "-l", join(root, "postgres.log"), "-o", `-h 127.0.0.1 -p ${port}`, "-w", "start"], {}, { inherit: true });
+  try {
+    run("pg_ctl", ["-D", data, "-l", logPath, "-o", `-h 127.0.0.1 -p ${port} -k ${root}`, "-w", "start"], {}, { inherit: true });
+  } catch (error) {
+    let postgresLog = "postgres log unavailable";
+    try { postgresLog = await readFile(logPath, "utf8"); } catch {}
+    throw new Error(`${error.message}\npostgres.log:\n${postgresLog}`, { cause: error });
+  }
   started = true;
   console.log("postgres integration: apply migration twice");
   run("createdb", [database], { ...env, PGDATABASE: "postgres" });
