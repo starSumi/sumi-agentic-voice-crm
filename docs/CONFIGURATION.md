@@ -11,11 +11,11 @@ Copy `.env.example` only when a launcher or deployment system loads it. Node.js 
 
 ## Effective runtime settings
 
-Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc`, `OBJECT_STORAGE_PROVIDER=s3`, each provider selector set to `openai-compatible` or `dashscope`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token. ASR, intent and TTS may select different adapters; `mock` is rejected in production.
+Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc` or `AUTH_MODE=static`, `OBJECT_STORAGE_PROVIDER=s3`, each provider selector set to `openai-compatible` or `dashscope`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token. ASR, intent and TTS may select different adapters; `mock` is rejected in production.
 
 | Boundary | Required production variables |
 | --- | --- |
-| Identity | `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URI`, `OIDC_REQUIRED_SCOPE`; optional tenant-claim, algorithm and JWKS cache controls |
+| Identity | Multi-user OIDC: issuer, audience, JWKS URI and required scope. Private single-tenant: `AUTH_STATIC_BEARER_TOKEN`, `AUTH_STATIC_TENANT_ID`, `AUTH_STATIC_SUBJECT` |
 | Database/privacy | `DATABASE_URL`, base64 32-byte `DATA_ENCRYPTION_KEY`; interaction payloads use AES-256-GCM |
 | Media | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds |
 | Providers | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent |
@@ -53,6 +53,7 @@ Use `npm run docs:dev` for live authoring and `npm run docs:build` for the produ
 ## Development and production separation
 
 - Development may use loopback HTTP, deterministic providers, synthetic tenants, and the in-memory store.
+- `AUTH_MODE=static` is intended for a private single-tenant operator deployment. The configured token fixes both tenant and actor identity; a conflicting `X-Tenant-Id` is rejected. Rotate the token by replacing the secret and restarting the API. Use OIDC when multiple independent users, browser login, per-user revocation, or delegated scopes are required.
 - Staging must use non-production credentials, durable backing services, representative media, and contract-compatible providers.
 - Production requires the open security, staging, resilience, and release checkpoints to be completed. Fail-closed configuration is implementation evidence, not deployment approval.
 - Never put bearer tokens, API keys, customer audio, transcripts, or production connection strings in `.env.example`, Markdown, tests, or Git history.

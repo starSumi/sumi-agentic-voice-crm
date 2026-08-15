@@ -19,6 +19,13 @@ function requirePositiveInteger(env, name, max) {
   }
 }
 
+function requireUuid(env, name) {
+  requireValue(env, name);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(env[name])) {
+    throw new Error(`${name} must be a UUID in production`);
+  }
+}
+
 function selectedName(env, names) {
   return names.find((name) => env[name]);
 }
@@ -47,10 +54,18 @@ export function validateProductionConfig(env = process.env, { component = "api" 
     if (env.OUTBOX_HMAC_SECRET.length < 32) throw new Error("OUTBOX_HMAC_SECRET must contain at least 32 characters");
     return;
   }
-  if (env.AUTH_MODE !== "oidc") throw new Error("AUTH_MODE=oidc is required in production");
+  if (!new Set(["oidc", "static"]).has(env.AUTH_MODE)) throw new Error("AUTH_MODE must be oidc or static in production");
   requirePositiveInteger(env, "PROVIDER_TIMEOUT_MS", 120_000);
-  for (const name of ["OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_REQUIRED_SCOPE", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "METRICS_BEARER_TOKEN"]) requireValue(env, name);
-  for (const name of ["OIDC_JWKS_URI", "PUBLIC_BASE_URL"]) requireHttps(env, name);
+  for (const name of ["OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "METRICS_BEARER_TOKEN"]) requireValue(env, name);
+  requireHttps(env, "PUBLIC_BASE_URL");
+  if (env.AUTH_MODE === "oidc") {
+    for (const name of ["OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_REQUIRED_SCOPE"]) requireValue(env, name);
+    requireHttps(env, "OIDC_JWKS_URI");
+  } else {
+    for (const name of ["AUTH_STATIC_BEARER_TOKEN", "AUTH_STATIC_SUBJECT"]) requireValue(env, name);
+    requireUuid(env, "AUTH_STATIC_TENANT_ID");
+    if (env.AUTH_STATIC_BEARER_TOKEN.length < 32) throw new Error("AUTH_STATIC_BEARER_TOKEN must contain at least 32 characters");
+  }
   if (env.OBJECT_STORAGE_PROVIDER !== "s3") throw new Error("OBJECT_STORAGE_PROVIDER=s3 is required in production");
   if (env.OBJECT_STORAGE_ENDPOINT) requireHttps(env, "OBJECT_STORAGE_ENDPOINT");
   const supportedProviders = new Set(["openai-compatible", "dashscope"]);

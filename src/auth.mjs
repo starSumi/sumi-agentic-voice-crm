@@ -1,6 +1,8 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const SAFE_TENANT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SAFE_SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$/;
 const DEFAULT_ALGORITHMS = ["RS256", "ES256"];
 
 function authError(message, code = "UNAUTHORIZED", cause) {
@@ -22,6 +24,25 @@ function requestedTenant(headers) {
   return tenantId;
 }
 
+function configuredStaticIdentity(env) {
+  const token = env.AUTH_STATIC_BEARER_TOKEN?.trim();
+  const tenantId = env.AUTH_STATIC_TENANT_ID?.trim();
+  const subject = env.AUTH_STATIC_SUBJECT?.trim();
+  if (!token || !tenantId || !subject) {
+    throw new Error("AUTH_STATIC_BEARER_TOKEN, AUTH_STATIC_TENANT_ID and AUTH_STATIC_SUBJECT are required in static mode");
+  }
+  if (token.length < 32 || token.length > 8192 || /[\r\n]/.test(token)) {
+    throw new Error("AUTH_STATIC_BEARER_TOKEN must contain between 32 and 8192 characters without newlines");
+  }
+  if (!SAFE_TENANT.test(tenantId)) throw new Error("AUTH_STATIC_TENANT_ID has an invalid format");
+  if (!SAFE_SUBJECT.test(subject)) throw new Error("AUTH_STATIC_SUBJECT has an invalid format");
+  return { token, tenantId, subject };
+}
+
+function tokenDigest(value) {
+  return createHash("sha256").update(value, "utf8").digest();
+}
+
 function tenantClaim(payload, claimName) {
   return payload[claimName] ?? payload.tenant_id ?? payload.tid ?? payload["https://sumi.invalid/tenant_id"];
 }
@@ -39,6 +60,19 @@ export function createAuthenticator({ env = process.env, remoteJwks, verify = jw
     return async (headers) => {
       const token = bearerToken(headers);
       return { tenant_id: requestedTenant(headers), actor_id: token.slice(0, 80), auth_mode: mode };
+    };
+  }
+  if (mode === "static") {
+    const identity = configuredStaticIdentity(env);
+    const expectedDigest = tokenDigest(identity.token);
+    return async (headers) => {
+      const suppliedDigest = tokenDigest(bearerToken(headers));
+      if (!timingSafeEqual(suppliedDigest, expectedDigest)) throw authError("bearer token verification failed");
+      const tenantHeader = headers.get("x-tenant-id")?.trim();
+      if (tenantHeader && tenantHeader !== identity.tenantId) {
+        throw authError("token is not bound to this tenant", "FORBIDDEN");
+      }
+      return { tenant_id: identity.tenantId, actor_id: identity.subject, auth_mode: mode };
     };
   }
   if (mode !== "oidc") throw new Error(`unsupported AUTH_MODE: ${mode}`);

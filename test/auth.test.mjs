@@ -62,9 +62,29 @@ test("OIDC authentication rejects forged, mismatched and underscoped tokens", as
   await assert.rejects(authenticate(new Headers({ authorization: "Bearer opaque", "x-tenant-id": "tenant-a" })), (error) => error.code === "UNAUTHORIZED");
 });
 
+test("static authentication binds one bearer token to configured tenant and subject", async () => {
+  const authenticate = createAuthenticator({ env: {
+    APP_ENV: "production",
+    AUTH_MODE: "static",
+    AUTH_STATIC_BEARER_TOKEN: "a".repeat(48),
+    AUTH_STATIC_TENANT_ID: "00000000-0000-4000-8000-000000000001",
+    AUTH_STATIC_SUBJECT: "sumi-static-operator",
+  } });
+  const expected = {
+    tenant_id: "00000000-0000-4000-8000-000000000001",
+    actor_id: "sumi-static-operator",
+    auth_mode: "static",
+  };
+  assert.deepEqual(await authenticate(new Headers({ authorization: `Bearer ${"a".repeat(48)}` })), expected);
+  assert.deepEqual(await authenticate(new Headers({ authorization: `Bearer ${"a".repeat(48)}`, "x-tenant-id": expected.tenant_id })), expected);
+  await assert.rejects(authenticate(new Headers({ authorization: `Bearer ${"b".repeat(48)}` })), (error) => error.code === "UNAUTHORIZED");
+  await assert.rejects(authenticate(new Headers({ authorization: `Bearer ${"a".repeat(48)}`, "x-tenant-id": "tenant-other" })), (error) => error.code === "FORBIDDEN");
+});
+
 test("production authentication fails closed on unsafe or incomplete configuration", () => {
   assert.throws(() => createAuthenticator({ env: { APP_ENV: "production", AUTH_MODE: "development" } }), /forbidden/);
   assert.throws(() => createAuthenticator({ env: { APP_ENV: "production", AUTH_MODE: "oidc", OIDC_ISSUER: issuer, OIDC_AUDIENCE: audience, OIDC_JWKS_URI: "http://issuer.test/jwks" } }), /HTTPS/);
   assert.throws(() => createAuthenticator({ env: { APP_ENV: "production", AUTH_MODE: "oidc" } }), /required/);
+  assert.throws(() => createAuthenticator({ env: { APP_ENV: "production", AUTH_MODE: "static" } }), /AUTH_STATIC/);
+  assert.throws(() => createAuthenticator({ env: { APP_ENV: "production", AUTH_MODE: "static", AUTH_STATIC_BEARER_TOKEN: "short", AUTH_STATIC_TENANT_ID: "tenant-a", AUTH_STATIC_SUBJECT: "operator" } }), /32/);
 });
-

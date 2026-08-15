@@ -160,7 +160,7 @@ export type ErrorEnvelope = {
 };
 
 /**
- * Tenant boundary selected by the authenticated actor.
+ * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
  */
 export type TenantId2 = TenantId;
 
@@ -173,9 +173,9 @@ export type AskData = {
   body: AskRequest;
   headers: {
     /**
-     * Tenant boundary selected by the authenticated actor.
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
      */
-    "X-Tenant-Id": TenantId;
+    "X-Tenant-Id"?: TenantId;
     /**
      * Stable mutation key. Reuse with a different request fingerprint returns 409.
      */
@@ -244,9 +244,9 @@ export type SynthesizeData = {
   body: TtsRequest;
   headers: {
     /**
-     * Tenant boundary selected by the authenticated actor.
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
      */
-    "X-Tenant-Id": TenantId;
+    "X-Tenant-Id"?: TenantId;
     /**
      * Stable mutation key. Reuse with a different request fingerprint returns 409.
      */
@@ -312,9 +312,9 @@ export type DecideReviewData = {
   };
   headers: {
     /**
-     * Tenant boundary selected by the authenticated actor.
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
      */
-    "X-Tenant-Id": TenantId;
+    "X-Tenant-Id"?: TenantId;
     /**
      * Stable mutation key. Reuse with a different request fingerprint returns 409.
      */

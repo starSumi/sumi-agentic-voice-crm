@@ -26,6 +26,24 @@ test("production API configuration rejects every development fallback", () => {
   }
 });
 
+test("production API configuration accepts fail-closed single-tenant static authentication", () => {
+  const staticAuth = {
+    ...production,
+    AUTH_MODE: "static",
+    AUTH_STATIC_BEARER_TOKEN: "s".repeat(48),
+    AUTH_STATIC_TENANT_ID: "00000000-0000-4000-8000-000000000001",
+    AUTH_STATIC_SUBJECT: "sumi-static-operator",
+  };
+  delete staticAuth.OIDC_ISSUER;
+  delete staticAuth.OIDC_AUDIENCE;
+  delete staticAuth.OIDC_JWKS_URI;
+  delete staticAuth.OIDC_REQUIRED_SCOPE;
+  assert.doesNotThrow(() => validateProductionConfig(staticAuth));
+  assert.throws(() => validateProductionConfig({ ...staticAuth, AUTH_STATIC_BEARER_TOKEN: "short" }), /32 characters/);
+  assert.throws(() => validateProductionConfig({ ...staticAuth, AUTH_STATIC_TENANT_ID: "not-a-uuid" }), /UUID/);
+  assert.throws(() => validateProductionConfig({ ...staticAuth, AUTH_STATIC_SUBJECT: "" }), /AUTH_STATIC_SUBJECT/);
+});
+
 test("production API configuration supports mixed providers and DashScope aliases", () => {
   const mixed = {
     ...production,

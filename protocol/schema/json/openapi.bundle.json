@@ -262,16 +262,16 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "Tenant-scoped OIDC access token. Production verifies the signature through the configured remote JWKS and validates issuer, audience, subject, tenant and required scope."
+        "bearerFormat": "JWT or opaque token",
+        "description": "Tenant-scoped credential. Production supports verified OIDC JWTs or a private single-tenant static bearer token bound to a configured tenant and subject."
       }
     },
     "parameters": {
       "TenantId": {
         "name": "X-Tenant-Id",
         "in": "header",
-        "required": true,
-        "description": "Tenant boundary selected by the authenticated actor.",
+        "required": false,
+        "description": "Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.",
         "schema": {
           "$ref": "#/components/schemas/TenantId"
         }
