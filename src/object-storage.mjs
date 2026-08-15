@@ -70,9 +70,9 @@ export class S3ObjectStorage {
     }
   }
 
-  async downloadUrl(key, { contentType } = {}) {
+  async downloadUrl(key) {
     try {
-      return await this.signer(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key, ResponseContentType: contentType }), { expiresIn: this.expiresIn });
+      return await this.signer(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: this.expiresIn });
     } catch (error) {
       throw storageError("object download signing failed", error);
     }

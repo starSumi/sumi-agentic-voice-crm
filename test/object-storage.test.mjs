@@ -12,7 +12,7 @@ const env = {
   OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: "45",
 };
 
-test("S3 storage uploads private encrypted audio and returns a short-lived signed download", async () => {
+test("S3 storage uploads private encrypted audio and returns an OSS-compatible signed download", async () => {
   const commands = [];
   const client = { send: async (command) => { commands.push(command); return {}; } };
   const signed = [];
@@ -37,6 +37,8 @@ test("S3 storage uploads private encrypted audio and returns a short-lived signe
   assert.equal(persisted.object_key, commands[0].input.Key);
   assert.equal(await storage.downloadUrl(persisted.object_key, { contentType: "audio/mpeg" }), "https://objects.example.test/signed");
   assert.ok(signed[0].command instanceof GetObjectCommand);
+  assert.deepEqual(signed[0].command.input, { Bucket: "private-audio", Key: persisted.object_key });
+  assert.equal("ResponseContentType" in signed[0].command.input, false);
   assert.deepEqual(signed[0].options, { expiresIn: 45 });
 });
 
