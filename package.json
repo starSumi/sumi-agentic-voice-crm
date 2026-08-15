@@ -20,7 +20,7 @@
     "start": "node dist/src/server.mjs",
     "start:outbox": "node dist/src/outbox-worker.mjs",
     "dev": "node src/server.mjs",
-    "test": "node --test",
+    "test": "node --test \"test/*.test.mjs\"",
     "test:postgres": "node scripts/test-postgres.mjs",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/check-protocol-drift.mjs",

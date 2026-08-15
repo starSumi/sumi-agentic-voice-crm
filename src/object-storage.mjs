@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetBucketLocationCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function storageError(message, cause) {
@@ -79,8 +79,8 @@ export class S3ObjectStorage {
   }
 
   async health() {
-    try { await this.client.send(new HeadBucketCommand({ Bucket: this.bucket })); return { ready: true, provider: this.provider }; }
-    catch (error) { return { ready: false, provider: this.provider, reason: error?.name ?? "head_bucket_failed" }; }
+    try { await this.client.send(new GetBucketLocationCommand({ Bucket: this.bucket })); return { ready: true, provider: this.provider }; }
+    catch (error) { return { ready: false, provider: this.provider, reason: error?.name ?? "bucket_location_failed" }; }
   }
 
   objectKey({ tenantId, assetId, kind, contentType }) {

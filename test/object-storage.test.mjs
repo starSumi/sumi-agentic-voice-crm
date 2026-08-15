@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { GetBucketLocationCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { createObjectStorage, persistAudioAsset, persistInputAudio, S3ObjectStorage } from "../src/object-storage.mjs";
 
 const env = {
@@ -44,6 +44,16 @@ test("production object storage fails closed without S3 configuration", () => {
   assert.throws(() => createObjectStorage({ env: { APP_ENV: "production", OBJECT_STORAGE_PROVIDER: "memory" } }), /forbidden/);
   assert.throws(() => createObjectStorage({ env: { APP_ENV: "production", OBJECT_STORAGE_PROVIDER: "s3" } }), /required/);
   assert.throws(() => createObjectStorage({ env: { ...env, APP_ENV: "production", OBJECT_STORAGE_ENDPOINT: "http://objects.example.test" } }), /HTTPS/);
+});
+
+test("S3 storage health uses a bucket-location probe compatible with Aliyun OSS", async () => {
+  const commands = [];
+  const storage = new S3ObjectStorage({
+    env,
+    client: { send: async (command) => { commands.push(command); return {}; } },
+  });
+  assert.deepEqual(await storage.health(), { ready: true, provider: "s3" });
+  assert.ok(commands[0] instanceof GetBucketLocationCommand);
 });
 
 test("input audio is stored privately without returning its bytes", async () => {
