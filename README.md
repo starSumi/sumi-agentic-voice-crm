@@ -11,7 +11,8 @@ This is an owned implementation. It is inspired by the observed boundaries of Sa
 ## Quick start
 
 ```powershell
-cd E:\Zero_Base\playground\sumi-agentic-voice-crm
+git clone https://github.com/starSumi/sumi-agentic-voice-crm.git
+Set-Location .\sumi-agentic-voice-crm
 npm ci
 npm run verify
 npm start
@@ -41,7 +42,7 @@ Open `http://127.0.0.1:4321/` for English or `http://127.0.0.1:4321/zh-cn/` for 
 Connect an MCP client locally with:
 
 ```powershell
-node E:\Zero_Base\playground\.sumi\Sumi-Docs-MCP\dist\index.js serve `
+node ..\.sumi\Sumi-Docs-MCP\dist\index.js serve `
   http://127.0.0.1:4321/_mcp/ `
   --base-url http://127.0.0.1:4321/
 ```

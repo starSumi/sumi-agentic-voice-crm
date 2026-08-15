@@ -21,7 +21,7 @@ npm run docs:preview -- --host 127.0.0.1 --port 4321
 Start Sumi Docs MCP with the machine projection as its corpus and the human site as its URL base:
 
 ```powershell
-node E:\Zero_Base\playground\.sumi\Sumi-Docs-MCP\dist\index.js serve `
+node ..\.sumi\Sumi-Docs-MCP\dist\index.js serve `
   http://127.0.0.1:4321/_mcp/ `
   --base-url http://127.0.0.1:4321/
 ```

@@ -7,9 +7,9 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-**Status:** Accepted for implementation  
-**Date:** 2026-08-14  
-**Decision owner:** protocol-owner  
+**Status:** Accepted for implementation
+**Date:** 2026-08-14
+**Decision owner:** protocol-owner
 **Scope:** REST API requests/responses/errors and their generated consumers
 
 ## Context

@@ -6,8 +6,8 @@ and contract fixtures. Uses `npm run protocol:generate`, then reviews source
 and generated diffs together.
 
 **Write boundary:** `contracts/`, `protocol/`, generated client projections,
-Postman examples and protocol ADRs.  
+Postman examples and protocol ADRs.
 **No authority:** cannot approve its own breaking change, CRM policy, tenant
-authorization, security exception or production release.  
+authorization, security exception or production release.
 **Required handoff:** source commit, generator/lock versions, drift-check output,
 consumer type-check, contract-test result and rollback pair.

@@ -28,18 +28,19 @@ The runtime implements the connected path with deterministic development adapter
 ## Fact classification
 
 - **source-confirmed:** the pinned comparative paths exist at their recorded
-  commits. This implementation round is based on Sumi `main@c9e88d19bf9808205f05380cdcc7ea60a13e93b7`
-  plus an uncommitted working-tree candidate; it is not presented as upstream truth.
-- **runtime-observed:** `npm run verify:release` passed locally on Volta Node
-  `v24.18.0`: 50/50 tests, PostgreSQL 18.4 integration, deterministic 20-file
-  runtime payload, dependency audit, 250-request load drill and provider/outbox
-  fault drill. The exact reports remain under ignored `artifacts/release/`.
+  commits. The Sumi implementation is owned by this repository and is not
+  presented as upstream truth; CI and the versioned handoff bind exact commits.
+- **runtime-observed:** the release-equivalent gates passed locally on Volta
+  Node `v24.18.0`: 65 tests, PostgreSQL 18.4 integration in a disposable
+  container, deterministic 24-file runtime payload, dependency audit, OCI
+  smoke, 250-request load drill and provider/outbox fault drill. The exact
+  reports remain under ignored `artifacts/release/`.
 - **inferred/design:** four-plane ownership, policy-as-code, transactional
   outbox, CloudEvents envelope, review gate and expand/migrate/contract are
   Sumi decisions documented in ADR-0001.
-- **unknown/not run:** production ASR/TTS quality, object-store malware scanning,
-  broad security/staging scans, OCI smoke on this Docker-less host, signed
-  provenance and staging rollback drill.
+- **unknown/not run:** production OIDC, production ASR/TTS quality, object-store
+  malware scanning, broad security scans, signed provenance and staging rollback
+  drill. Local WSL2 staging and OCI evidence do not replace these gates.
 
 ## Rejected interpretations
 
