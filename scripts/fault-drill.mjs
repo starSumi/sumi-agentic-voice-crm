@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { OutboxRelay, outboxConfig } from "../src/outbox-relay.mjs";
+import { isolatedDrillEnv } from "./drill-env.mjs";
 
 async function listen(server) {
   return await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", () => resolve(server.address().port)); });
@@ -13,7 +14,20 @@ const providerPort = await listen(provider);
 const portProbe = createServer();
 const appPort = await listen(portProbe); await new Promise((resolve) => portProbe.close(resolve));
 const app = spawn(process.execPath, ["src/server.mjs"], {
-  env: { ...process.env, PORT: String(appPort), APP_ENV: "test", AUTH_MODE: "development", STORE_PROVIDER: "memory", OBJECT_STORAGE_PROVIDER: "memory", INTENT_PROVIDER: "openai-compatible", OPENAI_API_KEY: "fault-drill", OPENAI_BASE_URL: `http://127.0.0.1:${providerPort}/v1`, PROVIDER_TIMEOUT_MS: "60" },
+  env: isolatedDrillEnv({
+    PORT: String(appPort),
+    APP_ENV: "test",
+    AUTH_MODE: "development",
+    STORE_PROVIDER: "memory",
+    OBJECT_STORAGE_PROVIDER: "memory",
+    ASR_PROVIDER: "mock",
+    INTENT_PROVIDER: "openai-compatible",
+    TTS_PROVIDER: "mock",
+    OPENAI_API_KEY: "fault-drill",
+    OPENAI_BASE_URL: `http://127.0.0.1:${providerPort}/v1`,
+    OPENAI_MODEL: "fault-intent",
+    PROVIDER_TIMEOUT_MS: "60",
+  }),
   stdio: ["ignore", "pipe", "pipe"],
 });
 let diagnostics = ""; app.stderr.on("data", (data) => { diagnostics += data; });

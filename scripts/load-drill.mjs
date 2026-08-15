@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { isolatedDrillEnv } from "./drill-env.mjs";
 
 const requests = Number(process.env.DRILL_REQUESTS || 250);
 const concurrency = Number(process.env.DRILL_CONCURRENCY || 25);
@@ -19,7 +20,19 @@ async function freePort() {
 
 async function startLocal() {
   const port = await freePort();
-  const child = spawn(process.execPath, ["src/server.mjs"], { env: { ...process.env, PORT: String(port), APP_ENV: "test", AUTH_MODE: "development", STORE_PROVIDER: "memory", OBJECT_STORAGE_PROVIDER: "memory" }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, ["src/server.mjs"], {
+    env: isolatedDrillEnv({
+      PORT: String(port),
+      APP_ENV: "test",
+      AUTH_MODE: "development",
+      STORE_PROVIDER: "memory",
+      OBJECT_STORAGE_PROVIDER: "memory",
+      ASR_PROVIDER: "mock",
+      INTENT_PROVIDER: "mock",
+      TTS_PROVIDER: "mock",
+    }),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let diagnostics = "";
   child.stderr.on("data", (data) => { diagnostics += data; });
   await new Promise((resolve, reject) => {
