@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { createAuthenticator } from "./auth.mjs";
 import { CrmStore } from "./store.mjs";
 import { ERROR_CODES, errorEnvelope, requestId, sha256, validateAudioInput, validateIdempotencyKey, validateTextAsk } from "./contracts.mjs";
-import { providerReadiness, synthesize, transcribe, understand } from "./providers.mjs";
+import { providerReadiness, synthesize, transcribe, ttsDefaultFormat, understand } from "./providers.mjs";
 import { createPostgresStore } from "./postgres-store.mjs";
 import { validateEvent, validateProtocol } from "./protocol-validation.mjs";
 import { createObjectStorage, persistAudioAsset, persistInputAudio } from "./object-storage.mjs";
@@ -48,7 +48,7 @@ async function ask(req, res, rid) {
       await store.recordInputAsset({ ...identity, request_id: rid, ...persistedInput, asset: persistedInput.asset });
     }
     const asrStarted = Date.now();
-    const transcriptResult = input.type === "audio" ? await transcribe(input.data, { locale }) : { text: input.text, language: locale.split("-")[0], confidence: 1, provider: "direct", model: "none", duration_ms: 0 };
+    const transcriptResult = input.type === "audio" ? await transcribe(input.data, { locale, contentType: input.content_type }) : { text: input.text, language: locale.split("-")[0], confidence: 1, provider: "direct", model: "none", duration_ms: 0 };
     if (!transcriptResult.text.trim()) throw Object.assign(new Error("no speech detected"), { code: "EMPTY_TRANSCRIPT" });
     await store.checkpointInteraction({
       ...identity, request_id: rid, idempotency_key: key, transcript: transcriptResult,
@@ -72,10 +72,11 @@ async function ask(req, res, rid) {
     }
     base.crm = await store.execute({ ...identity, idempotency_key: key, request_fingerprint: requestFingerprint, intent: u.intent, entities: u.entities, request_id: rid });
     if (output_mode === "audio" || output_mode === "both") {
-      const audioFingerprint = sha256(JSON.stringify({ text: base.answer.text, language: locale, format: "mp3" }));
+      const ttsFormat = ttsDefaultFormat();
+      const audioFingerprint = sha256(JSON.stringify({ text: base.answer.text, language: locale, format: ttsFormat }));
       const audioKey = `${identity.tenant_id}:${key}:audio:${audioFingerprint}`;
       const ttsStarted = Date.now();
-      const generated = await synthesize(base.answer.text, { language: locale, format: "mp3" });
+      const generated = await synthesize(base.answer.text, { language: locale, format: ttsFormat });
       const persisted = await persistAudioAsset(objectStorage, generated, { tenantId: identity.tenant_id, kind: "tts" });
       base.audio = await store.recordTts(audioKey, audioFingerprint, persisted.asset, { ...identity, request_id: rid, object_key: persisted.object_key, byte_length: persisted.byte_length, sha256: persisted.sha256 });
       await store.checkpointInteraction({

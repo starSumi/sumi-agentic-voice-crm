@@ -26,5 +26,6 @@ contentVersion: 0.1.0
 6. Structured redacted logs, secret manager, rotation, no prompts/audio/phone in telemetry by default.
 7. High-risk actions require explicit human confirmation; TTS answer cannot claim a commit before commit event.
 8. Supply chain: lockfile, dependency audit, SBOM, provenance, signed release artifact and protected main branch.
+9. Provider output remains untrusted: intent JSON is validated against the local CRM schema; DashScope ASR enforces its encoded-input limit; TTS inline/downloaded bytes are bounded and magic checked. Signed TTS URLs are restricted to HTTPS allowlisted result hosts, with manual redirect validation and no signed query propagation into API results.
 
-Current automated evidence covers forged/mismatched JWTs, production fail-closed configuration, tenant RLS, MIME spoofing boundaries, private object behavior, dependency audit and repository secret patterns. Prompt-injection, malware, SSRF allowlist, rate-limit, retention/deletion and restore exercises remain C5 holds.
+Current automated evidence covers forged/mismatched JWTs, production fail-closed configuration, tenant RLS, MIME spoofing boundaries, provider signed-URL allowlisting and redirect rejection, bounded provider audio, private object behavior, dependency audit and repository secret patterns. Prompt-injection, malware, broader SSRF, rate-limit, retention/deletion and restore exercises remain C5 holds.

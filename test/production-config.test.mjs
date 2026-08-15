@@ -9,7 +9,7 @@ const production = {
   OIDC_REQUIRED_SCOPE: "crm:write",
   OBJECT_STORAGE_PROVIDER: "s3", OBJECT_STORAGE_BUCKET: "private", OBJECT_STORAGE_REGION: "us-east-1",
   ASR_PROVIDER: "openai-compatible", INTENT_PROVIDER: "openai-compatible", TTS_PROVIDER: "openai-compatible", OPENAI_API_KEY: "test-only",
-  OPENAI_BASE_URL: "https://api.openai.com/v1",
+  OPENAI_BASE_URL: "https://api.openai.com/v1", OPENAI_MODEL: "gpt-4o-test",
   METRICS_BEARER_TOKEN: "x".repeat(32), PUBLIC_BASE_URL: "https://voice.example.test",
 };
 
@@ -24,6 +24,34 @@ test("production API configuration rejects every development fallback", () => {
   for (const [name, value] of [["OPENAI_BASE_URL", "http://api.example.test/v1"], ["OBJECT_STORAGE_ENDPOINT", "http://objects.example.test"]]) {
     assert.throws(() => validateProductionConfig({ ...production, [name]: value }), /HTTPS/);
   }
+});
+
+test("production API configuration supports mixed providers and DashScope aliases", () => {
+  const mixed = {
+    ...production,
+    ASR_PROVIDER: "dashscope",
+    INTENT_PROVIDER: "openai-compatible",
+    TTS_PROVIDER: "dashscope",
+    DASHSCOPE_API_KEY: "dashscope-test-only",
+    DASHSCOPE_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  };
+  assert.doesNotThrow(() => validateProductionConfig(mixed));
+
+  const dashscopeOnly = { ...mixed, INTENT_PROVIDER: "dashscope" };
+  delete dashscopeOnly.OPENAI_API_KEY;
+  delete dashscopeOnly.OPENAI_BASE_URL;
+  delete dashscopeOnly.OPENAI_MODEL;
+  assert.doesNotThrow(() => validateProductionConfig(dashscopeOnly));
+
+  const aliyunAliases = { ...dashscopeOnly, ALIYUN_BASE_APIKEY: "alias-test-only", ALIYUN_BASE_URL: mixed.DASHSCOPE_BASE_URL };
+  delete aliyunAliases.DASHSCOPE_API_KEY;
+  delete aliyunAliases.DASHSCOPE_BASE_URL;
+  assert.doesNotThrow(() => validateProductionConfig(aliyunAliases));
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_API_KEY: "", DASHSCOPE_BASE_URL: "" }), /DASHSCOPE_API_KEY or ALIYUN_BASE_APIKEY/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_TTS_MAX_BYTES: "0" }), /positive integer/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_TTS_MAX_BYTES: String(51 * 1024 * 1024) }), /no greater than/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, PROVIDER_TIMEOUT_MS: "120001" }), /no greater than/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_AUDIO_HOST_SUFFIXES: "not-a-domain" }), /DNS suffixes/);
 });
 
 test("production outbox configuration is independently fail-closed", () => {

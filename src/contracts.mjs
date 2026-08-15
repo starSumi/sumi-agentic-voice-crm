@@ -8,7 +8,7 @@ export const ERROR_CODES = Object.freeze({
   INVALID_REQUEST: [400, false], UNAUTHORIZED: [401, false], FORBIDDEN: [403, false],
   UNSUPPORTED_MEDIA: [415, false], NO_AUDIO_SOURCE: [422, false], EMPTY_TRANSCRIPT: [422, false],
   INTENT_LOW_CONFIDENCE: [202, false], CRM_CONFLICT: [409, true], ASR_TIMEOUT: [504, true],
-  IDEMPOTENCY_CONFLICT: [409, false], UPSTREAM_UNAVAILABLE: [503, true], RATE_LIMITED: [429, true]
+  IDEMPOTENCY_CONFLICT: [409, false], UPSTREAM_UNAVAILABLE: [503, true], PROVIDER_REJECTED: [502, false], RATE_LIMITED: [429, true]
 });
 
 export function requestId() { return `req_${randomUUID().replaceAll("-", "").slice(0, 24)}`; }

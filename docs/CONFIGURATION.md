@@ -11,18 +11,36 @@ Copy `.env.example` only when a launcher or deployment system loads it. Node.js 
 
 ## Effective runtime settings
 
-Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc`, `OBJECT_STORAGE_PROVIDER=s3`, all three providers set to `openai-compatible`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token.
+Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc`, `OBJECT_STORAGE_PROVIDER=s3`, each provider selector set to `openai-compatible` or `dashscope`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token. ASR, intent and TTS may select different adapters; `mock` is rejected in production.
 
 | Boundary | Required production variables |
 | --- | --- |
 | Identity | `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_JWKS_URI`, `OIDC_REQUIRED_SCOPE`; optional tenant-claim, algorithm and JWKS cache controls |
 | Database/privacy | `DATABASE_URL`, base64 32-byte `DATA_ENCRYPTION_KEY`; interaction payloads use AES-256-GCM |
 | Media | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds |
-| Providers | OpenAI-compatible endpoint/key and ASR, intent and TTS model names |
+| Providers | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent |
 | Relay | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls |
 | Operations | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage and provider state |
 
 Run the API with `npm start` and the independent transactional-outbox worker with `npm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
+
+## Provider adapters
+
+| Selector | Required settings | Protocol behavior |
+| --- | --- | --- |
+| `mock` | None; development only | Deterministic ASR, intent and TTS fixtures |
+| `openai-compatible` | `OPENAI_API_KEY`, HTTPS `OPENAI_BASE_URL`; `OPENAI_MODEL` when selected for intent | Audio transcriptions, strict-schema Responses intent extraction, and binary speech output |
+| `dashscope` | `DASHSCOPE_API_KEY`, HTTPS `DASHSCOPE_BASE_URL` | Qwen ASR and JSON Object intent over the compatible Chat Completions API; Qwen TTS over the native generation API |
+
+OpenAI TTS maps the public `voice=default` to `OPENAI_TTS_VOICE` (default `alloy`) and maps public `format=ogg` to the provider's `opus` response format. `OPENAI_TTS_MAX_BYTES` (or the shared `PROVIDER_TTS_MAX_BYTES`) bounds the binary response.
+
+DashScope defaults are `qwen-plus`, `qwen3-asr-flash`, `qwen3-tts-flash`, and voice `Cherry`. `DASHSCOPE_TTS_MAX_BYTES` bounds inline and downloaded audio; the default is 10 MiB. Native TTS currently returns WAV, so `dashscope` rejects other requested formats. The ask flow reads the selected adapter's default and requests WAV automatically. To stay inside the documented Qwen TTS 512-token limit without silently splicing audio, the adapter applies a conservative 512-character preflight; longer or unsupported locales return `INVALID_REQUEST`.
+
+`PROVIDER_TIMEOUT_MS` defaults to 15 seconds and is capped at 120 seconds. Provider audio limits are capped at 50 MiB.
+
+`DASHSCOPE_AUDIO_HOST_SUFFIXES` may extend the built-in allowlist for signed TTS audio downloads. Leave it empty for the official `dashscope-result-*.oss-*.aliyuncs.com` pattern. Every hop is upgraded or restricted to HTTPS, manually redirected, revalidated, size bounded, and checked against audio magic bytes.
+
+Existing deployments may keep `ALIYUN_BASE_APIKEY`, `ALIYUN_BASE_URL`, `ALIYUN_BASE_MODEL`, and the corresponding `ALIYUN_ASR_*`/`ALIYUN_TTS_*` variables. They are aliases; `DASHSCOPE_*` takes precedence when both namespaces are present.
 
 ## Documentation settings
 

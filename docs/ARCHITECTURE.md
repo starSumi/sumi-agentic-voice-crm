@@ -47,7 +47,7 @@ flowchart TB
 
 ## Design patterns
 
-- Hexagonal architecture: provider adapters implement `transcribe`, `understand`, `synthesize`; domain never imports provider SDKs.
+- Hexagonal architecture: the provider facade owns selection, deadlines, circuit isolation and error mapping; mock, OpenAI-compatible and DashScope adapters implement `transcribe`, `understand`, `synthesize`. The domain never imports provider SDKs or vendor protocols.
 - CQRS-lite: query context is separate from command path; commands return aggregate version.
 - Transactional outbox: domain mutation and event record commit atomically; relay is retryable.
 - Saga/compensation: external notification or TTS failure never silently rolls back a committed CRM transaction; status/event records describe compensation.
@@ -72,4 +72,4 @@ authorized CRM query tools; prompt and tool definitions are versioned artifacts.
 
 ## Failure isolation
 
-Each provider call has a timeout, circuit state, and redacted error mapping. The orchestrator persists encrypted interaction checkpoints, never retries a non-idempotent CRM command without its idempotency key, stores audio in private object storage, and relays transactional outbox rows independently. PostgreSQL, OIDC/JWKS, S3-compatible objects and OpenAI-compatible providers are implemented adapters; successful staging connectivity, quality, security review and release approval remain promotion evidence rather than source-code claims.
+Each provider call has one end-to-end timeout, adapter-and-capability circuit state, and redacted error mapping. User/configuration errors do not open a provider circuit. The orchestrator persists encrypted interaction checkpoints, never retries a non-idempotent CRM command without its idempotency key, stores audio in private object storage, and relays transactional outbox rows independently. PostgreSQL, OIDC/JWKS, S3-compatible objects, OpenAI-compatible providers and DashScope are implemented adapters; successful staging connectivity, quality, security review and release approval remain promotion evidence rather than source-code claims.

@@ -30,6 +30,11 @@ Start with the first failing command and its exit code. Preserve the request ID,
 | `EMPTY_TRANSCRIPT` | No usable speech was produced. | Ask for a new recording; do not invent text or execute CRM work. |
 | `INTENT_LOW_CONFIDENCE` | Understanding is ambiguous. | Use the review task and keep CRM state unchanged. |
 | `ASR_TIMEOUT` | Provider or model exceeded its budget. | Retry with the same idempotency context where allowed; inspect provider and queue health. |
+| `RATE_LIMITED` | The selected provider returned HTTP 429. | Respect backoff and quota; do not rotate credentials or bypass the tenant boundary. |
+| `PROVIDER_REJECTED` | The selected provider rejected the request with a non-rate-limit 4xx response, usually because of model, format, locale, or input limits. | Correct the selected adapter or request and retry only after the input/configuration changes. This does not open the circuit. |
+| `UPSTREAM_UNAVAILABLE` | Provider transport, schema, audio or server response failed validation. | Check `/health/ready`, the selected adapter/model and sanitized provider status; never log keys or signed audio query strings. |
+
+With `TTS_PROVIDER=dashscope`, request `format=wav`; other formats fail with `INVALID_REQUEST` because the current Qwen TTS adapter does not transcode. If readiness reports `credentials_or_adapter_missing`, verify the selected provider namespace: `DASHSCOPE_*` is canonical and existing `ALIYUN_*` names are aliases.
 
 ## Documentation language or theme
 

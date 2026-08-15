@@ -288,7 +288,7 @@ components:
           properties:
             code:
               type: string
-              enum: [INVALID_REQUEST, UNAUTHORIZED, FORBIDDEN, UNSUPPORTED_MEDIA, NO_AUDIO_SOURCE, EMPTY_TRANSCRIPT, INTENT_LOW_CONFIDENCE, CRM_CONFLICT, ASR_TIMEOUT, IDEMPOTENCY_CONFLICT, UPSTREAM_UNAVAILABLE, RATE_LIMITED]
+              enum: [INVALID_REQUEST, UNAUTHORIZED, FORBIDDEN, UNSUPPORTED_MEDIA, NO_AUDIO_SOURCE, EMPTY_TRANSCRIPT, INTENT_LOW_CONFIDENCE, CRM_CONFLICT, ASR_TIMEOUT, IDEMPOTENCY_CONFLICT, UPSTREAM_UNAVAILABLE, PROVIDER_REJECTED, RATE_LIMITED]
             message: { type: string, minLength: 1, maxLength: 1000 }
             retryable: { type: boolean }
             details: { type: object, additionalProperties: true }

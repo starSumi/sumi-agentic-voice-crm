@@ -149,6 +149,7 @@ export type ErrorEnvelope = {
       | "ASR_TIMEOUT"
       | "IDEMPOTENCY_CONFLICT"
       | "UPSTREAM_UNAVAILABLE"
+      | "PROVIDER_REJECTED"
       | "RATE_LIMITED";
     message: string;
     retryable: boolean;
