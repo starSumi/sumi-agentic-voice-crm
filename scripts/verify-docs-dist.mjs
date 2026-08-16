@@ -18,7 +18,7 @@ assert.deepEqual(Object.keys(manifest).sort(), [
   "version",
 ]);
 assert.equal(manifest.version, 1);
-assert.equal(manifest.documents.length, 38);
+assert.equal(manifest.documents.length, 40);
 assert.equal(new Set(manifest.documents).size, manifest.documents.length);
 assert.equal(routeMap.version, 1);
 assert.deepEqual(
@@ -60,7 +60,7 @@ for (const document of manifest.documents) {
 const chineseDocuments = manifest.documents.filter((document) =>
   document.startsWith("zh-cn/"),
 );
-assert.equal(chineseDocuments.length, 15);
+assert.equal(chineseDocuments.length, 16);
 for (const document of chineseDocuments) {
   const raw = await readFile(
     resolve(machineRoot, ...document.split("/")),

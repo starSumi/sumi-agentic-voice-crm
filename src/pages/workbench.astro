@@ -1,35 +1,200 @@
-<html lang="zh-CN">
+---
+const apiBaseUrl = import.meta.env.PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
+---
+<html lang="zh-CN" data-api-base-url={apiBaseUrl}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
     <title>Sumi Voice CRM Workbench</title>
     <style>
-      :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#07101d; color:#e8f0ff }
-      body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 10% 0%,#173765,#07101d 45%) }
-      main { width:min(920px,calc(100% - 32px)); display:grid; gap:18px; grid-template-columns:1.2fr .8fr }
-      section { padding:24px; border:1px solid #284467; border-radius:18px; background:#0b1728dd; box-shadow:0 22px 70px #0006 }
-      h1 { margin-top:0; font-size:clamp(1.8rem,5vw,3rem) } label { display:grid; gap:7px; margin:12px 0 }
-      textarea,input,select,button { font:inherit; border-radius:10px; border:1px solid #355477; padding:11px; background:#0a1321; color:inherit }
-      textarea { min-height:140px; resize:vertical } button { cursor:pointer; background:#2d6cdf; border:0; font-weight:700 }
-      button.secondary { background:#1a2b42 } button:disabled { opacity:.5; cursor:not-allowed }
-      .actions { display:flex; gap:10px; flex-wrap:wrap } pre { white-space:pre-wrap; word-break:break-word; min-height:180px; color:#a9c7f7 }
-      .status { color:#80dfc4; min-height:1.5em } @media(max-width:760px){ main{grid-template-columns:1fr} }
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        background: #eef1f4;
+        color: #17202a;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: #eef1f4; }
+      .app-header {
+        min-height: 64px;
+        padding: 12px max(20px, calc((100% - 1180px) / 2));
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        border-bottom: 1px solid #c9d0d8;
+        background: #ffffff;
+      }
+      .app-header h1 { margin: 0; font-size: 1.2rem; font-weight: 700; }
+      .mode {
+        flex: 0 0 auto;
+        padding: 4px 8px;
+        border: 1px solid #9aa6b2;
+        border-radius: 4px;
+        color: #45515d;
+        font-size: .78rem;
+        font-weight: 650;
+      }
+      main {
+        width: min(1180px, 100%);
+        min-height: calc(100vh - 64px);
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+        background: #ffffff;
+        border-inline: 1px solid #d6dce2;
+      }
+      section { min-width: 0; padding: 24px; }
+      section + section { border-left: 1px solid #d6dce2; }
+      h2 { margin: 0 0 18px; font-size: 1rem; }
+      h3 { margin: 0; font-size: .95rem; }
+      label { display: grid; gap: 6px; margin: 0 0 14px; color: #38434e; font-size: .88rem; font-weight: 600; }
+      textarea, input, select, button {
+        min-width: 0;
+        min-height: 40px;
+        font: inherit;
+        border-radius: 6px;
+        border: 1px solid #aeb8c2;
+      }
+      textarea, input, select { width: 100%; padding: 9px 10px; background: #ffffff; color: #17202a; }
+      textarea { min-height: 132px; resize: vertical; font-weight: 400; line-height: 1.5; }
+      input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, .review:focus-visible {
+        outline: 3px solid #7eb8f2;
+        outline-offset: 2px;
+      }
+      button {
+        min-width: 112px;
+        padding: 8px 14px;
+        cursor: pointer;
+        border-color: #1768ac;
+        background: #1768ac;
+        color: #ffffff;
+        font-weight: 700;
+      }
+      button.secondary { border-color: #64717e; background: #ffffff; color: #26313b; }
+      button.danger { border-color: #a74444; background: #ffffff; color: #8c2929; }
+      button:disabled { cursor: not-allowed; opacity: .52; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      .actions > * { flex: 1 1 132px; }
+      .status {
+        min-height: 40px;
+        margin: 18px 0 0;
+        padding: 9px 10px;
+        border-left: 3px solid #5b7288;
+        background: #f1f4f6;
+        color: #33404c;
+        line-height: 1.4;
+      }
+      .status[data-phase="error"] { border-color: #b13a3a; color: #812a2a; }
+      .status[data-phase="awaiting_review"] { border-color: #a36a13; color: #72500e; }
+      .status[data-phase="completed"] { border-color: #2b7650; color: #245f43; }
+      .result {
+        min-height: 180px;
+        max-height: 380px;
+        margin: 0;
+        padding: 14px;
+        overflow: auto;
+        border: 1px solid #c9d0d8;
+        border-radius: 4px;
+        background: #f7f8fa;
+        color: #26313b;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .review {
+        margin-top: 20px;
+        padding: 16px 0 0;
+        border-top: 3px solid #a36a13;
+      }
+      .review-summary { margin: 8px 0; color: #4d3b1d; }
+      .review-meta { margin: 0 0 12px; color: #5c6670; font-size: .82rem; word-break: break-word; }
+      .review-proposal { min-height: 96px; max-height: 220px; margin-bottom: 14px; }
+      .correction { min-height: 104px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .84rem; }
+      .field-error { min-height: 1.35em; margin: -7px 0 12px; color: #9b3030; font-size: .84rem; }
+      .audio-wrap { display: grid; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #d6dce2; }
+      audio { width: 100%; min-height: 40px; }
+      a { color: #075d9f; overflow-wrap: anywhere; }
+      .fallback { margin: 16px 0 0; color: #812a2a; }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      @media (max-width: 760px) {
+        .app-header { min-height: 56px; padding: 10px 16px; }
+        main { min-height: calc(100vh - 56px); grid-template-columns: minmax(0, 1fr); border: 0; }
+        section { padding: 20px 16px; }
+        section + section { border-left: 0; border-top: 1px solid #d6dce2; }
+        .actions > * { flex-basis: 100%; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+      }
     </style>
   </head>
   <body>
+    <header class="app-header">
+      <h1>Sumi Voice CRM</h1>
+      <span class="mode">同步处理</span>
+    </header>
     <main>
-      <section>
-        <p>Agent-centric CRM · generated client</p><h1>语音 / 文本工作台</h1>
+      <section aria-labelledby="workbench-title">
+        <h2 id="workbench-title">CRM 工作台</h2>
         <form id="ask-form">
-          <label>Tenant <input id="tenant" value="tenant_demo" /></label>
-          <label>Access token <input id="token" type="password" value="test-actor" /></label>
-          <label>Locale <select id="locale"><option>zh-CN</option><option>en-US</option><option>hi-IN</option><option>te-IN</option></select></label>
-          <label>问题或 CRM 指令 <textarea id="text">把 Acme renewal 移动到 negotiation 阶段</textarea></label>
-          <div class="actions"><button type="submit">文本 Ask</button><button type="button" class="secondary" id="record">开始录音</button></div>
+          <label for="tenant">Tenant
+            <input id="tenant" value="tenant_demo" autocomplete="organization" required />
+          </label>
+          <label for="token">Access token
+            <input id="token" type="password" value="" autocomplete="off" placeholder="Bearer token" required />
+          </label>
+          <label for="locale">Locale
+            <select id="locale">
+              <option>zh-CN</option>
+              <option>en-US</option>
+              <option>hi-IN</option>
+              <option>te-IN</option>
+            </select>
+          </label>
+          <label for="text">问题或 CRM 指令
+            <textarea id="text" placeholder="输入查询或待确认的 CRM 操作"></textarea>
+          </label>
+          <div class="actions">
+            <button type="submit" id="submit-ask">文本 Ask</button>
+            <button type="button" class="secondary" id="record">开始录音</button>
+          </div>
         </form>
-        <p class="status" id="status">就绪</p>
+        <p class="status" id="status" role="status" aria-live="polite" data-phase="idle">就绪</p>
       </section>
-      <section><h2>结构化结果</h2><pre id="result">等待输入…</pre><audio id="audio" controls hidden></audio></section>
+      <section aria-labelledby="result-title">
+        <h2 id="result-title">结构化结果</h2>
+        <pre class="result" id="result" role="log" aria-live="polite">等待输入…</pre>
+        <div class="review" id="review-panel" tabindex="-1" hidden>
+          <h3>需要人工确认</h3>
+          <p class="review-summary" id="review-summary">服务端已暂停 CRM 写入。</p>
+          <p class="review-meta" id="review-meta"></p>
+          <pre class="result review-proposal" id="review-understanding"></pre>
+          <label for="review-correction">校正 JSON（可选）
+            <textarea class="correction" id="review-correction" spellcheck="false" placeholder='{"entities": {}}'></textarea>
+          </label>
+          <p class="field-error" id="review-error" role="alert" aria-live="assertive"></p>
+          <div class="actions">
+            <button type="button" id="approve-review">确认执行</button>
+            <button type="button" class="danger" id="reject-review">拒绝提议</button>
+          </div>
+        </div>
+        <div class="audio-wrap" id="audio-wrap" hidden>
+          <strong>语音结果</strong>
+          <audio id="audio" controls preload="metadata"></audio>
+          <a id="audio-link" target="_blank" rel="noreferrer">打开音频</a>
+        </div>
+        <p class="fallback" id="fallback" hidden>响应无法安全映射，已停止自动处理。</p>
+      </section>
     </main>
     <script src="../scripts/workbench.ts"></script>
   </body>

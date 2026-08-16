@@ -30,6 +30,11 @@ const englishDocuments = [
     "adr-0001-agentic-crm.md",
     "/adr-0001-agentic-crm/",
   ],
+  [
+    "ADR-0004-runtime-agent-boundary.md",
+    "adr-0004-runtime-agent-boundary.md",
+    "/adr-0004-runtime-agent-boundary/",
+  ],
   ["TROUBLESHOOTING.md", "troubleshooting.md", "/troubleshooting/"],
   ["LOCALIZATION.md", "localization.md", "/localization/"],
 ];
@@ -49,6 +54,7 @@ const chineseDocuments = [
   ["troubleshooting.md", "/zh-cn/troubleshooting/"],
   ["localization.md", "/zh-cn/localization/"],
   ["adr-0001-agentic-crm.md", "/zh-cn/adr-0001-agentic-crm/"],
+  ["adr-0004-runtime-agent-boundary.md", "/zh-cn/adr-0004-runtime-agent-boundary/"],
   ["inspiration.md", "/zh-cn/inspiration/"],
 ];
 

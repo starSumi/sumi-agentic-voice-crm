@@ -13,9 +13,9 @@ This is an owned implementation. It is inspired by the observed boundaries of Sa
 ```powershell
 git clone https://github.com/starSumi/sumi-agentic-voice-crm.git
 Set-Location .\sumi-agentic-voice-crm
-npm ci
-npm run verify
-npm start
+pnpm install --frozen-lockfile
+pnpm verify
+pnpm start
 ```
 
 Then:
@@ -26,30 +26,45 @@ Invoke-RestMethod http://localhost:8080/health/ready
 
 The mock provider accepts base64 audio containing UTF-8 text prefixed with `MOCK_AUDIO:`. See the Postman collection and [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
-For source-level iteration without building `dist/`, use `npm run dev`. Machine-specific `.env`, caches, logs, sessions, reports, and generated evidence stay ignored; reviewed development guides, `.env.example`, `.agent/` governance, and version constraints stay in Git. Live agent sessions stay outside the checkout under `CODEX_HOME`, `XDG_STATE_HOME`, or `LOCALAPPDATA`; `npm run agent:resume` prints the selected path.
+For source-level iteration without building `dist/`, use `pnpm dev`. Machine-specific `.env`, caches, logs, sessions, reports, and generated evidence stay ignored; reviewed development guides, `.env.example`, `.agent/` governance, and version constraints stay in Git. Live agent sessions stay outside the checkout under `CODEX_HOME`, `XDG_STATE_HOME`, or `LOCALAPPDATA`; `pnpm agent:resume` prints the selected path.
+
+On Linux or WSL2, an optional pinned Nix development shell provides Node,
+PostgreSQL client/server tools, Docker/Compose clients, and the repository's
+build utilities without replacing pnpm or the Docker release image:
+
+```bash
+nix develop
+pnpm install --frozen-lockfile
+pnpm verify
+```
+
+Entering the shell never installs dependencies or starts services. The
+repository `pnpm-lock.yaml`, pnpm pin, Dockerfile, and CI remain canonical.
 
 ## Documentation for people and agents
 
 `docs/` is the single reviewed source. Astro and Starlight render it for people; the same build publishes bounded Markdown, route metadata, and OpenAPI under `/_mcp/` for Sumi Docs MCP.
 
 ```powershell
-npm run docs:build
-npm run docs:preview -- --host 127.0.0.1 --port 4321
+pnpm docs:build
+pnpm docs:preview -- --host 127.0.0.1 --port 4321
 ```
 
 Open `http://127.0.0.1:4321/` for English or `http://127.0.0.1:4321/zh-cn/` for Simplified Chinese. The site includes light, dark, and automatic themes.
 
-Connect an MCP client locally with:
+The repository-level [`.mcp.json`](.mcp.json) exposes the reviewed Markdown and
+generated OpenAPI bundle through the `sumi-docs-mcp` command. Build or install
+the sibling `Sumi-Docs-MCP` checkout, put its launcher on `PATH`, then let an MCP
+client load the project configuration. The equivalent manual command is:
 
-```powershell
-node ..\.sumi\Sumi-Docs-MCP\dist\index.js serve `
-  http://127.0.0.1:4321/_mcp/ `
-  --base-url http://127.0.0.1:4321/
+```shell
+sumi-docs-mcp serve docs \
+  --openapi protocol/schema/json/openapi.bundle.json
 ```
 
-The [agent development partner guide](docs/AGENT-GUIDE.md) defines discovery order, evidence priority, safety boundaries, and acceptance questions. `npm run verify:mcp` exercises all four MCP tools against the generated corpus and every published page URL.
+The [agent development partner guide](docs/AGENT-GUIDE.md) defines discovery order, evidence priority, safety boundaries, and acceptance questions. `pnpm verify:mcp` exercises all four MCP tools against the generated corpus and every published page URL.
 
-For ongoing maintenance, run `npm run agent:health` and `npm run agent:resume` at session start. The [maintainer and session continuity guide](docs/MAINTENANCE.md) defines the reviewed handoff cursor, external runtime state, CI operations agent, recovery, and human approval boundary.
+For ongoing maintenance, run `pnpm agent:health` and `pnpm agent:resume` at session start. The [maintainer and session continuity guide](docs/MAINTENANCE.md) defines the reviewed handoff cursor, external runtime state, CI operations agent, recovery, and human approval boundary.
 
 ## Architecture in one line
 
@@ -63,6 +78,8 @@ For ongoing maintenance, run `npm run agent:health` and `npm run agent:resume` a
 - [API](docs/API.md): identity, tenancy, idempotency, endpoint, and error contract.
 - [Agent guide](docs/AGENT-GUIDE.md): use the corpus as a development partner.
 - [ADR-0001](docs/ADR-0001-agentic-crm.md): decision, alternatives, ownership and rollback.
+- [ADR-0003](docs/ADR-0003-ag-ui-compatibility.md): optional AG-UI adapter boundary and adoption gates.
+- [ADR-0004](docs/ADR-0004-runtime-agent-boundary.md): runtime core, Agent plane, event state, attachments, extensions and transport choices.
 - [ARCHITECTURE](docs/ARCHITECTURE.md): boundaries, design patterns, lifecycle and failure paths.
 - [DATA-MODEL](docs/DATA-MODEL.md): tables, fields, indexes, invariants and retention.
 - [EVENTS-AUDIT](docs/EVENTS-AUDIT.md): event envelope, audit trail, trace/correlation and replay.

@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 const outputRoot = resolve("artifacts", "docs-site");
 const mcpEntry = process.env.SUMI_DOCS_MCP_ENTRY
   ? resolve(process.env.SUMI_DOCS_MCP_ENTRY)
-  : resolve("..", ".sumi", "Sumi-Docs-MCP", "dist", "index.js");
+  : resolve("..", "Sumi-Docs-MCP", "dist", "index.js");
 await access(mcpEntry);
 await access(resolve(outputRoot, "_mcp", "sumi-docs-manifest.json"));
 
@@ -120,7 +120,7 @@ try {
   const parseToolResult = (id) =>
     JSON.parse(responses.get(id)?.result?.content?.[0]?.text ?? "null");
   const listed = parseToolResult(2);
-  assert.equal(listed.length, 38);
+  assert.equal(listed.length, 40);
   assert.equal(
     listed.find(({ path }) => path === "agent-guide.md")?.url,
     `${baseUrl}agent-guide`,
