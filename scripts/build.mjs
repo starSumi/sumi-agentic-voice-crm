@@ -14,6 +14,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 
 const DEFAULT_RUNTIME_SOURCES = [
   "src/application/commands.mjs",
+  "src/application/attachments.mjs",
   "src/application/index.mjs",
   "src/application/mutation-policy.mjs",
   "src/application/services.mjs",
