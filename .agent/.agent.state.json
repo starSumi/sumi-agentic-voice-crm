@@ -1,6 +1,6 @@
 {
   "schema_version": "sumi.agent-state.v1",
-  "updated_at": "2026-08-16T20:03:43+08:00",
+  "updated_at": "2026-08-16T00:00:00Z",
   "updated_by": "continuity-supervisor",
   "phase_status": {
     "P0-discover-and-scope": "completed",

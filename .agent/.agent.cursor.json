@@ -1,6 +1,6 @@
 {
   "schema_version": "sumi.agent-cursor.v1",
-  "captured_at": "2026-08-16T20:03:43+08:00",
+  "captured_at": "2026-08-16T00:00:00Z",
   "captured_by": "continuity-supervisor",
   "source": {
     "repository": "starSumi/sumi-agentic-voice-crm",
@@ -11,7 +11,7 @@
   "control_plane": {
     "phase": "P3-service-and-provider-implementation",
     "checkpoint": "C3",
-    "state_updated_at": "2026-08-16T20:03:43+08:00"
+    "state_updated_at": "2026-08-16T00:00:00Z"
   },
   "last_verified_ci": {
     "workflow": "ci",
