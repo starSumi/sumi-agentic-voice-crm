@@ -5,8 +5,12 @@ import { test } from "node:test";
 test("production image installs only the lockfile production closure and runs dist", async () => {
   const dockerfile = await readFile("Dockerfile", "utf8");
 
-  assert.match(dockerfile, /RUN npm ci --omit=dev --ignore-scripts/);
-  assert.doesNotMatch(dockerfile, /RUN npm ci --ignore-scripts/);
+  assert.match(dockerfile, /corepack enable pnpm && corepack install/);
+  assert.match(
+    dockerfile,
+    /pnpm install --prod --frozen-lockfile --ignore-scripts/,
+  );
+  assert.doesNotMatch(dockerfile, /pnpm install --frozen-lockfile --ignore-scripts/);
   assert.match(
     dockerfile,
     /COPY --from=build --chown=node:node \/workspace\/dist \.\/dist/,

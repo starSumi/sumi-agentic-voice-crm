@@ -10,9 +10,11 @@
 
 <!-- Commands, exit codes, test names, and relevant runtime evidence. -->
 
-- [ ] `npm run verify`
-- [ ] `npm run verify:mcp` when docs, API, routing, or agent onboarding changed
-- [ ] `npm run sbom` and `npm run audit:deps` when dependencies or release inputs changed
+- [ ] `pnpm run verify`
+- [ ] Contract consumers use only the generated API client; `pnpm run contract:consumer-check` is clean
+- [ ] Contract changes regenerated the SDK and passed `pnpm run protocol:check` plus `pnpm run protocol:typecheck`
+- [ ] `pnpm run verify:mcp` when docs, API, routing, or agent onboarding changed
+- [ ] `pnpm run sbom` and `pnpm run audit:deps` when dependencies or release inputs changed
 - [ ] `dist/BUILD-MANIFEST.json` verifies after any build-chain change
 - [ ] New or changed behavior has regression coverage
 

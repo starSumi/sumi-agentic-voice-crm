@@ -16,21 +16,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Set up the package manager pinned in package.json
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
-      - run: npm run verify
+      - run: pnpm run verify
       - name: Run bounded load and dependency-fault drills
         run: |
-          npm run drill:load
-          npm run drill:fault
+          pnpm run drill:load
+          pnpm run drill:fault
       - name: Build and smoke-test the production container
-        run: npm run smoke:docker
+        run: pnpm run smoke:docker
       - name: Generate the runtime SPDX SBOM
-        run: npm run sbom
+        run: pnpm run sbom
       - name: Validate the SPDX SBOM
         run: node -e "const s=require('./artifacts/release/sbom.spdx.json');if(s.spdxVersion!=='SPDX-2.3')process.exit(1)"
       - name: Upload reviewed build evidence
@@ -44,4 +47,4 @@ jobs:
             artifacts/release/fault-drill.json
           if-no-files-found: error
           retention-days: 30
-      - run: npm run audit:deps
+      - run: pnpm run audit:deps

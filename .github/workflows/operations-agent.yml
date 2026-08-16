@@ -41,21 +41,29 @@ jobs:
           fetch-depth: 0
 
       - id: setup
-        name: Set up Node.js
+        name: Set up the package manager pinned in package.json
+        if: steps.checkout.outcome == 'success'
+        continue-on-error: true
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - id: setup-node
+        name: Set up the pinned Node.js runtime
         if: steps.checkout.outcome == 'success'
         continue-on-error: true
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - id: install
         name: Install dependencies for scheduled verification
         if: >-
           github.event_name != 'workflow_run' &&
-          steps.setup.outcome == 'success'
+          steps.setup.outcome == 'success' &&
+          steps.setup-node.outcome == 'success'
         continue-on-error: true
-        run: npm ci
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - id: verify
         name: Verify the default branch
@@ -63,13 +71,13 @@ jobs:
           github.event_name != 'workflow_run' &&
           steps.install.outcome == 'success'
         continue-on-error: true
-        run: npm run verify
+        run: pnpm run verify
 
       - id: health
         name: Check maintainer and handoff freshness
-        if: steps.setup.outcome == 'success'
+        if: steps.setup.outcome == 'success' && steps.setup-node.outcome == 'success'
         continue-on-error: true
-        run: npm run agent:health
+        run: pnpm run agent:health
 
       - id: result
         name: Resolve the operations result
@@ -82,6 +90,7 @@ jobs:
           UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          SETUP_NODE_OUTCOME: ${{ steps.setup-node.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           HEALTH_OUTCOME: ${{ steps.health.outcome }}
@@ -100,7 +109,7 @@ jobs:
           fi
 
           conclusion="success"
-          if [[ "$CHECKOUT_OUTCOME" != "success" || "$SETUP_OUTCOME" != "success" ]]; then
+          if [[ "$CHECKOUT_OUTCOME" != "success" || "$SETUP_OUTCOME" != "success" || "$SETUP_NODE_OUTCOME" != "success" ]]; then
             conclusion="failure"
           elif [[ "$EVENT_NAME" != "workflow_run" && ("$INSTALL_OUTCOME" != "success" || "$base_result" != "success") ]]; then
             conclusion="failure"
@@ -110,7 +119,7 @@ jobs:
             conclusion="failure"
           fi
 
-          reason="upstream=${base_result}; checkout=${CHECKOUT_OUTCOME}; setup=${SETUP_OUTCOME}; install=${INSTALL_OUTCOME}; verify=${VERIFY_OUTCOME}; health=${HEALTH_OUTCOME}"
+          reason="upstream=${base_result}; checkout=${CHECKOUT_OUTCOME}; setup-pnpm=${SETUP_OUTCOME}; setup-node=${SETUP_NODE_OUTCOME}; install=${INSTALL_OUTCOME}; verify=${VERIFY_OUTCOME}; health=${HEALTH_OUTCOME}"
           run_url="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}"
           echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
           echo "reason=$reason" >> "$GITHUB_OUTPUT"

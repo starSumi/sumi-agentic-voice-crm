@@ -9,7 +9,7 @@ const executables = ["initdb", "pg_ctl", "createdb", "dropdb", "psql"];
 for (const executable of executables) {
   const probe = spawnSync(executable, ["--version"], { encoding: "utf8", shell: false });
   if (probe.error || probe.status !== 0) {
-    throw new Error(`${executable} is required for npm run test:postgres`);
+    throw new Error(`${executable} is required for pnpm run test:postgres`);
   }
 }
 

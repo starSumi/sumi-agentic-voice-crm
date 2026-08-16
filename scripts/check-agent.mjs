@@ -1,4 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
+import { containsRepositoryCodeExecution } from "./workflow-safety.mjs";
 
 const agentRoot = ".agent";
 const agentManifest = JSON.parse(
@@ -213,11 +214,11 @@ for (const marker of [
     throw new Error(`operations freshness guard missing: ${marker}`);
   }
 }
-if (/actions\/checkout|\bnpm\s|node\s+scripts\//.test(authorizeJob)) {
+if (containsRepositoryCodeExecution(authorizeJob)) {
   throw new Error("freshness authorization job must not execute repository code");
 }
 const reconcileJob = operationsWorkflow.slice(reconcileStart);
-if (/actions\/checkout|\bnpm\s|node\s+scripts\//.test(reconcileJob)) {
+if (containsRepositoryCodeExecution(reconcileJob)) {
   throw new Error("issue-write reconciliation job must not execute repository code");
 }
 
@@ -243,10 +244,10 @@ for (const marker of [
   "github.ref == 'refs/heads/main'",
   "manifest.release_status",
   "C6 evidence",
-  "npm run verify",
-  "npm run smoke:docker",
-  "npm run audit:deps",
-  "npm run sbom",
+  "pnpm run verify",
+  "pnpm run smoke:docker",
+  "pnpm run audit:deps",
+  "pnpm run sbom",
   "environment: production-release",
   "id-token: write",
   "attestations: write",
@@ -259,7 +260,7 @@ for (const marker of [
   }
 }
 const ciWorkflow = await readFile(".github/workflows/ci.yml", "utf8");
-if (!ciWorkflow.includes("npm run smoke:docker")) {
+if (!ciWorkflow.includes("pnpm run smoke:docker")) {
   throw new Error("CI must run the Docker production-image smoke");
 }
 const workflowFiles = (await readdir(".github/workflows")).filter((file) =>

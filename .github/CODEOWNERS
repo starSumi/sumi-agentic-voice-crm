@@ -1,5 +1,9 @@
 * @starSumi
 /contracts/ @starSumi
+/protocol/ @starSumi
+/packages/api-client/src/generated/ @starSumi
+/src/scripts/ @starSumi
+/scripts/check-contract-consumers.mjs @starSumi
 /db/ @starSumi
 /.agent/ @starSumi
 /docs/ @starSumi
@@ -10,7 +14,7 @@
 /scripts/agent-incident.mjs @starSumi
 /scripts/build.mjs @starSumi
 /package.json @starSumi
-/package-lock.json @starSumi
+/pnpm-lock.yaml @starSumi
 /.dockerignore @starSumi
 /.npmignore @starSumi
 /.vercelignore @starSumi

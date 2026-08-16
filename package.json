@@ -9,44 +9,46 @@
     "dist/"
   ],
   "engines": {
-    "node": ">=24.18.0"
+    "node": ">=24.18.0",
+    "pnpm": "10.33.4"
   },
-  "packageManager": "npm@11.15.0",
+  "packageManager": "pnpm@10.33.4",
   "volta": {
-    "node": "24.18.0",
-    "npm": "11.15.0"
+    "node": "24.18.0"
   },
   "scripts": {
     "start": "node dist/src/server.mjs",
     "start:outbox": "node dist/src/outbox-worker.mjs",
     "dev": "node src/server.mjs",
+    "lint": "oxlint --deny-warnings .",
     "test": "node --test \"test/*.test.mjs\"",
     "test:postgres": "node scripts/test-postgres.mjs",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/check-protocol-drift.mjs",
     "protocol:typecheck": "tsc -p packages/api-client/tsconfig.json",
+    "contract:consumer-check": "node scripts/check-contract-consumers.mjs",
     "check": "node scripts/check.mjs",
     "check:agent": "node scripts/check-agent.mjs && node scripts/agent-ops.mjs check",
     "agent:health": "node scripts/agent-ops.mjs health",
     "agent:resume": "node scripts/agent-ops.mjs resume",
     "agent:snapshot": "node scripts/agent-ops.mjs snapshot",
     "agent:incident": "node scripts/agent-incident.mjs",
-    "build": "npm run protocol:check && node scripts/build.mjs",
+    "build": "pnpm run protocol:check && node scripts/build.mjs",
     "check:dist": "node -e \"import('./scripts/build.mjs').then(({verifyBuildManifest})=>verifyBuildManifest('dist'))\"",
-    "sbom": "node -e \"require('node:fs').mkdirSync('artifacts/release',{recursive:true})\" && npm sbom --sbom-format=spdx --omit=dev > artifacts/release/sbom.spdx.json",
-    "smoke:dist": "npm run build && node scripts/smoke-dist.mjs",
+    "sbom": "node scripts/generate-sbom.mjs",
+    "smoke:dist": "pnpm run build && node scripts/smoke-dist.mjs",
     "smoke:docker": "node scripts/smoke-docker.mjs",
     "docs:dev": "astro dev",
     "docs:check": "astro check",
     "docs:build": "astro check && astro build && node scripts/verify-docs-dist.mjs",
     "docs:preview": "astro preview",
     "verify:mcp": "node scripts/verify-docs-mcp.mjs",
-    "verify": "npm run protocol:check && npm run protocol:typecheck && npm test && npm run test:postgres && npm run check && npm run check:agent && npm run smoke:dist && npm run check:dist && npm run docs:build",
-    "audit:deps": "npm audit --audit-level=high --registry=https://registry.npmjs.org",
+    "verify": "pnpm run lint && pnpm run protocol:check && pnpm run protocol:typecheck && pnpm run contract:consumer-check && pnpm test && pnpm run test:postgres && pnpm run check && pnpm run check:agent && pnpm run smoke:dist && pnpm run check:dist && pnpm run docs:build",
+    "audit:deps": "pnpm audit --audit-level=high --registry=https://registry.npmjs.org",
     "drill:load": "node scripts/load-drill.mjs",
     "drill:fault": "node scripts/fault-drill.mjs",
-    "verify:release": "npm run audit:deps && npm run verify && npm run drill:load && npm run drill:fault",
-    "prepack": "npm run build"
+    "verify:release": "pnpm run audit:deps && pnpm run verify && pnpm run drill:load && pnpm run drill:fault",
+    "prepack": "pnpm run build"
   },
   "license": "Apache-2.0",
   "devDependencies": {
@@ -54,6 +56,7 @@
     "@astrojs/starlight": "^0.41.7",
     "@hey-api/openapi-ts": "0.99.0",
     "astro": "^7.2.2",
+    "oxlint": "1.76.0",
     "sharp": "^0.35.3",
     "typescript": "^5.9.3",
     "yaml": "^2.9.0"
@@ -61,12 +64,19 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1111.0",
     "@aws-sdk/s3-request-presigner": "3.1111.0",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
+    "@opentelemetry/resources": "2.10.0",
+    "@opentelemetry/sdk-trace-base": "2.10.0",
+    "@opentelemetry/sdk-trace-node": "2.10.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "jose": "6.2.8",
     "pg": "8.16.3"
   },
-  "overrides": {
-    "js-yaml": "4.3.1"
+  "pnpm": {
+    "overrides": {
+      "js-yaml": "4.3.1"
+    }
   }
 }
