@@ -31,18 +31,19 @@ The runtime implements the connected path with deterministic development adapter
 - **source-confirmed:** the pinned comparative paths exist at their recorded
   commits. The Sumi implementation is owned by this repository and is not
   presented as upstream truth; CI and the versioned handoff bind exact commits.
-- **runtime-observed:** the local feature-branch gates passed on Node
-  `v24.18.0` and pnpm `10.33.4`: 122 non-PostgreSQL tests, protocol and
-  consumer checks, deterministic runtime payload, dependency audit, OCI smoke,
-  documentation build, 250-request load drill and provider/outbox fault drill.
-  The real PostgreSQL integration is intentionally reserved for remote CI on
-  the final reviewed commit. The exact reports remain under ignored
-  `artifacts/release/`.
+- **runtime-observed:** local gates passed on Node `v24.18.0` and pnpm
+  `10.33.4`, and CI run [31945918723](https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31945918723)
+  passed on reviewed commit `8355cdf4b26b91931b795832de4d6a9b825646af`:
+  122 tests, real PostgreSQL migration/RLS/transaction integration, protocol
+  and consumer checks, deterministic runtime payload, dependency audit, OCI
+  smoke, documentation build, 250-request load drill and provider/outbox fault
+  drill. CI uploaded build evidence with archive digest
+  `sha256:dccc0302d9a3d09edab02d4fdcbd6ed5c7eacb1e654df56aa4e2034bfb3bbd99`.
 - **inferred/design:** four-plane ownership, policy-as-code, transactional
   outbox, CloudEvents envelope, review gate and expand/migrate/contract are
   Sumi decisions documented in ADR-0001.
-- **unknown/not run:** remote PostgreSQL integration for the final commit,
-  production OIDC, production ASR/TTS quality, object-store malware scanning,
+- **unknown/not run:** production OIDC, production ASR/TTS quality,
+  object-store malware scanning,
   broad security scans, signed provenance and staging rollback drill. Local WSL2
   staging and OCI evidence do not replace these gates.
 

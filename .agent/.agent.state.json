@@ -1,13 +1,13 @@
 {
   "schema_version": "sumi.agent-state.v1",
-  "updated_at": "2026-08-14T21:26:46+08:00",
+  "updated_at": "2026-08-16T20:03:43+08:00",
   "updated_by": "continuity-supervisor",
   "phase_status": {
     "P0-discover-and-scope": "completed",
     "P1-adr-and-architecture": "completed",
     "P2-domain-and-contract-hardening": "completed",
-    "P3-service-and-provider-implementation": "completed",
-    "P4-crm-safety-and-persistence": "in_progress",
+    "P3-service-and-provider-implementation": "in_progress",
+    "P4-crm-safety-and-persistence": "completed",
     "P5-integration-observability-and-resilience": "planned",
     "P6-verification-security-and-quality": "planned",
     "P7-release-and-operations": "planned",
@@ -16,8 +16,8 @@
   "checkpoint_status": {
     "C0": {"status": "completed", "evidence": ["docs/SOURCE-EVIDENCE.md", "docs/ADR-0001-agentic-crm.md"]},
     "C1": {"status": "completed", "evidence": ["contracts/openapi.yaml", "contracts/events.yaml", "postman/voice-crm.postman_collection.json", "pnpm run check"]},
-    "C2": {"status": "in_progress", "evidence": ["db/migrations/001_initial.sql", "src/store.mjs", "test/contract.test.mjs"], "gap": "real PostgreSQL transaction/RLS and two-tenant integration not run"},
-    "C3": {"status": "planned", "evidence": ["src/providers.mjs", "test/contract.test.mjs"], "gap": "real ASR/TTS quality and media security not run"},
+    "C2": {"status": "completed", "evidence": ["db/migrations/001_initial.sql", "src/store.mjs", "test/contract.test.mjs", "CI run 31945918723 job 95161718522", "build evidence artifact 9263273673"], "result": "real PostgreSQL transaction/RLS and two-tenant integration passed on reviewed commit 8355cdf4b26b91931b795832de4d6a9b825646af"},
+    "C3": {"status": "in_progress", "evidence": ["src/providers.mjs", "test/contract.test.mjs", "CI run 31945918723 job 95161718522"], "gap": "approved real ASR/TTS quality, media security, and staging provider/object-store integration remain open"},
     "C4": {"status": "planned", "gap": "staging telemetry, fault and restore drills"},
     "C5": {"status": "planned", "gap": "OIDC, SAST/SCA, secret, load and prompt-injection reports"},
     "C6": {"status": "planned", "evidence": ["docs/RELEASE-READINESS.md"], "reason": "reference release only; production evidence incomplete"}
@@ -27,5 +27,6 @@
   },
   "active_tasks": [],
   "waivers": [],
-  "next_action": "Implement real PostgreSQL transaction/RLS integration with a two-tenant test, then attach the result to C2 before advancing to C3-C5."
+  "next_action": "Obtain human review for PR 6, then prepare approved staging OIDC/provider/object-store integration and rollback evidence; do not mark C6 or production approval automatically.",
+  "remote_ci": {"run_id": 31945918723, "head_sha": "8355cdf4b26b91931b795832de4d6a9b825646af", "conclusion": "success", "postgresql": "passed"}
 }

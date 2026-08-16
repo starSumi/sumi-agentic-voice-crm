@@ -1,25 +1,28 @@
 {
   "schema_version": "sumi.agent-cursor.v1",
-  "captured_at": "2026-08-14T22:48:11+08:00",
+  "captured_at": "2026-08-16T20:03:43+08:00",
   "captured_by": "continuity-supervisor",
   "source": {
     "repository": "starSumi/sumi-agentic-voice-crm",
-    "visibility": "private",
-    "branch": "main",
-    "commit": "e51fc7e927c4526381687e75351cb253ea7650ab"
+    "visibility": "public",
+    "branch": "feat/runtime-agent-boundary",
+    "commit": "8355cdf4b26b91931b795832de4d6a9b825646af"
   },
   "control_plane": {
-    "phase": "P4-crm-safety-and-persistence",
-    "checkpoint": "C2",
-    "state_updated_at": "2026-08-14T21:26:46+08:00"
+    "phase": "P3-service-and-provider-implementation",
+    "checkpoint": "C3",
+    "state_updated_at": "2026-08-16T20:03:43+08:00"
   },
   "last_verified_ci": {
     "workflow": "ci",
-    "run_id": 31811208140,
-    "head_sha": "e51fc7e927c4526381687e75351cb253ea7650ab",
+    "run_id": 31945918723,
+    "head_sha": "8355cdf4b26b91931b795832de4d6a9b825646af",
     "conclusion": "success",
-    "observed_at": "2026-08-14T22:47:32+08:00",
-    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31811208140"
+    "observed_at": "2026-08-16T20:02:30+08:00",
+    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31945918723",
+    "job_url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31945918723/job/95161718522",
+    "artifact": "build-evidence-d49e924c1316bc6f36a36875133718bfd024d0cf",
+    "artifact_digest": "sha256:dccc0302d9a3d09edab02d4fdcbd6ed5c7eacb1e654df56aa4e2034bfb3bbd99"
   },
   "last_verified_operations": {
     "workflow": "operations-agent",
@@ -29,22 +32,17 @@
     "observed_at": "2026-08-14T22:48:11+08:00",
     "artifact": "operations-snapshot-31811267636",
     "artifact_expires_at": "2026-09-13T22:47:50+08:00",
-    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31811267636"
+    "url": "https://github.com/starSumi/sumi-agentic-voice-crm/actions/runs/31811267636",
+    "historical": true,
+    "note": "Default-main operations evidence retained for history; no operations-agent run was requested for PR 6."
   },
   "open_work": [
     {
-      "id": "C2-postgres-rls",
-      "owner": "data-owner",
-      "status": "open",
-      "next_action": "Run real PostgreSQL transaction and row-level-security integration with two isolated tenants.",
-      "acceptance": ["two-tenant isolation", "atomic CRM/audit/outbox commit", "rollback evidence"]
-    },
-    {
       "id": "remote-main-protection",
       "owner": "platform-owner",
-      "status": "externally_blocked",
-      "next_action": "Enable a plan that supports private-repository rulesets or branch protection, then require the observed CI checks.",
-      "evidence": "GitHub returned 403 for protection APIs on the current private-repository plan."
+      "status": "open",
+      "next_action": "Keep the protected main branch and require the green verify check plus review before merge.",
+      "evidence": "Repository is public; the feature PR verify check is green, while production release approval remains manual."
     }
   ],
   "next_session": {
@@ -64,6 +62,13 @@
       "pnpm run check:agent"
     ],
     "rule": "Re-probe Git, GitHub Actions and runtime state; do not treat this cursor or a prior session transcript as live evidence."
+  },
+  "remote_ci_evidence": {
+    "run_id": 31945918723,
+    "head_sha": "8355cdf4b26b91931b795832de4d6a9b825646af",
+    "conclusion": "success",
+    "postgresql_gate": "passed",
+    "artifact_digest": "sha256:dccc0302d9a3d09edab02d4fdcbd6ed5c7eacb1e654df56aa4e2034bfb3bbd99"
   },
   "human_gate": "No agent or CI workflow may mark C6 complete, publish a release, or bypass the owner's manual acceptance.",
   "refresh_rule": "Refresh after a phase/checkpoint transition, a changed blocker, or at least every 14 days. The recorded commit may be an ancestor of HEAD but must exist in repository history.",
