@@ -22,8 +22,8 @@ test("control-plane inspection verifies the reviewed cursor and maintainers", as
     now: new Date("2026-08-15T00:00:00Z"),
     includeFreshness: true,
   });
-  assert.equal(inspection.manifest.current_phase, "P4-crm-safety-and-persistence");
-  assert.equal(inspection.manifest.current_checkpoint, "C2");
+  assert.equal(inspection.manifest.current_phase, "P3-service-and-provider-implementation");
+  assert.equal(inspection.manifest.current_checkpoint, "C3");
   assert.equal(inspection.healthIssues.length, 0);
   assert.equal(inspection.manifest.active_roles.length, 27);
 });
