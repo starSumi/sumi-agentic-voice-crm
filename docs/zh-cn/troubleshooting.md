@@ -11,7 +11,7 @@ contentVersion: 0.1.0
 
 | 现象 | 检查 | 安全处理 |
 | --- | --- | --- |
-| `npm ci` 拒绝运行时 | `node --version` 与 `.nvmrc` | 使用 Node `24.18.0` 或更高版本。 |
+| `pnpm install --frozen-lockfile` 拒绝运行时 | `node --version`、`pnpm --version` 与 `.nvmrc` | 使用 Node `24.18.0` 或更高版本和 pnpm `10.33.4`。 |
 | Astro 报 frontmatter 缺失 | 指向的 `docs/` 文件 | 补齐 title、docId、locale、audience 和 contentVersion。 |
 | Web 有页面但 MCP 没有 | `astro.config.mjs` 映射 | 显式增加 source、machine 和 page 后重建。 |
 | MCP URL 为 404 | routes map 与 `--base-url` | 对齐 machine path 和页面 route，并保留 base URL 尾部 `/`。 |
@@ -19,4 +19,4 @@ contentVersion: 0.1.0
 
 `UNAUTHORIZED` 要求有效身份；`IDEMPOTENCY_CONFLICT` 要停止并核对原操作；`UNSUPPORTED_MEDIA` 要转换或重新采集；`EMPTY_TRANSCRIPT` 需要重录而不是猜测；`INTENT_LOW_CONFIDENCE` 必须进入人工复核；`ASR_TIMEOUT` 应在允许时沿用同一幂等上下文重试并检查 provider 与队列。
 
-上报问题时附带命令、退出码、Node/npm 版本、脱敏响应、受影响文档或 endpoint、预期行为和回滚结果。禁止附带 token、客户音频、原始转写或敏感本地路径。
+上报问题时附带命令、退出码、Node/pnpm 版本、脱敏响应、受影响文档或 endpoint、预期行为和回滚结果。禁止附带 token、客户音频、原始转写或敏感本地路径。

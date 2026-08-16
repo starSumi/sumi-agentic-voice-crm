@@ -7,7 +7,26 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-Use the repository's Volta pins: Node.js `24.18.0` and npm `11.15.0`. The runtime itself is JavaScript with explicit production dependencies; Astro and Starlight are development-only documentation dependencies.
+Use Node.js `24.18.0` or newer and the repository `packageManager` pin
+`pnpm@10.33.4`. The runtime itself is JavaScript with explicit production
+dependencies; Astro and Starlight are development-only documentation dependencies.
+
+## Optional Nix shell
+
+Linux and WSL2 contributors may enter the pinned development shell with
+`nix develop`. The flake supplies Node 24, Git, jq, OpenSSL, Python, build tools,
+PostgreSQL 17 tools, exact pnpm `10.33.4`, and Docker/Compose clients. It
+deliberately does not run `pnpm install`, start a daemon, start Compose, or
+replace the pnpm lockfile and Docker release path.
+
+```bash
+nix develop
+pnpm install --frozen-lockfile
+pnpm verify
+```
+
+`flake.lock` pins nixpkgs. Update it as a reviewed dependency change and rerun
+both `nix flake check` and the normal pnpm verification gates.
 
 ## Repository map
 
@@ -18,22 +37,23 @@ Use the repository's Volta pins: Node.js `24.18.0` and npm `11.15.0`. The runtim
 | `db/` | Production-target schema and row-level security migration. |
 | `docs/` | Single reviewed source for human Web and agent MCP documentation. |
 | `.agent/` | Versioned engineering governance and checkpoint routing. |
-| User state root selected by `npm run agent:resume` | Machine-local session identity, agent edges, locks, and retries; never committed. |
+| User state root selected by `pnpm agent:resume` | Machine-local session identity, agent edges, locks, and retries; never committed. |
 | `test/` | Runtime and contract regression tests. |
 | `scripts/` | Deterministic checks, builds, and cross-product verification. |
+| `flake.nix`, `flake.lock` | Optional pinned Linux/WSL2 development shell; not a release or package-manager replacement. |
 | `artifacts/docs-site/` | Generated documentation site and `_mcp` projection; ignored. |
 | `dist/` | Generated runtime release candidate; ignored. |
 
 ## Local gates
 
 ```powershell
-volta run npm ci
-volta run npm run agent:health
-volta run npm run agent:resume
-volta run npm run verify:release
-volta run npm run verify:mcp
-volta run npm run smoke:docker
-volta run npm run sbom
+pnpm install --frozen-lockfile
+pnpm agent:health
+pnpm agent:resume
+pnpm verify:release
+pnpm verify:mcp
+pnpm smoke:docker
+pnpm sbom
 ```
 
 `verify:release` runs the dependency audit, `verify`, and bounded load/fault drills. `verify` covers protocol drift/typecheck, runtime and disposable-PostgreSQL tests, repository/agent checks, the reproducible runtime build, dist smoke, Astro type checks, and static-site projection verification. `verify:mcp` additionally requires a built sibling Sumi-Docs-MCP checkout and exercises all four MCP tools against the generated site. `smoke:docker` is intentionally separate because it requires a usable Docker daemon and remains mandatory release evidence.
@@ -56,10 +76,11 @@ never target a shared database.
 ## Protocol change sequence
 
 `contracts/openapi.yaml` and `contracts/events.yaml` are normative sources.
-After a contract change, run `npm run protocol:generate`, inspect source and
-generated diffs together, then run `npm run protocol:check` and
-`npm run protocol:typecheck`. Frontend code imports `@sumi/voice-crm-api-client`
-and never declares a parallel request/response DTO. A breaking change requires
+After a contract change, run `pnpm protocol:generate`, inspect source and
+generated diffs together, then run `pnpm protocol:check`,
+`pnpm protocol:typecheck`, and `pnpm contract:consumer-check`. Frontend code
+imports `packages/api-client/src/index.ts` and never declares a parallel
+request/response DTO or raw `/v1/` transport. A breaking change requires
 a major protocol/event version, consumer inventory, migration window and
 rollback to the previous source/projection pair.
 
@@ -67,10 +88,10 @@ rollback to the previous source/projection pair.
 
 ```powershell
 # Terminal 1: CRM reference API
-npm start
+pnpm start
 
 # Terminal 2: documentation authoring
-npm run docs:dev -- --host 127.0.0.1 --port 4321
+pnpm docs:dev -- --host 127.0.0.1 --port 4321
 ```
 
 The two processes are deliberately independent. Documentation must remain buildable when no CRM service or provider credential is available.

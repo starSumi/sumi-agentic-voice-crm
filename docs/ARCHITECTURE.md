@@ -47,6 +47,10 @@ flowchart TB
 
 ## Design patterns
 
+- Composition root and explicit scopes: `src/composition-root.mjs` wires process
+  singletons and exposes a small ports object. Request context is immutable and
+  operation/transaction lifetimes remain explicit; no heavy DI container or
+  ambient tenant state is used.
 - Hexagonal architecture: the provider facade owns selection, deadlines, circuit isolation and error mapping; mock, OpenAI-compatible and DashScope adapters implement `transcribe`, `understand`, `synthesize`. The domain never imports provider SDKs or vendor protocols.
 - CQRS-lite: query context is separate from command path; commands return aggregate version.
 - Transactional outbox: domain mutation and event record commit atomically; relay is retryable.

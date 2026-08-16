@@ -8,11 +8,11 @@ contentVersion: 0.1.0
 ---
 
 ```powershell
-npm ci
-npm test
-npm run check
-npm run build
-npm start
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run check
+pnpm run build
+pnpm start
 ```
 
 服务默认监听 `http://localhost:8080`。先检查：
@@ -42,6 +42,6 @@ Invoke-RestMethod http://localhost:8080/v1/ask -Method Post -Headers $headers -C
 构建文档与 MCP 投影：
 
 ```powershell
-npm run docs:build
-npm run docs:preview -- --host 127.0.0.1 --port 4321
+pnpm run docs:build
+pnpm run docs:preview -- --host 127.0.0.1 --port 4321
 ```

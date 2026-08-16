@@ -15,7 +15,7 @@
   },
   "checkpoint_status": {
     "C0": {"status": "completed", "evidence": ["docs/SOURCE-EVIDENCE.md", "docs/ADR-0001-agentic-crm.md"]},
-    "C1": {"status": "completed", "evidence": ["contracts/openapi.yaml", "contracts/events.yaml", "postman/voice-crm.postman_collection.json", "npm run check"]},
+    "C1": {"status": "completed", "evidence": ["contracts/openapi.yaml", "contracts/events.yaml", "postman/voice-crm.postman_collection.json", "pnpm run check"]},
     "C2": {"status": "in_progress", "evidence": ["db/migrations/001_initial.sql", "src/store.mjs", "test/contract.test.mjs"], "gap": "real PostgreSQL transaction/RLS and two-tenant integration not run"},
     "C3": {"status": "planned", "evidence": ["src/providers.mjs", "test/contract.test.mjs"], "gap": "real ASR/TTS quality and media security not run"},
     "C4": {"status": "planned", "gap": "staging telemetry, fault and restore drills"},

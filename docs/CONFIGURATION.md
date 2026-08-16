@@ -7,7 +7,7 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-Copy `.env.example` only when a launcher or deployment system loads it. Node.js does not read `.env` automatically in the current `npm start` command. PowerShell users can set variables in the current process with `$env:NAME = "value"`; production should inject them through the deployment platform or a secret manager.
+Copy `.env.example` only when a launcher or deployment system loads it. Node.js does not read `.env` automatically in the current `pnpm start` command. PowerShell users can set variables in the current process with `$env:NAME = "value"`; production should inject them through the deployment platform or a secret manager.
 
 ## Effective runtime settings
 
@@ -20,9 +20,9 @@ Development defaults to the in-memory store, development bearer identity, memory
 | Media | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds |
 | Providers | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent |
 | Relay | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls |
-| Operations | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage and provider state |
+| Operations | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage and provider state; `OBSERVABILITY_MODE=manual` (default) or explicit `otel` |
 
-Run the API with `npm start` and the independent transactional-outbox worker with `npm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
+Run the API with `pnpm start` and the independent transactional-outbox worker with `pnpm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
 
 ## Provider adapters
 
@@ -38,6 +38,18 @@ DashScope defaults are `qwen-plus`, `qwen3-asr-flash`, `qwen3-tts-flash`, and vo
 
 `PROVIDER_TIMEOUT_MS` defaults to 15 seconds and is capped at 120 seconds. Provider audio limits are capped at 50 MiB.
 
+## Tracing
+
+`OBSERVABILITY_MODE=manual` is the default and emits no network traffic. It keeps
+low-cardinality W3C-compatible trace correlation plus explicit redacted spans
+for HTTP, application, provider, storage and transaction boundaries. Set
+`OBSERVABILITY_MODE=otel` only when an OTLP/HTTP collector is available.
+`OTEL_SERVICE_NAME` accepts a short stable service name and the standard
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` variables
+configure the exporter. Automatic Node, HTTP, fetch, PostgreSQL and provider
+instrumentation is deliberately disabled; Sumi never exports request bodies,
+transcripts, audio, tokens, SQL parameters, or signed URL query strings.
+
 `DASHSCOPE_AUDIO_HOST_SUFFIXES` may extend the built-in allowlist for signed TTS audio downloads. Leave it empty for the official `dashscope-result-*.oss-*.aliyuncs.com` pattern. Every hop is upgraded or restricted to HTTPS, manually redirected, revalidated, size bounded, and checked against audio magic bytes.
 
 Existing deployments may keep `ALIYUN_BASE_APIKEY`, `ALIYUN_BASE_URL`, `ALIYUN_BASE_MODEL`, and the corresponding `ALIYUN_ASR_*`/`ALIYUN_TTS_*` variables. They are aliases; `DASHSCOPE_*` takes precedence when both namespaces are present.
@@ -48,7 +60,7 @@ Existing deployments may keep `ALIYUN_BASE_APIKEY`, `ALIYUN_BASE_URL`, `ALIYUN_B
 | --- | --- | --- |
 | `DOCS_SITE_URL` | `http://127.0.0.1:4321` | Canonical URL used by the Astro documentation build. Set it to the deployed HTTPS origin in CI. |
 
-Use `npm run docs:dev` for live authoring and `npm run docs:build` for the production artifact in `artifacts/docs-site/`. The documentation build does not start the CRM API and the CRM runtime does not require Astro.
+Use `pnpm run docs:dev` for live authoring and `pnpm run docs:build` for the production artifact in `artifacts/docs-site/`. The documentation build does not start the CRM API and the CRM runtime does not require Astro.
 
 ## Development and production separation
 
@@ -64,7 +76,7 @@ Use `npm run docs:dev` for live authoring and `npm run docs:build` for the produ
 $env:PORT = "8080"
 $env:AUTH_MODE = "development"
 $env:STORE_PROVIDER = "memory"
-npm run dev
+pnpm run dev
 ```
 
 Confirm effective behavior through `GET /health/ready`; configured names alone are not proof of provider quality or production connectivity.

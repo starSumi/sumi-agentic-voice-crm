@@ -30,8 +30,8 @@ Use an imperative, scoped subject such as `docs: add MCP partner guide` or `fix(
 ## Required validation
 
 ```powershell
-npm run verify
-npm run verify:mcp
+pnpm run verify
+pnpm run verify:mcp
 ```
 
 If a gate cannot run, say exactly which one and why. Do not replace missing evidence with a status report or a confidence claim.

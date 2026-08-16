@@ -7,7 +7,7 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-当前 `npm start` 不会自动读取 `.env`。PowerShell 可用 `$env:NAME = "value"` 设置当前进程变量；生产环境应由部署平台或密钥管理系统注入。
+当前 `pnpm start` 不会自动读取 `.env`。PowerShell 可用 `$env:NAME = "value"` 设置当前进程变量；生产环境应由部署平台或密钥管理系统注入。
 
 ## 当前真正生效的变量
 
@@ -17,6 +17,6 @@ contentVersion: 0.1.0
 
 现有环境变量 `ALIYUN_BASE_APIKEY`、`ALIYUN_BASE_URL`、`ALIYUN_BASE_MODEL` 及对应 ASR/TTS 变量继续作为兼容别名；两套同时存在时优先 `DASHSCOPE_*`。完整变量见 `.env.example`；配置通过不等于 staging 或生产批准。
 
-文档构建使用 `DOCS_SITE_URL`，默认 `http://127.0.0.1:4321`。CI 部署时应设置为实际 HTTPS origin。`npm run docs:dev` 用于实时编写，`npm run docs:build` 把静态站和 `_mcp` 投影写入 `artifacts/docs-site/`。
+文档构建使用 `DOCS_SITE_URL`，默认 `http://127.0.0.1:4321`。CI 部署时应设置为实际 HTTPS origin。`pnpm run docs:dev` 用于实时编写，`pnpm run docs:build` 把静态站和 `_mcp` 投影写入 `artifacts/docs-site/`。
 
 禁止把 bearer token、API key、客户音频、原始转写或生产连接串写入示例、Markdown、测试和 Git 历史。

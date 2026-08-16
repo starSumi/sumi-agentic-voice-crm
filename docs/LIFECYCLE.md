@@ -36,4 +36,15 @@ Projection/UI state is disposable and rebuilt from query/events.
 
 ## Shutdown and recovery
 
-Readiness is removed before termination. The orchestrator drains in-flight requests; workers finish leased jobs or let leases expire; outbox relay resumes from `published_at=NULL`; review tasks remain actionable; media cleanup is retention-driven.
+The composition root in `src/composition-root.mjs` owns process-singleton resources:
+the environment snapshot, authenticator/JWKS cache, provider adapters and circuit
+breakers, object storage client, PostgreSQL pool, and observability registry.
+Each request gets an immutable context (`request_id`, traceparent, tenant/actor
+identity); each provider call is an operation scope with its own timeout; each
+PostgreSQL command is a transaction scope. Provider network calls never hold a
+database transaction open.
+
+On `SIGTERM`/`SIGINT`, readiness is removed first, the HTTP server drains
+in-flight requests, and the composition root closes its resources. Workers finish
+leased jobs or let leases expire; outbox relay resumes from `published_at=NULL`;
+review tasks remain actionable; media cleanup is retention-driven.

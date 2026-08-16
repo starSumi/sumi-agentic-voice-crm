@@ -7,30 +7,53 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-使用 Node.js `24.18.0` 或更高版本和 npm `11.15.0`。运行时是标准库 JavaScript；Astro 和 Starlight 只负责文档。
+使用 Node.js `24.18.0` 或更高版本和仓库固定的 `pnpm@10.33.4`。运行时是标准库 JavaScript；Astro 和 Starlight 只负责文档。
+
+## 可选 Nix 开发环境
+
+Linux 和 WSL2 开发者可以运行 `nix develop` 进入锁定的开发环境。该
+flake 提供 Node 24、Git、jq、OpenSSL、Python、构建工具、PostgreSQL 17、
+精确的 pnpm `10.33.4` 以及 Docker/Compose 客户端，但不会自动运行
+`pnpm install`、启动 daemon、启动 Compose，也不会取代 pnpm lockfile 或 Docker 发布链路。
+
+```bash
+nix develop
+pnpm install --frozen-lockfile
+pnpm verify
+```
+
+`flake.lock` 固定 nixpkgs。更新它属于需要评审的依赖变更，必须同时运行
+`nix flake check` 和原有 pnpm 验证门禁。
 
 ## 关键路径
 
 | 路径 | 责任 |
 | --- | --- |
 | `src/` | HTTP 参考运行时、校验、provider 和内存状态。 |
+| `packages/api-client/src/index.ts` | 前端唯一 API facade；由 OpenAPI 生成操作和类型。 |
 | `contracts/` | OpenAPI 与事件协议权威来源。 |
 | `db/` | 生产目标 schema 与 RLS migration。 |
 | `docs/` | Web 与 MCP 共用的唯一评审内容源。 |
 | `.agent/` | 版本化工程治理和检查点路由。 |
-| `npm run agent:resume` 选择的用户状态根 | 机器本地的会话 ID、agent 关系、锁和重试，不能提交。 |
+| `pnpm agent:resume` 选择的用户状态根 | 机器本地的会话 ID、agent 关系、锁和重试，不能提交。 |
 | `test/` | 运行时和契约回归测试。 |
+| `flake.nix`、`flake.lock` | 可选的 Linux/WSL2 开发环境，不替代发布或包管理链路。 |
 | `artifacts/docs-site/` | 生成的站点和 `_mcp` 投影，不提交。 |
 | `dist/` | 生成的运行时候选制品，不提交。 |
 
 ## 本地门禁
 
 ```powershell
-npm ci
-npm run agent:health
-npm run agent:resume
-npm run verify
-npm run verify:mcp
+pnpm install --frozen-lockfile
+pnpm agent:health
+pnpm agent:resume
+pnpm verify
+pnpm verify:mcp
 ```
 
 开始开发前读取评审后的 cursor 与当前检查点，并重新探测 Git 和 CI。变更公开行为前先增加失败测试；先改规范类型或契约，再改 adapter 和 transport；模型输出始终是不可信输入；行为或运维流程改变时同步核心中英文文档。无法运行的门必须明确报告，不能用状态文档代替证据。
+
+协议消费者必须运行 `pnpm run contract:consumer-check`：前端只能从
+`packages/api-client/src/index.ts` 导入生成操作和类型，不能手写 `/v1/` 请求或
+重复定义传输 DTO。`src/composition-root.mjs` 负责进程级资源；请求、provider
+操作和 PostgreSQL 事务的生命周期保持显式，provider 网络调用不持有数据库事务。

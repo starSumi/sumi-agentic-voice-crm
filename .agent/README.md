@@ -74,7 +74,7 @@ operator location is `${CODEX_HOME}/operations/sumi-agentic-voice-crm/`, then
 platform local application-data directory. The ignored `.agent-runtime/` path
 is only an explicit fallback, not the canonical cross-session store.
 
-Run `npm run agent:resume` at session startup. It prints the next action and
+Run `pnpm run agent:resume` at session startup. It prints the next action and
 writes a metadata-first runtime snapshot. Accessing an `open` child agent may
 then restore its own canonical history lazily; the snapshot itself is never
 treated as history or proof that the process is alive.

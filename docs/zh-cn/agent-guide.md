@@ -11,12 +11,11 @@ contentVersion: 0.1.0
 
 ## 本地连接
 
-```powershell
-npm run docs:build
-npm run docs:preview -- --host 127.0.0.1 --port 4321
-node ..\.sumi\Sumi-Docs-MCP\dist\index.js serve `
-  http://127.0.0.1:4321/_mcp/ `
-  --base-url http://127.0.0.1:4321/
+```shell
+pnpm run docs:build
+pnpm run docs:preview -- --host 127.0.0.1 --port 4321
+sumi-docs-mcp serve docs \
+  --openapi protocol/schema/json/openapi.bundle.json
 ```
 
 loopback HTTP 只用于开发，部署后必须使用 HTTPS。
@@ -29,7 +28,7 @@ loopback HTTP 只用于开发，部署后必须使用 HTTPS。
 4. 修改请求或响应前先调用 `get_openapi_spec`。
 5. 写代码前回到 `src/`、`contracts/`、migration 和测试核实当前行为。
 
-有 checkout 时还应运行 `npm run agent:health` 和 `npm run agent:resume`，然后读取 `.agent/.agent.cursor.json` 与当前检查点卡。cursor 只是经过评审的交接信息，使用前仍要核实其中的 commit 与 CI 状态。搜索 `continuity-supervisor` 或获取 `zh-cn/maintenance.md` 可以看到完整的当前/下一会话流程。
+有 checkout 时还应运行 `pnpm run agent:health` 和 `pnpm run agent:resume`，然后读取 `.agent/.agent.cursor.json` 与当前检查点卡。cursor 只是经过评审的交接信息，使用前仍要核实其中的 commit 与 CI 状态。搜索 `continuity-supervisor` 或获取 `zh-cn/maintenance.md` 可以看到完整的当前/下一会话流程。
 
 ## 证据优先级
 
@@ -37,4 +36,4 @@ OpenAPI 与事件契约是协议权威；`RELEASE-READINESS` 决定哪些门真�
 
 任何自然语言输出都不能直接修改 CRM。写操作必须具备授权租户和操作人、严格 schema、风险策略、幂等、事务、审计和 outbox。低置信度必须创建复核任务。
 
-`npm run verify:mcp` 会通过真实 stdio MCP 请求验证四个工具和代表性开发问题，而不是只相信文档描述。
+`pnpm run verify:mcp` 会通过真实 stdio MCP 请求验证四个工具和代表性开发问题，而不是只相信文档描述。

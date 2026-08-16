@@ -60,8 +60,8 @@
     "first_commands": [
       "git status --short --branch",
       "git fetch --prune origin",
-      "npm run agent:resume",
-      "npm run check:agent"
+      "pnpm run agent:resume",
+      "pnpm run check:agent"
     ],
     "rule": "Re-probe Git, GitHub Actions and runtime state; do not treat this cursor or a prior session transcript as live evidence."
   },

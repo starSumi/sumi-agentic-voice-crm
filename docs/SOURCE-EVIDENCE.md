@@ -8,14 +8,15 @@ contentVersion: 0.1.0
 ---
 
 This document separates comparative evidence from Sumi-owned design. It is
-reproducible against the pinned local checkouts observed on 2026-08-14.
+reproducible against the pinned local checkouts observed through 2026-08-16.
 
 ## Pinned comparative sources
 
 | Source | Identity | Evidence used | Boundary |
 | --- | --- | --- | --- |
 | Saathi CRM | `JagadeepPortfolio/saathi-crm`, `main@693ec2bd20e546a06238559cc4cb20e342080af2` | `app/api/intake/route.ts` (multipart intake), `lib/intake.ts` (`runIntake` orchestration), `lib/asr/whisper.ts` (`transcribe`), `lib/ai/adapter.ts` (typed adapter) | comparative only; no source files, prompts, fixtures or credentials copied |
-| Northstar/Strands CRM | `CopilotKit/CopilotKit`, `main@2328062960a1e9b4b8bc2eb2817724fc624f8785`, showcase path `examples/showcases/strands-crm` | agent tool boundary, CRM state projection, AG-UI/HITL test organization | comparative only; checkout had pre-existing dirty overlay, preserved untouched |
+| CopilotKit AG-UI | Local reference snapshot of Windows checkout `main@6a5bb62b62b0d351abb35a2fe3bb0fed547a275d`; reviewed paths `skills/copilotkit-agui` and `packages/runtime` | AG-UI 0.0.57 event families, SSE ordering, RunAgentInput, tool/state/HITL adapter boundary | comparative protocol evidence only; snapshot contains tracked source and no Git directory |
+| Northstar/Strands CRM | Local sparse reference snapshot of Windows checkout `main@2328062960a1e9b4b8bc2eb2817724fc624f8785`; reviewed showcase `examples/showcases/strands-crm`; overlay SHA-256 `af1ae662870fbef78885d357981b0039039844d09d56fa5c8caeccf43d20d548` | StrandsAgent boundary, state projection after mutating tools, generative UI/HITL organization | comparative only; the two-file pre-existing overlay is preserved and its values are not treated as Sumi configuration |
 
 ## Connected map
 
@@ -30,17 +31,20 @@ The runtime implements the connected path with deterministic development adapter
 - **source-confirmed:** the pinned comparative paths exist at their recorded
   commits. The Sumi implementation is owned by this repository and is not
   presented as upstream truth; CI and the versioned handoff bind exact commits.
-- **runtime-observed:** the release-equivalent gates passed locally on Volta
-  Node `v24.18.0`: 65 tests, PostgreSQL 18.4 integration in a disposable
-  container, deterministic 24-file runtime payload, dependency audit, OCI
-  smoke, 250-request load drill and provider/outbox fault drill. The exact
-  reports remain under ignored `artifacts/release/`.
+- **runtime-observed:** the local feature-branch gates passed on Node
+  `v24.18.0` and pnpm `10.33.4`: 122 non-PostgreSQL tests, protocol and
+  consumer checks, deterministic runtime payload, dependency audit, OCI smoke,
+  documentation build, 250-request load drill and provider/outbox fault drill.
+  The real PostgreSQL integration is intentionally reserved for remote CI on
+  the final reviewed commit. The exact reports remain under ignored
+  `artifacts/release/`.
 - **inferred/design:** four-plane ownership, policy-as-code, transactional
   outbox, CloudEvents envelope, review gate and expand/migrate/contract are
   Sumi decisions documented in ADR-0001.
-- **unknown/not run:** production OIDC, production ASR/TTS quality, object-store
-  malware scanning, broad security scans, signed provenance and staging rollback
-  drill. Local WSL2 staging and OCI evidence do not replace these gates.
+- **unknown/not run:** remote PostgreSQL integration for the final commit,
+  production OIDC, production ASR/TTS quality, object-store malware scanning,
+  broad security scans, signed provenance and staging rollback drill. Local WSL2
+  staging and OCI evidence do not replace these gates.
 
 ## Rejected interpretations
 

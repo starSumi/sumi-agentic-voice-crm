@@ -14,7 +14,7 @@ This project separates durable project truth from transient agent runtime state.
 | State | Location | Lifecycle |
 | --- | --- | --- |
 | Roles, phase/checkpoint policy, maintainers, reviewed handoff cursor | `.agent/` | Versioned, reviewed, and changed with the project contract. |
-| Current session identity, agent edges, retries, locks, and temporary evidence | `CODEX_HOME`, then `XDG_STATE_HOME`, then the platform local application-data directory | Machine-local and ignored. `npm run agent:resume` prints the selected path; use `.agent-runtime/` only as an explicit fallback. |
+| Current session identity, agent edges, retries, locks, and temporary evidence | `CODEX_HOME`, then `XDG_STATE_HOME`, then the platform local application-data directory | Machine-local and ignored. `pnpm run agent:resume` prints the selected path; use `.agent-runtime/` only as an explicit fallback. |
 | CI observation snapshot | `agent-operations-<run-id>` Actions artifact | Generated per run and retained for 30 days. |
 | CI degradation requiring attention | One GitHub Issue titled `[CI Operations] main requires attention` | Opened or updated on failure and closed after a successful main observation. |
 
@@ -22,7 +22,7 @@ This project separates durable project truth from transient agent runtime state.
 
 ## Maintainers
 
-`.agent/.agent.maintainers.json` owns the documentation, continuity, and CI operations surfaces. `CODEOWNERS` routes review to the same repository owner. The registry records review intervals and the last reviewed source commit; `npm run agent:health` rejects stale or inconsistent control-plane state.
+`.agent/.agent.maintainers.json` owns the documentation, continuity, and CI operations surfaces. `CODEOWNERS` routes review to the same repository owner. The registry records review intervals and the last reviewed source commit; `pnpm run agent:health` rejects stale or inconsistent control-plane state.
 
 The three operational roles are deliberately separate:
 
@@ -36,8 +36,8 @@ At the start of a repository session:
 
 ```powershell
 git status --short --branch
-npm run agent:health
-npm run agent:resume
+pnpm run agent:health
+pnpm run agent:resume
 ```
 
 Read `AGENTS.md`, `.agent/.agent.manifest.json`, `.agent/.agent.state.json`, `.agent/.agent.cursor.json`, and the active checkpoint card. Re-probe Git and CI before treating cursor facts as current. Runtime agent edges use only `open` or `closed`: a stopped process is not automatically a closed delegation.
@@ -45,7 +45,7 @@ Read `AGENTS.md`, `.agent/.agent.manifest.json`, `.agent/.agent.state.json`, `.a
 At handoff, update the versioned cursor only when its durable facts changed, then write the local session snapshot atomically:
 
 ```powershell
-npm run agent:resume -- --agent "/root=open" --agent "/root/reviewer=closed"
+pnpm run agent:resume -- --agent "/root=open" --agent "/root/reviewer=closed"
 ```
 
 The command prints the runtime file location. That file remains outside Git by default.
@@ -58,6 +58,6 @@ The workflow records the upstream conclusion, current commit, control-plane heal
 
 ## Recovery and rollback
 
-If a local runtime snapshot is missing or corrupt, remove only that thread's external operations directory and run `npm run agent:resume` again. The versioned cursor remains the recovery source. If a governance change is wrong, revert its bounded commit; do not rewrite runtime history into `.agent/`.
+If a local runtime snapshot is missing or corrupt, remove only that thread's external operations directory and run `pnpm run agent:resume` again. The versioned cursor remains the recovery source. If a governance change is wrong, revert its bounded commit; do not rewrite runtime history into `.agent/`.
 
 This private repository currently cannot enforce the intended branch protection rules under the available GitHub plan. Keep the repository private, preserve the human acceptance gate, and treat CI success as evidence rather than approval.
