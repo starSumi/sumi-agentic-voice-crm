@@ -14,10 +14,11 @@
     "event_schema_bundle": "protocol/schema/json/events.bundle.json",
     "typescript_client": "packages/api-client/src/generated"
   },
+  "consumer_roots": ["src/scripts", "packages/api-client/src/contract-fixture.ts"],
   "commands": {
-    "generate": "npm run protocol:generate",
-    "drift_check": "npm run protocol:check",
-    "consumer_check": "npm run protocol:typecheck"
+    "generate": "pnpm run protocol:generate",
+    "drift_check": "pnpm run protocol:check",
+    "consumer_check": "pnpm run contract:consumer-check"
   },
   "breaking_change_policy": "major-version-and-migration-plan-required",
   "rollback": "restore the previous compatible source and regenerated projections"

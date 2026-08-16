@@ -52,7 +52,7 @@ try {
     const expected = await files(root);
     const actual = await files(generatedRoot);
     if (JSON.stringify(expected) !== JSON.stringify(actual)) differences.push(`${root}: file list changed`);
-    for (const path of [...new Set([...expected, ...actual])]) {
+    for (const path of new Set([...expected, ...actual])) {
       try {
         const [left, right] = await Promise.all([
           readFile(join(root, path)),
@@ -65,7 +65,7 @@ try {
     }
   }
   if (differences.length) {
-    throw new Error(`generated protocol drift:\n${[...new Set(differences)].join("\n")}\nRun npm run protocol:generate and review the projections.`);
+    throw new Error(`generated protocol drift:\n${[...new Set(differences)].join("\n")}\nRun pnpm run protocol:generate and review the projections.`);
   }
   console.log("protocol drift check passed");
 } finally {

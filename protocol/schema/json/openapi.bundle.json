@@ -11,6 +11,70 @@
       "url": "http://localhost:8080"
     }
   ],
+  "x-sumi-error-policy": {
+    "INVALID_REQUEST": {
+      "status": 400,
+      "retryable": false
+    },
+    "UNAUTHORIZED": {
+      "status": 401,
+      "retryable": false
+    },
+    "FORBIDDEN": {
+      "status": 403,
+      "retryable": false
+    },
+    "UNSUPPORTED_MEDIA": {
+      "status": 415,
+      "retryable": false
+    },
+    "NO_AUDIO_SOURCE": {
+      "status": 422,
+      "retryable": false
+    },
+    "EMPTY_TRANSCRIPT": {
+      "status": 422,
+      "retryable": false
+    },
+    "INTENT_LOW_CONFIDENCE": {
+      "status": 202,
+      "retryable": false
+    },
+    "CRM_CONFLICT": {
+      "status": 409,
+      "retryable": true
+    },
+    "ASR_TIMEOUT": {
+      "status": 504,
+      "retryable": true
+    },
+    "IDEMPOTENCY_CONFLICT": {
+      "status": 409,
+      "retryable": false
+    },
+    "UPSTREAM_UNAVAILABLE": {
+      "status": 503,
+      "retryable": true
+    },
+    "PROVIDER_REJECTED": {
+      "status": 502,
+      "retryable": false
+    },
+    "RATE_LIMITED": {
+      "status": 429,
+      "retryable": true
+    },
+    "PAYLOAD_TOO_LARGE": {
+      "status": 413,
+      "retryable": false
+    }
+  },
+  "x-sumi-request-body-limits": {
+    "ask_json_bytes": 37748736,
+    "ask_multipart_bytes": 28311552,
+    "tts_json_bytes": 131072,
+    "review_json_bytes": 131072
+  },
   "security": [
     {
       "bearerAuth": []
@@ -90,6 +154,9 @@
           "409": {
             "$ref": "#/components/responses/Error"
           },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
           "415": {
             "$ref": "#/components/responses/Error"
           },
@@ -97,6 +164,9 @@
             "$ref": "#/components/responses/Error"
           },
           "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -158,10 +228,16 @@
           "409": {
             "$ref": "#/components/responses/Error"
           },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
           "422": {
             "$ref": "#/components/responses/Error"
           },
           "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -194,8 +270,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "pattern": "^(rev_[A-Za-z0-9_-]{4,64}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89ab][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              "$ref": "#/components/schemas/ReviewId"
             }
           }
         ],
@@ -204,24 +279,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "decision"
-                ],
-                "properties": {
-                  "decision": {
-                    "type": "string",
-                    "enum": [
-                      "approve",
-                      "reject"
-                    ]
-                  },
-                  "correction": {
-                    "type": "object",
-                    "additionalProperties": true
-                  }
-                }
+                "$ref": "#/components/schemas/ReviewDecisionRequest"
               }
             }
           }
@@ -232,8 +290,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true
+                  "$ref": "#/components/schemas/ReviewDecisionResponse"
                 }
               }
             }
@@ -248,6 +305,111 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/assets/{asset_id}": {
+      "get": {
+        "operationId": "getAsset",
+        "summary": "Resolve tenant-scoped attachment metadata",
+        "description": "Returns only opaque attachment metadata. The response never includes an object-storage key, credentials or signed URL query parameters.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          },
+          {
+            "$ref": "#/components/parameters/AssetId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentRef"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/assets/{asset_id}/content": {
+      "get": {
+        "operationId": "getAssetContent",
+        "summary": "Download tenant-scoped attachment content",
+        "description": "Authenticated binary retrieval for clients that cannot attach bearer credentials to media elements. Clients should fetch this operation and create a local object URL; raw bytes are never returned by getAsset.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          },
+          {
+            "$ref": "#/components/parameters/AssetId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment bytes using the stored media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Private cache policy selected by the server."
+              },
+              "Content-Type": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentMimeType"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -283,6 +445,15 @@
         "description": "Stable mutation key. Reuse with a different request fingerprint returns 409.",
         "schema": {
           "$ref": "#/components/schemas/IdempotencyKey"
+        }
+      },
+      "AssetId": {
+        "name": "asset_id",
+        "in": "path",
+        "required": true,
+        "description": "Opaque tenant-scoped attachment identifier.",
+        "schema": {
+          "$ref": "#/components/schemas/AttachmentId"
         }
       }
     },
@@ -324,6 +495,77 @@
       "RequestId": {
         "type": "string",
         "pattern": "^req_[0-9a-f]{24}$"
+      },
+      "AttachmentId": {
+        "type": "string",
+        "minLength": 12,
+        "maxLength": 132,
+        "pattern": "^ast_[A-Za-z0-9_-]{8,128}$"
+      },
+      "AttachmentKind": {
+        "type": "string",
+        "enum": [
+          "audio",
+          "image",
+          "document"
+        ]
+      },
+      "AttachmentMimeType": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 191,
+        "pattern": "^[a-z][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$"
+      },
+      "AttachmentSha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "AttachmentRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Opaque, JSON-safe attachment metadata. Object-storage keys, raw bytes, authorization metadata and signed URL query parameters are never part of this boundary. Image and document kinds are reserved for future adapters and are not accepted by the current ask request.",
+        "required": [
+          "asset_id",
+          "kind",
+          "mime_type",
+          "status"
+        ],
+        "properties": {
+          "asset_id": {
+            "$ref": "#/components/schemas/AttachmentId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AttachmentKind"
+          },
+          "mime_type": {
+            "$ref": "#/components/schemas/AttachmentMimeType"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "failed"
+            ]
+          },
+          "byte_length": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "$ref": "#/components/schemas/AttachmentSha256"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri-reference",
+            "maxLength": 2048,
+            "pattern": "^(?:/(?!/)[^\\s?#]*|https?://[^\\s?#]+)$"
+          }
+        }
       },
       "TextInput": {
         "type": "object",
@@ -462,7 +704,32 @@
           "metadata": {
             "type": "string",
             "contentMediaType": "application/json",
+            "contentSchema": {
+              "$ref": "#/components/schemas/MultipartAskMetadata"
+            },
             "description": "JSON-encoded object containing output_mode, locale and optional conversation_id."
+          }
+        }
+      },
+      "MultipartAskMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "output_mode": {
+            "type": "string",
+            "enum": [
+              "text",
+              "audio",
+              "both"
+            ],
+            "default": "both"
+          },
+          "locale": {
+            "$ref": "#/components/schemas/Locale"
+          },
+          "conversation_id": {
+            "type": "string",
+            "maxLength": 128
           }
         }
       },
@@ -628,6 +895,55 @@
           }
         }
       },
+      "ReviewId": {
+        "type": "string",
+        "pattern": "^(rev_[A-Za-z0-9_-]{4,64}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89ab][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+      },
+      "ReviewDecisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          },
+          "correction": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ReviewDecisionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "review_id",
+          "status",
+          "decision"
+        ],
+        "properties": {
+          "review_id": {
+            "$ref": "#/components/schemas/ReviewId"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "decision": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
       "TtsRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -663,6 +979,7 @@
       "TtsAsset": {
         "type": "object",
         "additionalProperties": false,
+        "description": "Source-compatible audio response. New transport-neutral adapters use AttachmentRef; the optional common fields allow incremental adoption without changing existing TTS response requirements.",
         "required": [
           "asset_id",
           "url",
@@ -671,14 +988,26 @@
         ],
         "properties": {
           "asset_id": {
-            "type": "string"
+            "$ref": "#/components/schemas/AttachmentId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AttachmentKind"
           },
           "url": {
             "type": "string",
-            "format": "uri-reference"
+            "format": "uri-reference",
+            "maxLength": 2048,
+            "pattern": "^(?:/(?!/)[^\\s?#]*|https?://[^\\s?#]+)$"
           },
           "mime_type": {
-            "type": "string"
+            "$ref": "#/components/schemas/AttachmentMimeType"
+          },
+          "byte_length": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "$ref": "#/components/schemas/AttachmentSha256"
           },
           "duration_ms": {
             "type": "integer",
@@ -767,7 +1096,8 @@
                   "IDEMPOTENCY_CONFLICT",
                   "UPSTREAM_UNAVAILABLE",
                   "PROVIDER_REJECTED",
-                  "RATE_LIMITED"
+                  "RATE_LIMITED",
+                  "PAYLOAD_TOO_LARGE"
                 ]
               },
               "message": {

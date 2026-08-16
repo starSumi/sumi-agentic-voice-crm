@@ -12,6 +12,7 @@
     "compatibility": { "enum": ["additive-by-default"] },
     "sources": { "type": "object", "required": ["http", "events", "database"], "additionalProperties": { "type": "string" } },
     "generated": { "type": "object", "required": ["json_schema_bundle", "event_schema_bundle", "typescript_client"], "additionalProperties": { "type": "string" } },
+    "consumer_roots": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
     "commands": { "type": "object", "required": ["generate", "drift_check", "consumer_check"], "additionalProperties": { "type": "string" } },
     "breaking_change_policy": { "type": "string", "minLength": 1 },
     "rollback": { "type": "string", "minLength": 1 }

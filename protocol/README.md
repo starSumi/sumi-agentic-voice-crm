@@ -23,7 +23,7 @@ contracts/openapi.yaml ──parse/normalize─> protocol/schema/json/openapi.bu
 contracts/events.yaml  ──parse/normalize─> protocol/schema/json/events.bundle.json
                                   │
                                   └─ openapi-ts ──> packages/api-client/src/generated/*
-                                       └─ frontend imports only this boundary
+                                       └─ frontend imports only packages/api-client/src/index.ts
 ```
 
 The server compiles its input validators from the JSON bundle. The
@@ -40,13 +40,14 @@ diffs, and offline builds; they must never be edited by hand.
 ## Change procedure
 
 1. Change the normative OpenAPI/event source and its compatibility version.
-2. Run `npm run protocol:generate`.
+2. Run `pnpm run protocol:generate`.
 3. Review source and generated diffs together.
-4. Run `npm run protocol:check` and contract tests.
+4. Run `pnpm run protocol:check`, `pnpm run protocol:typecheck`,
+   `pnpm run contract:consumer-check`, and contract tests.
 5. For a breaking change, add a major endpoint/event version, migration window,
    consumer inventory, deprecation telemetry, and rollback plan.
 
-The exact generator version is pinned in `package-lock.json`. Generator upgrades
+The exact generator version is pinned in `pnpm-lock.yaml`. Generator upgrades
 are dedicated changes: regenerate, inspect semantic diff, run consumer compile
 tests, and retain the previous generated package until the compatibility window
 closes.

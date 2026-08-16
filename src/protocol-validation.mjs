@@ -9,11 +9,17 @@ ajv.addSchema(protocol, "sumi-openapi");
 ajv.addSchema(events, "sumi-events");
 
 const validators = Object.freeze({
+  AttachmentRef: ajv.getSchema("sumi-openapi#/components/schemas/AttachmentRef"),
   AskRequest: ajv.getSchema("sumi-openapi#/components/schemas/AskRequest"),
   AskResponse: ajv.getSchema("sumi-openapi#/components/schemas/AskResponse"),
   ReviewResponse: ajv.getSchema("sumi-openapi#/components/schemas/ReviewResponse"),
+  ReviewDecisionRequest: ajv.getSchema("sumi-openapi#/components/schemas/ReviewDecisionRequest"),
+  ReviewDecisionResponse: ajv.getSchema("sumi-openapi#/components/schemas/ReviewDecisionResponse"),
+  ReviewId: ajv.getSchema("sumi-openapi#/components/schemas/ReviewId"),
+  MultipartAskMetadata: ajv.getSchema("sumi-openapi#/components/schemas/MultipartAskMetadata"),
   TtsRequest: ajv.getSchema("sumi-openapi#/components/schemas/TtsRequest"),
   TtsSynthesizeResponse: ajv.getSchema("sumi-openapi#/components/schemas/TtsSynthesizeResponse"),
+  ErrorEnvelope: ajv.getSchema("sumi-openapi#/components/schemas/ErrorEnvelope"),
   EventEnvelope: ajv.getSchema("sumi-events"),
 });
 

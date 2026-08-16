@@ -15,6 +15,12 @@ import type {
   DecideReviewData,
   DecideReviewErrors,
   DecideReviewResponses,
+  GetAssetContentData,
+  GetAssetContentErrors,
+  GetAssetContentResponses,
+  GetAssetData,
+  GetAssetErrors,
+  GetAssetResponses,
   SynthesizeData,
   SynthesizeErrors,
   SynthesizeResponses,
@@ -92,4 +98,44 @@ export const decideReview = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+
+/**
+ * Resolve tenant-scoped attachment metadata
+ *
+ * Returns only opaque attachment metadata. The response never includes an object-storage key, credentials or signed URL query parameters.
+ */
+export const getAsset = <ThrowOnError extends boolean = false>(
+  options: Options<GetAssetData, ThrowOnError>,
+): RequestResult<GetAssetResponses, GetAssetErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    GetAssetResponses,
+    GetAssetErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/assets/{asset_id}",
+    ...options,
+  });
+
+/**
+ * Download tenant-scoped attachment content
+ *
+ * Authenticated binary retrieval for clients that cannot attach bearer credentials to media elements. Clients should fetch this operation and create a local object URL; raw bytes are never returned by getAsset.
+ */
+export const getAssetContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAssetContentData, ThrowOnError>,
+): RequestResult<
+  GetAssetContentResponses,
+  GetAssetContentErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).get<
+    GetAssetContentResponses,
+    GetAssetContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/assets/{asset_id}/content",
+    ...options,
   });
