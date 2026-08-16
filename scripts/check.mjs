@@ -2,8 +2,8 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
-const runtimeSources = ["src/auth.mjs", "src/contracts.mjs", "src/data-cipher.mjs", "src/object-storage.mjs", "src/observability.mjs", "src/outbox-relay.mjs", "src/outbox-worker.mjs", "src/provider-common.mjs", "src/provider-dashscope.mjs", "src/provider-mock.mjs", "src/provider-openai.mjs", "src/providers.mjs", "src/production-config.mjs", "src/protocol-validation.mjs", "src/postgres-store.mjs", "src/server.mjs", "src/store.mjs"];
-const required = ["README.md", "AGENTS.md", "LICENSE", "contracts/openapi.yaml", "contracts/events.yaml", "db/migrations/001_initial.sql", "db/tests/001_rls_and_atomicity.sql", "protocol/protocol.manifest.json", "protocol/protocol-manifest.schema.json", "protocol/schema/json/openapi.bundle.json", "protocol/schema/json/events.bundle.json", "packages/api-client/src/generated/index.ts", "astro.config.mjs", "src/content.config.ts", "integrations/sumi-docs-publisher.mjs", "scripts/load-drill.mjs", "scripts/fault-drill.mjs", ...runtimeSources, "docs/index.md", "docs/QUICKSTART.md", "docs/CONFIGURATION.md", "docs/API.md", "docs/AGENT-GUIDE.md", "docs/DEVELOPMENT.md", "docs/CONTRIBUTING.md", "docs/TROUBLESHOOTING.md", "docs/LOCALIZATION.md", "docs/MAINTENANCE.md", "docs/zh-cn/maintenance.md", "docs/ADR-0001-agentic-crm.md", "docs/ADR-0002-protocol-first-generated-client.md", "docs/ARCHITECTURE.md", "docs/DATA-MODEL.md", "docs/EVENTS-AUDIT.md", "docs/LIFECYCLE.md", "docs/SECURITY.md", "docs/BUILD-RELEASE.md", "docs/CHECKPOINTS.md", "docs/SOURCE-EVIDENCE.md", "docs/TRACEABILITY.md", "postman/voice-crm.postman_collection.json"];
+const runtimeSources = ["src/application/commands.mjs", "src/application/index.mjs", "src/application/mutation-policy.mjs", "src/application/services.mjs", "src/auth.mjs", "src/composition-root.mjs", "src/contracts.mjs", "src/data-cipher.mjs", "src/mutation-policy.mjs", "src/object-storage.mjs", "src/observability.mjs", "src/outbox-relay.mjs", "src/outbox-worker.mjs", "src/provider-common.mjs", "src/provider-dashscope.mjs", "src/provider-mock.mjs", "src/provider-openai.mjs", "src/providers.mjs", "src/production-config.mjs", "src/protocol-policy.mjs", "src/protocol-validation.mjs", "src/postgres-store.mjs", "src/server.mjs", "src/sse-adapter.mjs", "src/store.mjs"];
+const required = ["README.md", "AGENTS.md", "LICENSE", "contracts/openapi.yaml", "contracts/events.yaml", "db/migrations/001_initial.sql", "db/tests/001_rls_and_atomicity.sql", "protocol/protocol.manifest.json", "protocol/protocol-manifest.schema.json", "protocol/schema/json/openapi.bundle.json", "protocol/schema/json/events.bundle.json", "packages/api-client/src/generated/index.ts", ".mcp.json", "astro.config.mjs", "src/content.config.ts", "integrations/sumi-docs-publisher.mjs", "scripts/check-contract-consumers.mjs", "scripts/load-drill.mjs", "scripts/fault-drill.mjs", ...runtimeSources, "docs/index.md", "docs/QUICKSTART.md", "docs/CONFIGURATION.md", "docs/API.md", "docs/AGENT-GUIDE.md", "docs/DEVELOPMENT.md", "docs/CONTRIBUTING.md", "docs/TROUBLESHOOTING.md", "docs/LOCALIZATION.md", "docs/MAINTENANCE.md", "docs/zh-cn/maintenance.md", "docs/ADR-0001-agentic-crm.md", "docs/ADR-0002-protocol-first-generated-client.md", "docs/ADR-0004-runtime-agent-boundary.md", "docs/zh-cn/adr-0004-runtime-agent-boundary.md", "docs/ARCHITECTURE.md", "docs/DATA-MODEL.md", "docs/EVENTS-AUDIT.md", "docs/LIFECYCLE.md", "docs/SECURITY.md", "docs/BUILD-RELEASE.md", "docs/CHECKPOINTS.md", "docs/SOURCE-EVIDENCE.md", "docs/TRACEABILITY.md", "postman/voice-crm.postman_collection.json"];
 const missing = required.filter((p) => !existsSync(p));
 if (missing.length) throw new Error(`missing required files: ${missing.join(", ")}`);
 JSON.parse(await readFile("postman/voice-crm.postman_collection.json", "utf8"));
@@ -13,6 +13,7 @@ const events = await readFile("contracts/events.yaml", "utf8");
 for (const marker of ["$schema:", "specversion: { const: \"1.0\" }", "crm.command.committed.v1", "voice.request.failed.v1"]) if (!events.includes(marker)) throw new Error(`event marker missing: ${marker}`);
 const protocolManifest = JSON.parse(await readFile("protocol/protocol.manifest.json", "utf8"));
 for (const field of ["protocol_version", "sources", "generated", "commands", "rollback"]) if (!(field in protocolManifest)) throw new Error(`protocol manifest field missing: ${field}`);
+if (!Array.isArray(protocolManifest.consumer_roots) || protocolManifest.consumer_roots.length === 0) throw new Error("protocol manifest consumer_roots must be non-empty");
 for (const path of Object.values(protocolManifest.generated)) if (!existsSync(path)) throw new Error(`generated protocol path missing: ${path}`);
 const sql = await readFile("db/migrations/001_initial.sql", "utf8");
 for (const marker of ["create table if not exists tenants", "create table if not exists outbox_events", "enable row level security", "force row level security", "create policy tenant_isolation"]) if (!sql.includes(marker)) throw new Error(`SQL safety marker missing: ${marker}`);
@@ -31,6 +32,9 @@ const secretPatterns = [
 ];
 const secretFindings = [];
 for (const path of trackedFiles.stdout.split("\0").filter(Boolean)) {
+  // A tracked file staged for deletion (for example, a replaced lockfile) is
+  // still returned by git ls-files but no longer exists in the worktree.
+  if (!existsSync(path)) continue;
   const bytes = await readFile(path);
   if (bytes.includes(0)) continue;
   const text = bytes.toString("utf8");

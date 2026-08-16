@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { now, sha256 } from "./contracts.mjs";
 import { validateEvent } from "./protocol-validation.mjs";
@@ -21,9 +20,10 @@ function idempotencyConflict() {
  * state, audit and outbox records together.
  */
 export class PostgresCrmStore {
-  constructor({ connectionString = process.env.DATABASE_URL, pool, cipher, env = process.env } = {}) {
-    if (!pool && !connectionString) throw new Error("DATABASE_URL is required when STORE_PROVIDER=postgres");
-    this.pool = pool ?? new Pool({ connectionString, max: Number(process.env.DATABASE_POOL_MAX || 10) });
+  constructor({ connectionString, pool, cipher, env = process.env } = {}) {
+    const resolvedConnectionString = connectionString ?? env.DATABASE_URL;
+    if (!pool && !resolvedConnectionString) throw new Error("DATABASE_URL is required when STORE_PROVIDER=postgres");
+    this.pool = pool ?? new Pool({ connectionString: resolvedConnectionString, max: Number(env.DATABASE_POOL_MAX || 10) });
     this.cipher = cipher ?? new DataCipher({ env: { ...env, STORE_PROVIDER: "postgres" } });
   }
 

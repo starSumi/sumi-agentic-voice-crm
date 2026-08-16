@@ -13,14 +13,21 @@ import {
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 const DEFAULT_RUNTIME_SOURCES = [
+  "src/application/commands.mjs",
+  "src/application/index.mjs",
+  "src/application/mutation-policy.mjs",
+  "src/application/services.mjs",
   "src/auth.mjs",
+  "src/composition-root.mjs",
   "src/contracts.mjs",
   "src/data-cipher.mjs",
+  "src/mutation-policy.mjs",
   "src/object-storage.mjs",
   "src/observability.mjs",
   "src/outbox-relay.mjs",
   "src/outbox-worker.mjs",
   "src/provider-common.mjs",
+  "src/protocol-policy.mjs",
   "src/provider-dashscope.mjs",
   "src/provider-mock.mjs",
   "src/provider-openai.mjs",
@@ -29,6 +36,7 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/protocol-validation.mjs",
   "src/postgres-store.mjs",
   "src/server.mjs",
+  "src/sse-adapter.mjs",
   "src/store.mjs",
 ];
 
@@ -185,6 +193,7 @@ export async function buildRuntime({
     );
     await cp(join(resolvedRoot, "LICENSE"), join(stageRoot, "LICENSE"));
     for (const source of runtimeSources) {
+      await mkdir(dirname(join(stageRoot, source)), { recursive: true });
       await cp(join(resolvedRoot, source), join(stageRoot, source));
     }
     await writeFile(

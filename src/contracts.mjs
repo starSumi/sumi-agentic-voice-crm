@@ -1,23 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
+import { AUDIO_TYPES, DEFAULT_LOCALE, ERROR_CODES, LOCALES, OUTPUT_MODES } from "./protocol-policy.mjs";
+
+export { AUDIO_TYPES, ERROR_CODES, LOCALES, OUTPUT_MODES } from "./protocol-policy.mjs";
 
 export const API_VERSION = "v1";
 export const INTENT_SCHEMA_VERSION = "understanding.v1";
-export const OUTPUT_MODES = new Set(["text", "audio", "both"]);
-export const AUDIO_TYPES = new Set(["audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp4", "audio/webm"]);
-export const ERROR_CODES = Object.freeze({
-  INVALID_REQUEST: [400, false], UNAUTHORIZED: [401, false], FORBIDDEN: [403, false],
-  UNSUPPORTED_MEDIA: [415, false], NO_AUDIO_SOURCE: [422, false], EMPTY_TRANSCRIPT: [422, false],
-  INTENT_LOW_CONFIDENCE: [202, false], CRM_CONFLICT: [409, true], ASR_TIMEOUT: [504, true],
-  IDEMPOTENCY_CONFLICT: [409, false], UPSTREAM_UNAVAILABLE: [503, true], PROVIDER_REJECTED: [502, false], RATE_LIMITED: [429, true]
-});
 
 export function requestId() { return `req_${randomUUID().replaceAll("-", "").slice(0, 24)}`; }
 export function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 export function now() { return new Date().toISOString(); }
 
 export function errorEnvelope(code, message, request_id, details = {}) {
-  const [status, retryable] = ERROR_CODES[code] ?? [500, false];
-  return { status: "failed", request_id, error: { code, message, retryable, details } };
+  const safeCode = ERROR_CODES[code] ? code : "INVALID_REQUEST";
+  const [, retryable] = ERROR_CODES[safeCode];
+  const safeMessage = (typeof message === "string" ? message : "request failed").trim().slice(0, 1000) || "request failed";
+  const safeDetails = details && typeof details === "object" ? details : {};
+  return { status: "failed", request_id, error: { code: safeCode, message: safeMessage, retryable, details: safeDetails } };
 }
 
 export function assertTenant(headers) {
@@ -61,15 +59,16 @@ export function validateIdempotencyKey(value) {
 }
 
 export function validateTextAsk(body) {
-  if (!body || typeof body !== "object" || body.input?.type !== "text" || typeof body.input.text !== "string" || !body.input.text.trim()) {
+  // The transport contract has already been validated by validateProtocol.
+  // This function only normalizes the accepted DTO for the domain operation.
+  if (!body || typeof body !== "object" || body.input?.type !== "text" || typeof body.input.text !== "string") {
     throw Object.assign(new Error("input.type=text and non-empty input.text are required"), { code: "INVALID_REQUEST" });
   }
-  if (!OUTPUT_MODES.has(body.output_mode)) throw Object.assign(new Error("output_mode must be text, audio or both"), { code: "INVALID_REQUEST" });
-  if (body.input.text.length > 10000) throw Object.assign(new Error("text exceeds 10000 characters"), { code: "INVALID_REQUEST" });
-  return { type: "text", text: body.input.text.trim(), locale: body.locale ?? "zh-CN", output_mode: body.output_mode, conversation_id: body.conversation_id };
+  if (!body.input.text.trim()) throw Object.assign(new Error("input text must not be empty"), { code: "INVALID_REQUEST" });
+  return { type: "text", text: body.input.text.trim(), locale: body.locale ?? DEFAULT_LOCALE, output_mode: body.output_mode, conversation_id: body.conversation_id };
 }
 
-export function validateAudioInput({ data, content_type, locale = "zh-CN", output_mode = "both" }) {
+export function validateAudioInput({ data, content_type, locale = "zh-CN", output_mode = "both", env = process.env }) {
   if (!data || !Buffer.isBuffer(data) || data.length === 0) throw Object.assign(new Error("audio part is empty"), { code: "NO_AUDIO_SOURCE" });
   if (!AUDIO_TYPES.has(content_type)) throw Object.assign(new Error(`unsupported audio content type: ${content_type}`), { code: "UNSUPPORTED_MEDIA" });
   if (data.length > 25 * 1024 * 1024) throw Object.assign(new Error("audio exceeds 25 MB"), { code: "INVALID_REQUEST" });
@@ -77,10 +76,10 @@ export function validateAudioInput({ data, content_type, locale = "zh-CN", outpu
   if (magic && !compatibleAudioType(content_type, magic)) {
     throw Object.assign(new Error(`audio bytes do not match ${content_type}`), { code: "UNSUPPORTED_MEDIA" });
   }
-  if (!magic && process.env.ALLOW_MOCK_AUDIO !== "true" && (process.env.PROVIDER_MODE ?? "mock") !== "mock") {
+  if (!magic && env.ALLOW_MOCK_AUDIO !== "true" && (env.PROVIDER_MODE ?? "mock") !== "mock") {
     throw Object.assign(new Error("audio signature is not recognized"), { code: "UNSUPPORTED_MEDIA" });
   }
-  if (!OUTPUT_MODES.has(output_mode)) throw Object.assign(new Error("invalid output_mode"), { code: "INVALID_REQUEST" });
+  if (!OUTPUT_MODES.has(output_mode) || !LOCALES.has(locale)) throw Object.assign(new Error("audio locale or output mode is outside the published contract"), { code: "INVALID_REQUEST" });
   return { type: "audio", data, content_type, locale, output_mode };
 }
 

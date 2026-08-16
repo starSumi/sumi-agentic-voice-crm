@@ -21,14 +21,43 @@ test("health readiness exposes provider contract", async () => {
   const r = await fetch(`${base}/health/ready`); assert.equal(r.status, 200); assert.equal((await r.json()).status, "ready");
 });
 
-test("text ask returns CRM result and TTS asset", async () => {
-  const r = await ask({ input: { type: "text", text: "move Acme renewal to Negotiation" }, output_mode: "both", locale: "en-US" });
-  assert.equal(r.status, 200); assert.equal(r.body.understanding.intent, "crm.deal.update_stage"); assert.equal(r.body.crm.action, "updated"); assert.equal(r.body.audio.status, "ready");
+test("read-only text ask returns CRM result and TTS asset", async () => {
+  const r = await ask({ input: { type: "text", text: "find Acme renewal" }, output_mode: "both", locale: "en-US" });
+  assert.equal(r.status, 200); assert.equal(r.body.understanding.intent, "crm.search"); assert.equal(r.body.understanding.needs_confirmation, false); assert.equal(r.body.crm.action, "read_only"); assert.equal(r.body.audio.status, "ready");
 });
 
-test("same idempotency key returns the same resource result", async () => {
+test("audio assets use an authenticated metadata and binary content boundary", async () => {
+  const r = await ask({ input: { type: "text", text: "find Acme renewal" }, output_mode: "both", locale: "en-US" }, "asset-boundary-1");
+  assert.equal(r.status, 200);
+  const assetId = r.body.audio.asset_id;
+  const headers = { authorization: "Bearer test-actor", "x-tenant-id": "tenant_demo" };
+  const metadata = await fetch(`${base}/v1/assets/${assetId}`, { headers });
+  assert.equal(metadata.status, 200);
+  const metadataBody = await metadata.json();
+  assert.equal(metadataBody.asset_id, assetId);
+  assert.equal(metadataBody.kind, "audio");
+  assert.equal(metadataBody.url, `/v1/assets/${assetId}/content`);
+  assert.equal(/[?&](?:signature|token|x-amz-)/i.test(metadataBody.url), false);
+
+  const content = await fetch(`${base}${metadataBody.url}`, { headers });
+  assert.equal(content.status, 200);
+  assert.match(content.headers.get("content-type"), /^audio\//);
+  assert.ok((await content.arrayBuffer()).byteLength > 0);
+  const denied = await fetch(`${base}${metadataBody.url}`);
+  assert.equal(denied.status, 401);
+});
+
+test("mutating intent is fail-closed even when provider says no confirmation", async () => {
+  const r = await ask({ input: { type: "text", text: "move Acme renewal to Negotiation" }, output_mode: "text", locale: "en-US" }, "mutation-policy-1");
+  assert.equal(r.status, 202); assert.equal(r.body.status, "needs_review"); assert.equal(r.body.understanding.needs_confirmation, true); assert.ok(r.body.review_task.id);
+  const events = await fetch(`${base}/v1/events`, { headers: { authorization: "Bearer test-actor", "x-tenant-id": "tenant_demo" } });
+  const committed = (await events.json()).events.filter((event) => event.request_id === r.body.request_id && event.type === "crm.command.committed.v1");
+  assert.equal(committed.length, 0);
+});
+
+test("same idempotency key returns the same review task", async () => {
   const body = { input: { type: "text", text: "move Acme renewal to Negotiation" }, output_mode: "text", locale: "en-US" };
-  const a = await ask(body, "stable-key-1"); const b = await ask(body, "stable-key-1"); assert.equal(a.body.crm.resource.id, b.body.crm.resource.id); assert.equal(a.body.crm.aggregate_version, b.body.crm.aggregate_version);
+  const a = await ask(body, "stable-key-1"); const b = await ask(body, "stable-key-1"); assert.equal(a.status, 202); assert.equal(b.status, 202); assert.equal(a.body.review_task.id, b.body.review_task.id);
 });
 
 test("low confidence creates review task and does not commit CRM", async () => {
@@ -41,8 +70,8 @@ test("missing audio is a non-retryable boundary error", async () => {
 });
 
 test("mock audio exercises ASR to intent to TTS", async () => {
-  const r = await ask({ input: { type: "audio", data_base64: Buffer.from("MOCK_AUDIO:move Acme renewal to Negotiation").toString("base64"), content_type: "audio/wav" }, output_mode: "both", locale: "en-US" }, "audio-key-1");
-  assert.equal(r.status, 200); assert.equal(r.body.input.type, "audio"); assert.equal(r.body.input.asr.provider, "mock"); assert.equal(r.body.audio.mime_type, "audio/mpeg");
+  const r = await ask({ input: { type: "audio", data_base64: Buffer.from("MOCK_AUDIO:find Acme renewal").toString("base64"), content_type: "audio/wav" }, output_mode: "both", locale: "en-US" }, "audio-key-1");
+  assert.equal(r.status, 200); assert.equal(r.body.input.type, "audio"); assert.equal(r.body.input.asr.provider, "mock"); assert.equal(r.body.understanding.needs_confirmation, false); assert.equal(r.body.audio.mime_type, "audio/mpeg");
 });
 
 test("unauthenticated requests are rejected", async () => {

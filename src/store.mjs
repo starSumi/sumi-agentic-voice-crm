@@ -20,7 +20,7 @@ export class CrmStore {
     if (tenant_id) { this.recordAsset({ tenant_id, actor_id, request_id, asset, object_key }); this.#events.push(event); this.#outbox.push(event); this.#audits.push(audit); }
     return structuredClone(asset);
   }
-  recordAsset({ tenant_id, actor_id, request_id, asset, object_key }) {
+  recordAsset({ tenant_id, request_id, asset, object_key }) {
     if (!tenant_id || !asset?.asset_id) return;
     this.#assets.set(`${tenant_id}:${asset.asset_id}`, { tenant_id, request_id, asset: structuredClone(asset) });
     if (object_key) this.#assetObjects.set(`${tenant_id}:${asset.asset_id}`, object_key);
@@ -48,8 +48,8 @@ export class CrmStore {
     if (transcript !== undefined) row.transcript = structuredClone(transcript);
     if (understanding !== undefined) row.understanding = structuredClone(understanding);
     if (provider_invocations) row.provider_invocations.push(...structuredClone(provider_invocations));
-    if (model_versions) row.model_versions = { ...(row.model_versions ?? {}), ...model_versions };
-    if (latency_ms) row.latency_ms = { ...(row.latency_ms ?? {}), ...latency_ms };
+    if (model_versions) row.model_versions = { ...row.model_versions, ...model_versions };
+    if (latency_ms) row.latency_ms = { ...row.latency_ms, ...latency_ms };
     if (input_asset_id) row.input_asset_id = input_asset_id;
   }
   completeInteraction({ tenant_id, idempotency_key, response, http_status }) {
@@ -67,9 +67,9 @@ export class CrmStore {
     const row = this.#interactions.get(`${tenant_id}:${idempotency_key}`);
     return row ? structuredClone(row) : undefined;
   }
-  recordInputAsset({ tenant_id, actor_id, request_id, asset, object_key, byte_length, sha256 }) {
+  recordInputAsset({ tenant_id, actor_id, request_id, asset, object_key, byte_length, sha256: assetSha256 }) {
     this.recordAsset({ tenant_id, actor_id, request_id, asset: { ...asset, url: `/v1/assets/${asset.asset_id}` }, object_key });
-    return { asset_id: asset.asset_id, object_key, byte_length, sha256 };
+    return { asset_id: asset.asset_id, object_key, byte_length, sha256: assetSha256 };
   }
   execute({ tenant_id, actor_id, idempotency_key, intent, entities, request_id, request_fingerprint }) {
     const fingerprint = request_fingerprint ?? sha256(JSON.stringify({ intent, entities }));
