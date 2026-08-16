@@ -12,7 +12,7 @@ COPY contracts ./contracts
 COPY protocol ./protocol
 COPY packages ./packages
 COPY scripts ./scripts
-COPY src/*.mjs ./src/
+COPY src ./src
 RUN node scripts/build.mjs
 
 FROM node:24.18.0-bookworm-slim AS runtime
