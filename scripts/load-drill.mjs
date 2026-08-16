@@ -56,7 +56,7 @@ async function worker() {
       const response = await fetch(`${baseUrl}/v1/ask`, {
         method: "POST",
         headers: { authorization: process.env.DRILL_AUTHORIZATION || "Bearer load-actor", "x-tenant-id": process.env.DRILL_TENANT_ID || "tenant_demo", "idempotency-key": `load-${Date.now()}-${index}`, "content-type": "application/json" },
-        body: JSON.stringify({ input: { type: "text", text: "find customer" }, output_mode: "text", locale: "en-US" }),
+        body: JSON.stringify({ input: { type: "text", text: "find records" }, output_mode: "text", locale: "en-US" }),
         signal: AbortSignal.timeout(Number(process.env.DRILL_REQUEST_TIMEOUT_MS || 5_000)),
       });
       if (response.status !== 200) failures.push({ index, status: response.status });
