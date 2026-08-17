@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   cp,
+  chmod,
   mkdir,
   readFile,
   readdir,
@@ -31,6 +32,7 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/extensions/index.mjs",
   "src/extensions/manifest.mjs",
   "src/extensions/registry.mjs",
+  "src/extensions/rust-process-supervisor.mjs",
   "src/lifecycle/staged-timeout.mjs",
   "src/lifecycle/managed-task-registry.mjs",
   "src/mutation-policy.mjs",
@@ -50,6 +52,13 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/server.mjs",
   "src/sse-adapter.mjs",
   "src/store.mjs",
+];
+
+const DEFAULT_RUNTIME_BINARIES = [
+  {
+    source: "target/release/sumi-runtime-supervisor",
+    target: "bin/sumi-runtime-supervisor",
+  },
 ];
 
 function sha256(value) {
@@ -76,10 +85,16 @@ async function createManifest(stageRoot, packageMetadata) {
   const files = [];
   for (const path of paths) {
     const bytes = await readFile(join(stageRoot, path));
-    files.push({ path, bytes: bytes.length, sha256: sha256(bytes) });
+    const metadata = await stat(join(stageRoot, path));
+    files.push({
+      path,
+      bytes: bytes.length,
+      sha256: sha256(bytes),
+      executable: (metadata.mode & 0o111) !== 0,
+    });
   }
   const contentSet = files
-    .map(({ path, bytes, sha256: digest }) => `${path}\0${bytes}\0${digest}`)
+    .map(({ path, bytes, sha256: digest, executable }) => `${path}\0${bytes}\0${digest}\0${executable}`)
     .join("\n");
   return {
     schema_version: "sumi.runtime-build-manifest.v1",
@@ -121,13 +136,19 @@ export async function verifyBuildManifest(root) {
     ) {
       throw new Error(`unsafe runtime manifest path: ${entry.path}`);
     }
-    const bytes = await readFile(join(resolvedRoot, entry.path));
-    if (bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256) {
+    const absolutePath = join(resolvedRoot, entry.path);
+    const bytes = await readFile(absolutePath);
+    const metadata = await stat(absolutePath);
+    if (
+      bytes.length !== entry.bytes
+      || sha256(bytes) !== entry.sha256
+      || ((metadata.mode & 0o111) !== 0) !== entry.executable
+    ) {
       throw new Error(`runtime build manifest digest mismatch: ${entry.path}`);
     }
   }
   const contentSet = manifest.files
-    .map(({ path, bytes, sha256: digest }) => `${path}\0${bytes}\0${digest}`)
+    .map(({ path, bytes, sha256: digest, executable }) => `${path}\0${bytes}\0${digest}\0${executable}`)
     .join("\n");
   if (sha256(contentSet) !== manifest.content_set_sha256) {
     throw new Error("runtime build aggregate digest mismatch");
@@ -163,6 +184,7 @@ export async function buildRuntime({
   root = process.cwd(),
   output = "dist",
   runtimeSources = DEFAULT_RUNTIME_SOURCES,
+  runtimeBinaries = DEFAULT_RUNTIME_BINARIES,
 } = {}) {
   const resolvedRoot = resolve(root);
   const outputRoot = resolve(resolvedRoot, output);
@@ -212,6 +234,21 @@ export async function buildRuntime({
     for (const source of runtimeSources) {
       await mkdir(dirname(join(stageRoot, source)), { recursive: true });
       await cp(join(resolvedRoot, source), join(stageRoot, source));
+    }
+    for (const binary of runtimeBinaries) {
+      if (
+        !binary
+        || typeof binary.source !== "string"
+        || typeof binary.target !== "string"
+        || binary.target.startsWith("/")
+        || binary.target.includes("..")
+      ) {
+        throw new Error("runtime binary mapping is invalid");
+      }
+      const target = join(stageRoot, binary.target);
+      await mkdir(dirname(target), { recursive: true });
+      await cp(join(resolvedRoot, binary.source), target);
+      await chmod(target, 0o755);
     }
     await writeFile(
       join(stageRoot, "package.json"),

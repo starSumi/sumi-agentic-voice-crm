@@ -30,6 +30,10 @@
             packages = [
               pkgs.nodejs_24
               pnpmPinned
+              pkgs.rustc
+              pkgs.cargo
+              pkgs.clippy
+              pkgs.rustfmt
               pkgs.git
               pkgs.jq
               pkgs.openssl
@@ -58,7 +62,7 @@
                 echo "Sumi expects pnpm 10.33.4" >&2
                 return 1
               }
-              echo "Sumi Nix shell: Node $(node --version), pnpm $(pnpm --version); services remain stopped."
+              echo "Sumi Nix shell: Node $(node --version), pnpm $(pnpm --version), $(rustc --version); services remain stopped."
             '';
           };
         }
@@ -75,6 +79,8 @@
             src = self;
           } ''
             test -f "$src/pnpm-lock.yaml"
+            test -f "$src/Cargo.lock"
+            test "$(sed -n 's/^channel = \"\(.*\)\"/\1/p' "$src/rust-toolchain.toml")" = "1.96.0"
             test ! -e "$src/package-lock.json"
             test "$(jq -r .packageManager "$src/package.json")" = "pnpm@10.33.4"
             test "$(jq -r .volta.node "$src/package.json")" = "24.18.0"

@@ -21,6 +21,9 @@ test("production image installs only the lockfile production closure and runs di
   );
   assert.match(dockerfile, /COPY src \.\/src/);
   assert.match(dockerfile, /COPY db\/migrations \.\/db\/migrations/);
+  assert.match(dockerfile, /FROM rust:1\.96\.0-bookworm AS rust-build/);
+  assert.match(dockerfile, /cargo build --release --locked --package sumi-runtime-supervisor/);
+  assert.match(dockerfile, /target\/release\/sumi-runtime-supervisor/);
   assert.doesNotMatch(dockerfile, /COPY src\/\*\.mjs \.\/src/);
   assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /CMD \["node", "dist\/src\/server\.mjs"\]/);
@@ -39,6 +42,8 @@ test("container smoke verifies the image command, production dependencies and re
     "await import('@aws-sdk/client-s3')",
     "await import('./dist/src/outbox-relay.mjs')",
     "003_conversation_revision_cas.sql",
+    "dist/bin/sumi-runtime-supervisor",
+    "sumi.runtime.supervisor.v1",
     '"--publish",',
     "health/ready",
     'assert.equal(runtimeUser, "node"',

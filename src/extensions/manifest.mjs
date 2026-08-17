@@ -1,6 +1,7 @@
 export const EXTENSION_PROTOCOL_VERSION = "sumi.runtime.extension.v1";
 
 export const EXTENSION_CAPABILITIES = Object.freeze([
+  "runtime.health",
   "provider.asr",
   "provider.intent",
   "provider.tts",
@@ -24,6 +25,7 @@ export const EXTENSION_PERMISSIONS = Object.freeze([
 ]);
 
 const CAPABILITY_PERMISSIONS = Object.freeze({
+  "runtime.health": [],
   "provider.asr": ["network.provider", "media.read"],
   "provider.intent": ["network.provider"],
   "provider.tts": ["network.provider", "media.write"],
@@ -80,7 +82,10 @@ export function validateExtensionManifest(input) {
     throw new TypeError("extension entrypoint is invalid");
   }
   const capabilities = strings(input.capabilities, "extension capabilities", { allow: new Set(EXTENSION_CAPABILITIES) });
-  const permissions = strings(input.permissions, "extension permissions", { allow: new Set(EXTENSION_PERMISSIONS) });
+  const permissions = strings(input.permissions, "extension permissions", {
+    allow: new Set(EXTENSION_PERMISSIONS),
+    allowEmpty: true,
+  });
   for (const capability of capabilities) {
     for (const required of CAPABILITY_PERMISSIONS[capability]) {
       if (!permissions.includes(required)) throw new TypeError(`extension capability ${capability} requires permission ${required}`);

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sumi.dev/runtime/supervisor-v1.json",
+  "title": "Sumi Runtime Supervisor Protocol",
+  "description": "Internal NDJSON lifecycle protocol. It carries no CRM DTO, credential, or capability payload.",
+  "oneOf": [
+    { "$ref": "#/$defs/startRequest" },
+    { "$ref": "#/$defs/healthRequest" },
+    { "$ref": "#/$defs/stopRequest" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "protocol": { "const": "sumi.runtime.supervisor.v1" },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "extensionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "startRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "op", "extension_id", "program", "args", "env", "startup_timeout_ms", "shutdown_grace_ms"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "request_id": { "$ref": "#/$defs/requestId" },
+        "op": { "const": "start" },
+        "extension_id": { "$ref": "#/$defs/extensionId" },
+        "program": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/" },
+        "args": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "maxLength": 4096 }
+        },
+        "env": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]{0,63}$" },
+          "additionalProperties": { "type": "string", "maxLength": 8192 }
+        },
+        "startup_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 30000 },
+        "shutdown_grace_ms": { "type": "integer", "minimum": 1, "maximum": 30000 }
+      }
+    },
+    "healthRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "op"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "request_id": { "$ref": "#/$defs/requestId" },
+        "op": { "const": "health" }
+      }
+    },
+    "stopRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "op"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "request_id": { "$ref": "#/$defs/requestId" },
+        "op": { "const": "stop" }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "ok", "state"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "ok": { "type": "boolean" },
+        "state": { "enum": ["created", "running", "stopped", "failed"] },
+        "ready": { "type": "boolean" },
+        "child_pid": { "type": "integer", "minimum": 1 },
+        "forced": { "type": "boolean" },
+        "exit_code": { "type": "integer" },
+        "signal": { "type": "integer", "minimum": 1 },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+          }
+        }
+      }
+    }
+  }
+}

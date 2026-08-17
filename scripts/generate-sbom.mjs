@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawnCargoSync } from "./run-cargo.mjs";
 
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const lockfile = await readFile("pnpm-lock.yaml");
+const cargoLockfile = await readFile("Cargo.lock");
 const expectedPnpm = packageJson.packageManager?.match(/^pnpm@(\d+\.\d+\.\d+)$/)?.[1];
 
 if (!expectedPnpm || packageJson.engines?.pnpm !== expectedPnpm) {
@@ -18,6 +20,17 @@ function runPnpm(args) {
   });
   if (result.status !== 0) {
     throw new Error(`pnpm ${args.join(" ")} failed: ${result.stderr || result.stdout}`);
+  }
+  return result.stdout.trim();
+}
+
+function runCargo(args) {
+  const result = spawnCargoSync(args, {
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error(`cargo ${args.join(" ")} failed: ${result.stderr || result.stdout}`);
   }
   return result.stdout.trim();
 }
@@ -65,6 +78,31 @@ function visit(parentKey, dependencies = {}) {
 visit(rootKey, project.dependencies);
 visit(rootKey, project.optionalDependencies);
 
+const cargoMetadata = JSON.parse(runCargo(["metadata", "--locked", "--format-version", "1"]));
+const cargoVersion = runCargo(["--version"]);
+const cargoPackageById = new Map(cargoMetadata.packages.map((entry) => [entry.id, entry]));
+const cargoNodeById = new Map((cargoMetadata.resolve?.nodes ?? []).map((entry) => [entry.id, entry]));
+const cargoReachable = new Set();
+
+function cargoKey(id) {
+  return `cargo:${id}`;
+}
+
+function visitCargo(id) {
+  if (cargoReachable.has(id)) return;
+  cargoReachable.add(id);
+  const node = cargoNodeById.get(id);
+  for (const dependencyId of node?.dependencies ?? []) {
+    relationships.add(`${spdxId(cargoKey(id))} DEPENDS_ON ${spdxId(cargoKey(dependencyId))}`);
+    visitCargo(dependencyId);
+  }
+}
+
+for (const memberId of cargoMetadata.workspace_members) {
+  relationships.add(`${spdxId(rootKey)} DEPENDS_ON ${spdxId(cargoKey(memberId))}`);
+  visitCargo(memberId);
+}
+
 const missingLicenseMetadata = [...packageByKey.keys()].filter(
   (key) => !licenseByPackage.has(key),
 );
@@ -96,7 +134,37 @@ const dependencyPackages = [...packageByKey.entries()]
     };
   });
 
-const lockDigest = createHash("sha256").update(lockfile).digest("hex");
+const cargoPackages = [...cargoReachable]
+  .sort()
+  .map((id) => {
+    const dependency = cargoPackageById.get(id);
+    if (!dependency) throw new Error(`cargo metadata omitted package ${id}`);
+    if (!dependency.license) throw new Error(`cargo package omitted license metadata: ${dependency.name}@${dependency.version}`);
+    return {
+      SPDXID: spdxId(cargoKey(id)),
+      name: dependency.name,
+      versionInfo: dependency.version,
+      downloadLocation: "NOASSERTION",
+      filesAnalyzed: false,
+      licenseConcluded: "NOASSERTION",
+      licenseDeclared: dependency.license,
+      copyrightText: "NOASSERTION",
+      ...(dependency.homepage ? { homepage: dependency.homepage } : {}),
+      externalRefs: [
+        {
+          referenceCategory: "PACKAGE-MANAGER",
+          referenceType: "purl",
+          referenceLocator: `pkg:cargo/${encodeURIComponent(dependency.name)}@${encodeURIComponent(dependency.version)}`,
+        },
+      ],
+    };
+  });
+
+const lockDigest = createHash("sha256")
+  .update(lockfile)
+  .update("\0")
+  .update(cargoLockfile)
+  .digest("hex");
 const rootId = spdxId(rootKey);
 const sbom = {
   spdxVersion: "SPDX-2.3",
@@ -106,7 +174,7 @@ const sbom = {
   documentNamespace: `https://github.com/starSumi/sumi-agentic-voice-crm/sbom/${packageJson.version}/${lockDigest}`,
   creationInfo: {
     created: new Date().toISOString(),
-    creators: [`Tool: pnpm-${actualPnpm}`, "Tool: scripts/generate-sbom.mjs"],
+    creators: [`Tool: pnpm-${actualPnpm}`, `Tool: ${cargoVersion}`, "Tool: scripts/generate-sbom.mjs"],
   },
   documentDescribes: [rootId],
   packages: [
@@ -121,6 +189,7 @@ const sbom = {
       copyrightText: "NOASSERTION",
     },
     ...dependencyPackages,
+    ...cargoPackages,
   ],
   relationships: [
     {

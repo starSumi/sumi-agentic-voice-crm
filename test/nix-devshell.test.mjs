@@ -21,6 +21,11 @@ test("Nix remains an optional shell around the canonical pnpm and Docker workflo
   assert.match(flake, /sha256-9ocTLpPeTn5BjSB01\+EO2\+UlpKpdYPG2AWq14RJ8Myg=/);
   assert.match(flake, /docker-client/);
   assert.match(flake, /docker-compose/);
+  for (const rustTool of ["pkgs.rustc", "pkgs.cargo", "pkgs.clippy", "pkgs.rustfmt"]) {
+    assert.ok(flake.includes(rustTool), `Nix shell is missing ${rustTool}`);
+  }
+  assert.match(flake, /src\/Cargo\.lock/);
+  assert.match(flake, /rust-toolchain\.toml/);
   assert.match(flake, /services remain stopped/);
   assert.doesNotMatch(flake, /pnpm install/);
   assert.doesNotMatch(flake, /docker compose up/);

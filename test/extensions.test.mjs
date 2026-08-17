@@ -24,6 +24,10 @@ test("extension manifests are closed, exact-versioned capability declarations", 
   assert.throws(() => validateExtensionManifest({ ...manifest("bad"), extra: true }), /unknown field/);
   assert.throws(() => validateExtensionManifest(manifest("bad", { version: "latest" })), /exact semver/);
   assert.throws(() => validateExtensionManifest(manifest("bad", { permissions: ["shell.root"] })), /unsupported value/);
+  assert.deepEqual(validateExtensionManifest(manifest("health.sidecar", {
+    capabilities: ["runtime.health"],
+    permissions: [],
+  })).permissions, []);
 });
 
 test("registry enforces trust, permissions, dependency order and reverse shutdown", async () => {

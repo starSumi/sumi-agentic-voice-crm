@@ -15,6 +15,10 @@
 /scripts/build.mjs @starSumi
 /package.json @starSumi
 /pnpm-lock.yaml @starSumi
+/Cargo.toml @starSumi
+/Cargo.lock @starSumi
+/rust-toolchain.toml @starSumi
+/crates/ @starSumi
 /.dockerignore @starSumi
 /.npmignore @starSumi
 /.vercelignore @starSumi

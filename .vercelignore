@@ -12,6 +12,7 @@ dist/
 .dist.staging-*/
 .dist.backup-*/
 node_modules/
+target/
 .agent-*.json
 .agent-*.tmp
 .codex/
