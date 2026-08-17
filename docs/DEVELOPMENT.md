@@ -79,7 +79,8 @@ never target a shared database.
 After a contract change, run `pnpm protocol:generate`, inspect source and
 generated diffs together, then run `pnpm protocol:check`,
 `pnpm protocol:typecheck`, and `pnpm contract:consumer-check`. Frontend code
-imports `packages/api-client/src/index.ts` and never declares a parallel
+imports operations from `packages/api-client/src/api.ts`, types from
+`packages/api-client/src/protocol.ts`, and never declares a parallel
 request/response DTO or raw `/v1/` transport. A breaking change requires
 a major protocol/event version, consumer inventory, migration window and
 rollback to the previous source/projection pair.

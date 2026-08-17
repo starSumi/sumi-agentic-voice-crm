@@ -36,9 +36,21 @@ Sumi 分为两个服务端平面和多个薄客户端适配器：
 - MCP 是 Agent 工具和文档资源的扩展边界。未来 CRM MCP server 必须是应用服务的薄适配器，并显式映射租户、actor、scope 和幂等。文档 MCP 继续只读，和 CRM mutation 工具分离。
 - gRPC 留给未来真正拆分后的内部服务。现在引入会制造第二套传输/ schema 面，并需要浏览器 gateway。WebSocket 只在确实需要双向低延迟媒体或控制时引入；普通进度不需要它。
 
+## Protocol 与 API 方向
+
+即使当前由同一个 workspace package 承载，Protocol 与 API 也是两个依赖边界。`@sumi/voice-crm-api-client/protocol` 只导出数据和事件类型；`@sumi/voice-crm-api-client/api` 负责 HTTP 操作、client 配置、transport error、timeout 和认证 header。根入口只保留兼容聚合。两者仍由同一份 OpenAPI 和 event contract 生成，拆包不能产生第二套 DTO 真相源。
+
+系统有两条不能混淆的 API 方向：Web、desktop、TUI 消费 Sumi 入站 API，而服务端 application core 实现合同，不反向调用自己的 HTTP client；Agent plane 调用外部模型 API 时，先构造供应商无关的内部 item，由 provider adapter 映射为 OpenAI Responses、DashScope 或本地模型请求，再把 HTTP/SSE provider event 映射回内部 Agent event，最后才能更新会话状态。
+
+`ResponsesApiRequest` 等供应商专属类型必须留在对应 adapter。只有在 Sumi 明确定义 schema、顺序、兼容和脱敏规则后，`ResponseItem`、`ContentItem`、`TurnItem` 才能进入共享 protocol。SQ/EQ 目前不是 Sumi 合同术语，不能凭空加入。
+
+当前生成客户端只实现请求/响应式 HTTP 操作与 client 配置，尚未提供供应商无关的 Responses SSE parser。只有在事件顺序、取消、续传、错误和兼容合同完成评审后，parser 才进入 API/provider adapter；application core 只消费映射后的内部事件流。
+
 ## 扩展与插件边界
 
-Provider adapter、MCP server 和 UI projection 都是扩展，但运行时不加载任意第三方代码。未来扩展 manifest 必须固定版本、能力集合、协议版本、owner 和权限 allowlist。不可信扩展在进程外运行，通过受审协议通信；凭据只由部署边界注入。`.mcp.json` 是客户端/服务注册文件，不是授权授予。
+Provider adapter、MCP server 和 UI projection 都是扩展，但运行时不加载任意第三方代码。当前 manifest 已固定精确版本、协议版本、owner、隔离模式、capability、permission、dependency 与 entrypoint；registry 按依赖启动、逆序停止，以部署 allowlist 和受信 ID 控制权限，并只传 permission-scoped ports。
+
+`process` 只有在受信 deployment launcher 确实创建并监管子进程时才构成隔离；manifest 和 `terminate()` 本身不是 OS sandbox。registry 不动态 import entrypoint，也不向扩展传完整环境变量。Control Engine 统一管理 epoch-aware CAS 熔断与生命周期：10 秒软超时发出协同取消，再给 2 秒清理窗口；只有受监管进程才具备真实 hard kill。`.mcp.json` 只是注册文件，不授予权限。
 
 ## 后果与回滚
 

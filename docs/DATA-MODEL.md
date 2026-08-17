@@ -29,7 +29,22 @@ The target CRM vocabulary includes these aggregates, each with `id`, `tenant_id`
 
 ### `voice_interactions`
 
-`id uuid PK`, tenant/request/actor/idempotency identity, request fingerprint, input type, status, encrypted input/transcript/understanding/response/error fields, input asset reference, provider invocation metadata, model versions, stage latency, HTTP result, and timestamps. Sensitive JSON uses tenant-bound AES-256-GCM envelopes; full audio bytes never enter this table.
+`id uuid PK`, tenant/request/actor/idempotency identity, request fingerprint,
+input type, status, encrypted input/transcript/understanding/response/error fields,
+input asset reference, provider invocation metadata, model versions, stage
+latency, HTTP result, lease owner/expiry, recovery count, and timestamps.
+Sensitive JSON uses tenant-bound AES-256-GCM envelopes; full audio bytes never
+enter this table.
+
+### `interaction_wal`
+
+Tenant and interaction identity, request ID, monotonically ordered sequence,
+transition type, encrypted transition metadata, and creation time. PostgreSQL
+WAL provides database durability; this separate application journal records
+`started`, `checkpointed`, `recovered`, `completed`, and `failed` ordering. A
+database trigger rejects update/delete, `FORCE RLS` isolates tenants, and the
+journal append shares the interaction transaction. It deliberately omits raw
+transcripts/provider payloads and is not sufficient to rebuild all state.
 
 ### `media_assets`
 
@@ -71,6 +86,10 @@ Planned for the production persistence migration; the reference runtime keeps th
 - `crm_commands.status=committed` implies business transaction committed.
 - `review_tasks.status=approved` contains actor, time and corrections.
 - Media object is private and referenced by expiring URL only.
+- Only an unexpired interaction lease owner may checkpoint or complete; stale
+  work is reclaimed with a conditional update and increments `recovery_count`.
+- `interaction_wal` is append-only and encrypted; replay responses remain owned
+  by `voice_interactions`.
 - Monetary arithmetic uses integer minor units; no floating-point persistence.
 - Soft-delete/archival is explicit; hard deletion requires retention/legal policy event.
 

@@ -65,15 +65,61 @@ credentials, signed URL query strings, raw transcripts, or customer entities.
   a browser gateway. WebSocket is reserved for a proven need for bidirectional,
   low-latency media or control; ordinary progress does not justify it.
 
+## Protocol and API direction
+
+Protocol and API are separate dependencies even when generated into one
+workspace package. `@sumi/voice-crm-api-client/protocol` exports data and event
+types only. `@sumi/voice-crm-api-client/api` owns HTTP operations, client
+configuration, transport errors, timeout and authentication-header policy. The
+root export remains a compatibility facade. All projections still come from the
+same reviewed OpenAPI and event contracts; package separation must not create a
+parallel DTO source.
+
+There are two different API directions:
+
+1. Web, desktop, and TUI clients consume the inbound Sumi API. The server-side
+   application core implements that contract and never calls its own HTTP client.
+2. The Agent plane consumes outbound model-provider APIs. It constructs a
+   vendor-neutral internal item, a provider adapter maps that item to an OpenAI
+   Responses, DashScope, or future local request, the transport serializes HTTP
+   and parses SSE, and the adapter maps provider events back to internal Agent
+   events before session state changes.
+
+Names such as `ResponsesApiRequest` and provider-specific SSE events stay inside
+the corresponding provider adapter. `ResponseItem`, `ContentItem`, or `TurnItem`
+may enter the shared protocol only after Sumi defines their vendor-neutral schema,
+ordering, compatibility, and redaction rules. SQ/EQ modes are not current Sumi
+protocol terms and must not be invented without a reviewed contract.
+
+The current generated client implements request/response HTTP operations and
+client configuration only. It does not yet expose a provider-independent
+Responses SSE parser. That parser belongs in the API/provider adapter after its
+event ordering, cancellation, resume, error, and compatibility contract is
+reviewed; the application core will consume the mapped internal event stream.
+
 ## Extension and plugin boundary
 
 Provider adapters, MCP servers, and UI projections are extensions, but arbitrary
-third-party code is not loaded into the runtime process. A future extension
-manifest must pin a version, capability set, protocol version, owner, and
-permission allowlist. Untrusted extensions run out of process and communicate
-through a reviewed protocol; secrets are injected only by the deployment
-boundary. `.mcp.json` is a client/server registration file, not an authority
-grant.
+third-party code is not loaded into the runtime process. The implemented
+extension manifest pins an exact version, protocol version, owner, isolation,
+capabilities, permissions, dependencies, and entrypoint. The registry uses a
+deployment permission allowlist, explicit trusted IDs for in-process code,
+dependency-ordered startup, reverse shutdown, bounded health checks, and only
+permission-scoped ports.
+
+`process` means the deployment supplied a trusted launcher that actually creates
+and supervises another process. A manifest and `terminate()` method alone are not
+an OS sandbox. The registry never imports a manifest entrypoint dynamically and
+never passes the environment snapshot to an extension. Credentials remain a
+deployment concern. `.mcp.json` is a client/server registration file, not an
+authority grant.
+
+The Control Engine owns keyed, epoch-aware CAS circuit breakers and extension
+lifecycle. Provider and outbox operations receive a child `AbortSignal`: after a
+10 second soft deadline cooperative cleanup begins, and after a further 2 second
+grace a process supervisor may terminate isolated work. In-process JavaScript
+cannot be physically killed, so hard-stop hooks are only a real kill boundary for
+supervised processes.
 
 ## Consequences
 

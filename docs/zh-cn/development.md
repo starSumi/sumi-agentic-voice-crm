@@ -30,7 +30,8 @@ pnpm verify
 | 路径 | 责任 |
 | --- | --- |
 | `src/` | HTTP 参考运行时、校验、provider 和内存状态。 |
-| `packages/api-client/src/index.ts` | 前端唯一 API facade；由 OpenAPI 生成操作和类型。 |
+| `packages/api-client/src/api.ts` | HTTP/SSE operation、认证 header、timeout 和 client 配置边界。 |
+| `packages/api-client/src/protocol.ts` | 由合同生成的纯数据与事件类型；无 I/O 和业务逻辑。 |
 | `contracts/` | OpenAPI 与事件协议权威来源。 |
 | `db/` | 生产目标 schema 与 RLS migration。 |
 | `docs/` | Web 与 MCP 共用的唯一评审内容源。 |
@@ -54,6 +55,6 @@ pnpm verify:mcp
 开始开发前读取评审后的 cursor 与当前检查点，并重新探测 Git 和 CI。变更公开行为前先增加失败测试；先改规范类型或契约，再改 adapter 和 transport；模型输出始终是不可信输入；行为或运维流程改变时同步核心中英文文档。无法运行的门必须明确报告，不能用状态文档代替证据。
 
 协议消费者必须运行 `pnpm run contract:consumer-check`：前端只能从
-`packages/api-client/src/index.ts` 导入生成操作和类型，不能手写 `/v1/` 请求或
+`packages/api-client/src/api.ts` 导入操作、从 `packages/api-client/src/protocol.ts` 导入类型，不能手写 `/v1/` 请求或
 重复定义传输 DTO。`src/composition-root.mjs` 负责进程级资源；请求、provider
 操作和 PostgreSQL 事务的生命周期保持显式，provider 网络调用不持有数据库事务。

@@ -40,11 +40,21 @@ The composition root in `src/composition-root.mjs` owns process-singleton resour
 the environment snapshot, authenticator/JWKS cache, provider adapters and circuit
 breakers, object storage client, PostgreSQL pool, and observability registry.
 Each request gets an immutable context (`request_id`, traceparent, tenant/actor
-identity); each provider call is an operation scope with its own timeout; each
+identity, `AbortSignal`); each provider call is an operation scope with a
+10-second cooperative deadline and a 2-second hard-stop grace; each
 PostgreSQL command is a transaction scope. Provider network calls never hold a
 database transaction open.
 
+Interactions hold a renewable database lease. Checkpoint and completion updates
+require the current owner and an unexpired lease. A new request may reclaim only
+`processing` work whose lease expired, using one conditional database update;
+the recovery transition and encrypted journal entry commit in the same
+transaction. The journal establishes transition order and incident evidence. It
+is not an event-sourcing log and does not replace the current interaction row.
+
 On `SIGTERM`/`SIGINT`, readiness is removed first, the HTTP server drains
 in-flight requests, and the composition root closes its resources. Workers finish
-leased jobs or let leases expire; outbox relay resumes from `published_at=NULL`;
+leased jobs or release their leases on cooperative cancellation; cancellation
+does not consume a delivery attempt. The outbox relay resumes from
+`published_at=NULL`;
 review tasks remain actionable; media cleanup is retention-driven.

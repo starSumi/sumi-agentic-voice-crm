@@ -51,6 +51,13 @@ flowchart TB
   singletons and exposes a small ports object. Request context is immutable and
   operation/transaction lifetimes remain explicit; no heavy DI container or
   ambient tenant state is used.
+- Governed inversion of control: `src/extensions/` validates closed manifests,
+  grants only deployment-approved permission ports, and serializes dependency
+  startup/rollback/shutdown. Built-ins may run in process only by trusted ID;
+  external code requires a trusted process supervisor rather than dynamic import.
+- Control Engine: `src/control/` owns extension lifecycle and keyed epoch-aware
+  compare-and-swap circuit breakers so stale completions cannot corrupt a newer
+  half-open/recovered cycle.
 - Hexagonal architecture: the provider facade owns selection, deadlines, circuit isolation and error mapping; mock, OpenAI-compatible and DashScope adapters implement `transcribe`, `understand`, `synthesize`. The domain never imports provider SDKs or vendor protocols.
 - CQRS-lite: query context is separate from command path; commands return aggregate version.
 - Transactional outbox: domain mutation and event record commit atomically; relay is retryable.
@@ -76,4 +83,14 @@ authorized CRM query tools; prompt and tool definitions are versioned artifacts.
 
 ## Failure isolation
 
-Each provider call has one end-to-end timeout, adapter-and-capability circuit state, and redacted error mapping. User/configuration errors do not open a provider circuit. The orchestrator persists encrypted interaction checkpoints, never retries a non-idempotent CRM command without its idempotency key, stores audio in private object storage, and relays transactional outbox rows independently. PostgreSQL, OIDC/JWKS, S3-compatible objects, OpenAI-compatible providers and DashScope are implemented adapters; successful staging connectivity, quality, security review and release approval remain promotion evidence rather than source-code claims.
+Each provider call has a cooperative 10-second soft deadline followed by a
+2-second hard-stop grace, adapter-and-capability CAS circuit state, and redacted
+error mapping. Caller cancellation and input/configuration rejection do not open
+a provider circuit. The orchestrator persists encrypted interaction checkpoints
+plus an append-only transition journal, reclaims only expired leases through a
+database CAS, never retries a non-idempotent CRM command without its idempotency
+key, stores audio in private object storage, and relays transactional outbox rows
+independently. PostgreSQL, OIDC/JWKS, S3-compatible objects, OpenAI-compatible
+providers and DashScope are implemented adapters; successful staging connectivity,
+quality, security review and release approval remain promotion evidence rather
+than source-code claims.

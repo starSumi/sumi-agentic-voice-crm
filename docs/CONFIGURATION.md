@@ -20,7 +20,7 @@ Development defaults to the in-memory store, development bearer identity, memory
 | Media | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds |
 | Providers | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent |
 | Relay | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls |
-| Operations | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage and provider state; `OBSERVABILITY_MODE=manual` (default) or explicit `otel` |
+| Operations | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage, providers, and registered extensions; `OBSERVABILITY_MODE=manual` (default) or explicit `otel` |
 
 Run the API with `pnpm start` and the independent transactional-outbox worker with `pnpm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
 
@@ -36,7 +36,13 @@ OpenAI TTS maps the public `voice=default` to `OPENAI_TTS_VOICE` (default `alloy
 
 DashScope defaults are `qwen-plus`, `qwen3-asr-flash`, `qwen3-tts-flash`, and voice `Cherry`. `DASHSCOPE_TTS_MAX_BYTES` bounds inline and downloaded audio; the default is 10 MiB. Native TTS currently returns WAV, so `dashscope` rejects other requested formats. The ask flow reads the selected adapter's default and requests WAV automatically. To stay inside the documented Qwen TTS 512-token limit without silently splicing audio, the adapter applies a conservative 512-character preflight; longer or unsupported locales return `INVALID_REQUEST`.
 
-`PROVIDER_TIMEOUT_MS` defaults to 15 seconds and is capped at 120 seconds. Provider audio limits are capped at 50 MiB.
+`PROVIDER_SOFT_TIMEOUT_MS` defaults to 10 seconds and is capped at 120 seconds.
+At that deadline the child `AbortSignal` requests cooperative cleanup.
+`PROVIDER_HARD_GRACE_MS` defaults to 2 seconds and is capped at 30 seconds; only
+a supervised process extension can be physically terminated after that grace.
+`PROVIDER_TIMEOUT_MS` remains a deprecated soft-timeout fallback for existing
+deployments. `INTERACTION_LEASE_MS` defaults to 30 seconds and is capped at 15
+minutes. Provider audio limits are capped at 50 MiB.
 
 ## Tracing
 
