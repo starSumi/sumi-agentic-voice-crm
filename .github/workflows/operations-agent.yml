@@ -56,12 +56,19 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - id: setup-postgres
+        name: Add PostgreSQL tools to PATH
+        if: steps.setup-node.outcome == 'success'
+        continue-on-error: true
+        run: echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+
       - id: install
         name: Install dependencies for scheduled verification
         if: >-
           github.event_name != 'workflow_run' &&
           steps.setup.outcome == 'success' &&
-          steps.setup-node.outcome == 'success'
+          steps.setup-node.outcome == 'success' &&
+          steps.setup-postgres.outcome == 'success'
         continue-on-error: true
         run: pnpm install --frozen-lockfile --ignore-scripts
 
@@ -91,6 +98,7 @@ jobs:
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           SETUP_OUTCOME: ${{ steps.setup.outcome }}
           SETUP_NODE_OUTCOME: ${{ steps.setup-node.outcome }}
+          SETUP_POSTGRES_OUTCOME: ${{ steps.setup-postgres.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           HEALTH_OUTCOME: ${{ steps.health.outcome }}
@@ -109,7 +117,7 @@ jobs:
           fi
 
           conclusion="success"
-          if [[ "$CHECKOUT_OUTCOME" != "success" || "$SETUP_OUTCOME" != "success" || "$SETUP_NODE_OUTCOME" != "success" ]]; then
+          if [[ "$CHECKOUT_OUTCOME" != "success" || "$SETUP_OUTCOME" != "success" || "$SETUP_NODE_OUTCOME" != "success" || "$SETUP_POSTGRES_OUTCOME" != "success" ]]; then
             conclusion="failure"
           elif [[ "$EVENT_NAME" != "workflow_run" && ("$INSTALL_OUTCOME" != "success" || "$base_result" != "success") ]]; then
             conclusion="failure"
@@ -119,7 +127,7 @@ jobs:
             conclusion="failure"
           fi
 
-          reason="upstream=${base_result}; checkout=${CHECKOUT_OUTCOME}; setup-pnpm=${SETUP_OUTCOME}; setup-node=${SETUP_NODE_OUTCOME}; install=${INSTALL_OUTCOME}; verify=${VERIFY_OUTCOME}; health=${HEALTH_OUTCOME}"
+          reason="upstream=${base_result}; checkout=${CHECKOUT_OUTCOME}; setup-pnpm=${SETUP_OUTCOME}; setup-node=${SETUP_NODE_OUTCOME}; setup-postgres=${SETUP_POSTGRES_OUTCOME}; install=${INSTALL_OUTCOME}; verify=${VERIFY_OUTCOME}; health=${HEALTH_OUTCOME}"
           run_url="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}"
           echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
           echo "reason=$reason" >> "$GITHUB_OUTPUT"
