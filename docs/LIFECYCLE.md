@@ -58,3 +58,17 @@ leased jobs or release their leases on cooperative cancellation; cancellation
 does not consume a delivery attempt. The outbox relay resumes from
 `published_at=NULL`;
 review tasks remain actionable; media cleanup is retention-driven.
+
+Background loops are registered with the Control Engine's managed-task
+registry. It stops admission, sends one cooperative abort to every task, and
+waits concurrently for `RUNTIME_TEARDOWN_MS` (default 3000 ms). A terminate hook
+is valid only for a supervised process or worker. The HTTP adapter uses the same
+default drain budget, then aborts request signals and closes remaining
+connections. A non-cooperative in-process resource is reported as a teardown
+failure for the process supervisor; JavaScript does not pretend to kill it.
+
+Conversation state has a separate optimistic lifecycle:
+`ABSENT -> revision 0 -> revision N+1`. A writer supplies the revision it read.
+Only an exact tenant/conversation/revision match replaces the encrypted state;
+otherwise the application service returns `CRM_CONFLICT` and the caller must
+read, merge, or abandon its projection.

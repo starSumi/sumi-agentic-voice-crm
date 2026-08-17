@@ -46,6 +46,14 @@ database trigger rejects update/delete, `FORCE RLS` isolates tenants, and the
 journal append shares the interaction transaction. It deliberately omits raw
 transcripts/provider payloads and is not sufficient to rebuild all state.
 
+### `conversation_states`
+
+Composite key `(tenant_id, conversation_id)`, monotonically increasing
+`revision`, tenant-bound encrypted `state_ciphertext`, last updating actor and
+timestamps. State is a bounded internal JSON object, not a copy of provider SSE
+envelopes or a public transport DTO. Replacement is a single expected-revision
+CAS update. A conflict reveals no newer state and requires an explicit read.
+
 ### `media_assets`
 
 `id uuid PK`, `tenant_id`, `request_id`, `kind input_audio|tts_audio`, `object_key`, `content_type`, `byte_length`, `sha256`, `duration_ms`, `status`, `expires_at`, `created_at`. Unique `(tenant_id, sha256, kind)` enables safe cache deduplication.
@@ -90,6 +98,8 @@ Planned for the production persistence migration; the reference runtime keeps th
   work is reclaimed with a conditional update and increments `recovery_count`.
 - `interaction_wal` is append-only and encrypted; replay responses remain owned
   by `voice_interactions`.
+- Conversation state is tenant isolated and encrypted; only the current
+  revision may be replaced, and every successful replacement increments it.
 - Monetary arithmetic uses integer minor units; no floating-point persistence.
 - Soft-delete/archival is explicit; hard deletion requires retention/legal policy event.
 

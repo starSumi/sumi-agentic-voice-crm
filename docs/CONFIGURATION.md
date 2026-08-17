@@ -42,7 +42,9 @@ At that deadline the child `AbortSignal` requests cooperative cleanup.
 a supervised process extension can be physically terminated after that grace.
 `PROVIDER_TIMEOUT_MS` remains a deprecated soft-timeout fallback for existing
 deployments. `INTERACTION_LEASE_MS` defaults to 30 seconds and is capped at 15
-minutes. Provider audio limits are capped at 50 MiB.
+minutes. `RUNTIME_TEARDOWN_MS` defaults to 3000 ms and is capped at 30 seconds;
+it bounds managed background-task cleanup and HTTP drain before forced
+connection closure. Provider audio limits are capped at 50 MiB.
 
 ## Tracing
 

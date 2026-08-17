@@ -41,6 +41,10 @@ contentVersion: 0.1.0
 - [ ] request/trace/event IDs correlate end-to-end.
 - [ ] P50/P95/P99, error, confidence, queue lag and replay metrics emitted.
 - [ ] Restart, duplicate, provider-down, dead-letter and restore drills pass.
+- [ ] Managed background tasks stop within the configured teardown budget;
+      non-cooperative in-process work is surfaced to the process supervisor.
+- [ ] Conversation revision conflicts, Guardian denial interruption and stale
+      worker completion are covered by deterministic and PostgreSQL tests.
 - [ ] Alerts map to an owner and runbook.
 
 ## C5 — Security and privacy

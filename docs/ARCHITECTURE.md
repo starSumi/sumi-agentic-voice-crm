@@ -58,6 +58,15 @@ flowchart TB
 - Control Engine: `src/control/` owns extension lifecycle and keyed epoch-aware
   compare-and-swap circuit breakers so stale completions cannot corrupt a newer
   half-open/recovered cycle.
+- Managed lifecycle: `src/lifecycle/managed-task-registry.mjs` owns background
+  tasks, cooperative cancellation, bounded teardown and supervised termination.
+  The outbox poller is registered work rather than an unowned module loop.
+- Semantic Guardian governor: turn-level denial windows interrupt repeated
+  unsafe review cycles independently of provider availability circuits. The
+  permission-review adapter itself remains a future, fail-closed integration.
+- Conversation state: the application service is the only adapter-facing port;
+  PostgreSQL replaces encrypted state with an expected-revision CAS so stale
+  web, SSE, MCP, desktop or TUI writers cannot overwrite a newer turn.
 - Hexagonal architecture: the provider facade owns selection, deadlines, circuit isolation and error mapping; mock, OpenAI-compatible and DashScope adapters implement `transcribe`, `understand`, `synthesize`. The domain never imports provider SDKs or vendor protocols.
 - CQRS-lite: query context is separate from command path; commands return aggregate version.
 - Transactional outbox: domain mutation and event record commit atomically; relay is retryable.
