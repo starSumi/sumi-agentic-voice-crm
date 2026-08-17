@@ -9,6 +9,7 @@ RUN corepack enable pnpm && corepack install
 RUN test "$(pnpm --version)" = "10.33.4" \
   && pnpm install --prod --frozen-lockfile --ignore-scripts
 COPY contracts ./contracts
+COPY db/migrations ./db/migrations
 COPY protocol ./protocol
 COPY packages ./packages
 COPY scripts ./scripts

@@ -20,6 +20,7 @@ test("production image installs only the lockfile production closure and runs di
     /COPY --from=build --chown=node:node \/workspace\/node_modules \.\/node_modules/,
   );
   assert.match(dockerfile, /COPY src \.\/src/);
+  assert.match(dockerfile, /COPY db\/migrations \.\/db\/migrations/);
   assert.doesNotMatch(dockerfile, /COPY src\/\*\.mjs \.\/src/);
   assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /CMD \["node", "dist\/src\/server\.mjs"\]/);
