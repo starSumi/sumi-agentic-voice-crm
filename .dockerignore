@@ -14,6 +14,7 @@ protocol/.cache
 packages/api-client/.tmp
 logs
 .agent/
+.local/
 .agent.local/
 .agent-runtime/
 .agent-cache/

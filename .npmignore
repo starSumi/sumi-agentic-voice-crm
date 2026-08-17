@@ -1,5 +1,6 @@
 # Governance source is for repository review, not the published runtime package.
 .agent/
+.local/
 .agent.local/
 .agent-runtime/
 .agent-cache/

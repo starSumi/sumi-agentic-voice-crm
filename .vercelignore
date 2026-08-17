@@ -1,4 +1,5 @@
 .agent/
+.local/
 .agent.local/
 .agent-runtime/
 .agent-cache/

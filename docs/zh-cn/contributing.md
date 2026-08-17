@@ -7,7 +7,7 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-先阅读根目录 `AGENTS.md`、相关 ADR 和负责该变更的 checkpoint。提交实现前先搜索已有 issue 与 PR，并说明当前行为、期望行为、证据、风险和回滚。
+先阅读根目录 `AGENTS.md` 和相关 ADR。提交实现前先搜索已有 issue 与 PR，并说明当前行为、期望行为、证据、风险和回滚。
 
 新增 provider 类型、破坏性公开 schema、生命周期、信任边界或 Agent 能力需要 ADR。不得复制外部源码、prompt、fixture、客户资料或凭据。
 

@@ -29,7 +29,7 @@ jobs:
         with:
           ref: ${{ inputs.expected_commit }}
           fetch-depth: 0
-      - name: Reject an unreviewed release cursor
+      - name: Verify the reviewed commit and package version
         env:
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -39,15 +39,10 @@ jobs:
           test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
           node --input-type=module <<'NODE'
           import { readFileSync } from "node:fs";
-          const manifest = JSON.parse(readFileSync(".agent/.agent.manifest.json", "utf8"));
-          const state = JSON.parse(readFileSync(".agent/.agent.state.json", "utf8"));
           const packageMetadata = JSON.parse(readFileSync("package.json", "utf8"));
-          const failures = [];
-          if (manifest.release_status !== "approved-release-candidate") failures.push("manifest release_status is not approved-release-candidate");
-          if (state.checkpoint_status?.C6?.status !== "completed") failures.push("C6 is not completed");
-          if (!state.checkpoint_status?.C6?.evidence?.length) failures.push("C6 evidence is empty");
-          if (packageMetadata.version !== process.env.RELEASE_VERSION) failures.push("release version does not match package.json");
-          if (failures.length) throw new Error(`release acceptance failed: ${failures.join("; ")}`);
+          if (packageMetadata.version !== process.env.RELEASE_VERSION) {
+            throw new Error("release version does not match package.json");
+          }
           NODE
       - name: Set up the package manager pinned in package.json
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10

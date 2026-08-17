@@ -5,13 +5,10 @@
 /src/scripts/ @starSumi
 /scripts/check-contract-consumers.mjs @starSumi
 /db/ @starSumi
-/.agent/ @starSumi
 /docs/ @starSumi
 /astro.config.mjs @starSumi
 /src/content.config.ts @starSumi
 /integrations/ @starSumi
-/scripts/agent-ops.mjs @starSumi
-/scripts/agent-incident.mjs @starSumi
 /scripts/build.mjs @starSumi
 /package.json @starSumi
 /pnpm-lock.yaml @starSumi

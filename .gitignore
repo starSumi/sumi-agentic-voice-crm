@@ -24,8 +24,10 @@ protocol/.tmp/
 protocol/.cache/
 packages/api-client/.tmp/
 
-# Agent development environment: keep versioned .agent/ governance, ignore
-# local runners, caches, logs, reports and generated evidence.
+# Agent control plane and development-only evidence are maintained locally by
+# the WSL2 Commander. They are not product source or release evidence.
+.agent/
+.local/
 .agent.local/
 .agent-runtime/
 .agent-cache/
