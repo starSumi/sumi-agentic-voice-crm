@@ -16,8 +16,6 @@ contentVersion: 0.1.0
 
 Traditional CRMs treat AI as a chat sidebar while forms and manual actions still drive business state. This project makes the agent a workflow orchestrator, but natural-language reasoning is never business truth: a model can be ambiguous, hallucinate, repeat a call, or exceed its authority. Voice adds MIME, duration, transcoding, empty-audio, ASR-quality, retention, and TTS-provider failure modes.
 
-The pinned comparative evidence shows that Saathi has an ASR-to-structured-CRM input path and Northstar has CRM tools, event projections, HITL, and test organization. Neither supplies the complete TTS, unified `/ask`, enterprise identity, tenant, and high-availability control plane required here. They are evidence and inspiration, not implementation sources.
-
 ## Decision
 
 Adopt a four-plane, contract-first, provider-neutral architecture:
@@ -47,14 +45,17 @@ The benefits are explicit service boundaries, independently testable providers, 
 
 ## Compatibility and migration
 
-- Map Saathi Customer, Visit, and Message records to Customer, Activity, and VoiceInteraction while preserving raw transcripts and AI metadata under the retention policy.
-- Map Northstar `CrmState` to CRM aggregates. A full snapshot is only a migration adapter; versioned queries and events are the target.
 - Existing text CRM calls can enter through `/v1/ask`; voice support does not weaken the existing API security boundary.
+- External imports map through explicit versioned adapters into Customer,
+  Activity and VoiceInteraction aggregates; imported snapshots never become the
+  runtime source of truth.
 
 ## Rollback
 
 Roll back the application by image digest. Database changes use expand, migrate, and contract rather than rolling back committed business state. TTS can be disabled by feature flag while text responses remain available. A failed Intent release routes the affected `schema_version` to the previous compatible version. Unconsumed outbox, review, and media records must not be deleted.
 
-## Checkpoint
+## Release acceptance
 
-This ADR can advance to production approval only after the C0-C6 evidence in [CHECKPOINTS.md](CHECKPOINTS.md) is complete.
+Implementation acceptance does not authorize production. Promotion follows the
+staging, security, rollback, artifact and human approval gates in
+[Build and release](BUILD-RELEASE.md).

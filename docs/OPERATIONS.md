@@ -27,4 +27,4 @@ Run the API and relay as separate processes from the same immutable artifact: `p
 | TTS failure | provider health/voice capability | keep text response; retry TTS job |
 | event lag | relay lease/dead-letter/DB | scale relay; preserve order and deduplicate |
 
-Every incident gets a timeline, affected tenant scope, trace/event IDs, decision, remediation and follow-up checkpoint.
+Every incident gets a timeline, affected tenant scope, trace/event IDs, decision, remediation, owner and follow-up action.

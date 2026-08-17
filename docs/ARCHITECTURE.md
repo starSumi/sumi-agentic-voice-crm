@@ -19,7 +19,7 @@ flowchart TB
   asr --> normalize[Normalizer + PII policy]
   context --> intent[Intent + Entity Agent\nJSON Schema + confidence]
   normalize --> intent
-  intent --> policy[Policy Decision Point\nRBAC • risk • confirmation]
+  intent --> policy[Policy Decision Point\nRBAC upper bound • ABAC • review]
   policy -->|read| crmquery[CRM Query]
   policy -->|write| command[CRM Command Service\ntransaction + idempotency]
   policy -->|ambiguous| review[Review Task Queue]
@@ -36,14 +36,14 @@ flowchart TB
 
 ## Bounded contexts
 
-| Context | Owner | Source of truth | Input | Output |
-| --- | --- | --- | --- | --- |
-| Identity & Tenant | Platform | IdP/tenant DB | JWT/request | actor, tenant, scopes |
-| Voice Media | Media Platform | object store + media metadata | bytes/MIME | asset, checksum, duration |
-| Understanding | Agent Platform | versioned inference record | transcript + CRM context | intent/entity proposal |
-| CRM Domain | CRM Team | Postgres aggregates | validated commands | committed aggregate/version |
-| Review | CRM Operations | review task store | ambiguous proposals | approve/reject/corrections |
-| Interaction | Experience Team | request/event projections | all prior results | answer, audio URL, UI events |
+| Context           | Owner           | Source of truth               | Input                    | Output                                                      |
+| ----------------- | --------------- | ----------------------------- | ------------------------ | ----------------------------------------------------------- |
+| Identity & Tenant | Platform        | IdP/tenant DB                 | JWT/request              | active principal, roles, actor/token scopes, policy version |
+| Voice Media       | Media Platform  | object store + media metadata | bytes/MIME               | asset, checksum, duration                                   |
+| Understanding     | Agent Platform  | versioned inference record    | transcript + CRM context | intent/entity proposal                                      |
+| CRM Domain        | CRM Team        | Postgres aggregates           | validated commands       | committed aggregate/version                                 |
+| Review            | CRM Operations  | review task store             | ambiguous proposals      | approve/reject/corrections                                  |
+| Interaction       | Experience Team | request/event projections     | all prior results        | answer, audio URL, UI events                                |
 
 ## Design patterns
 
@@ -61,7 +61,7 @@ flowchart TB
 - Control Engine: `src/control/` owns extension lifecycle and keyed epoch-aware
   compare-and-swap circuit breakers so stale completions cannot corrupt a newer
   half-open/recovered cycle.
-- Managed lifecycle: `src/lifecycle/managed-task-registry.mjs` owns background
+- Managed lifecycle: `src/lifecycle/managed-task-registry.ts` owns background
   tasks, cooperative cancellation, bounded teardown and supervised termination.
   The outbox poller is registered work rather than an unowned module loop.
 - Semantic Guardian governor: turn-level denial windows interrupt repeated
@@ -75,9 +75,14 @@ flowchart TB
 - Transactional outbox: domain mutation and event record commit atomically; relay is retryable.
 - Saga/compensation: external notification or TTS failure never silently rolls back a committed CRM transaction; status/event records describe compensation.
 - State machine: explicit request/job states; invalid transitions fail closed.
-- Policy-as-code: command risk, tenant scope, actor scope and approval requirements are deterministic before agent execution.
+- Authorization-as-code: `contracts/authorization-policy.json` defines a
+  closed RBAC ceiling and named ABAC conditions. Actor and token scopes can
+  only reduce that ceiling. Application services are the authoritative PEP;
+  PostgreSQL reloads active actor facts and rechecks mutations in the same
+  transaction as business state, audit and outbox writes.
 - Idempotent command: `(tenant_id, idempotency_key)` unique; repeated requests replay the original result.
-- Anti-corruption layer: adapters translate Saathi/Northstar concepts without importing their source model.
+- Anti-corruption layer: adapters translate external provider and import schemas
+  into owned domain contracts without importing external source models.
 
 ## Ownership rules
 

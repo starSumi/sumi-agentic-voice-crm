@@ -17,7 +17,7 @@ The production target is PostgreSQL 16+ with migrations. Development can use the
 
 ### `actors`
 
-`id uuid PK`, `tenant_id uuid FK`, `subject text`, `display_name text`, `role text`, `scopes jsonb`, `created_at timestamptz`.
+`id uuid PK`, `tenant_id uuid FK`, `subject text`, `display_name text`, `role text`, `scopes jsonb`, `status active|suspended`, `created_at timestamptz`. Role grants are an upper bound; actor scopes narrow them. The current actor row and tenant policy version are read inside each PostgreSQL transaction.
 
 ### `customers`
 
@@ -25,7 +25,7 @@ The production target is PostgreSQL 16+ with migrations. Development can use the
 
 ### `accounts`, `contacts`, `deals`, `activities`, `follow_ups`
 
-The target CRM vocabulary includes these aggregates, each with `id`, `tenant_id`, `version`, timestamps and owner references. In the `0.1.0` reference migration only `deals` is materialized; the other four are explicitly **planned**, not silently implied as deployed tables. A production promotion must add their expand migrations, foreign keys, indexes and contract tests before C2 approval. `deals.stage` is an enum; `amount_minor bigint` plus `currency char(3)` is canonical.
+The target CRM vocabulary includes these aggregates, each with `id`, `tenant_id`, `version`, timestamps and owner references. In the `0.1.0` reference migration only `deals` is materialized; the other four are explicitly **planned**, not silently implied as deployed tables. A production promotion must add their expand migrations, foreign keys, indexes and contract tests before the database gate is approved. `deals.stage` is an enum; `amount_minor bigint` plus `currency char(3)` is canonical.
 
 ### `voice_interactions`
 
@@ -89,6 +89,9 @@ Planned for the production persistence migration; the reference runtime keeps th
 ## Invariants
 
 - Every row has `tenant_id`; every query requires tenant predicate.
+- A suspended or unregistered actor cannot enter a business transaction.
+- A mutation is authorized against current actor and token scopes before its
+  business write, audit and outbox records commit.
 - `version` increases monotonically per aggregate under optimistic concurrency.
 - A committed command has exactly one idempotency result and one corresponding outbox event.
 - `crm_commands.status=committed` implies business transaction committed.

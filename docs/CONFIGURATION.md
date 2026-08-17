@@ -13,24 +13,24 @@ Copy `.env.example` only when a launcher or deployment system loads it. Node.js 
 
 Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc` or `AUTH_MODE=static`, `OBJECT_STORAGE_PROVIDER=s3`, each provider selector set to `openai-compatible` or `dashscope`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token. ASR, intent and TTS may select different adapters; `mock` is rejected in production.
 
-| Boundary | Required production variables |
-| --- | --- |
-| Identity | Multi-user OIDC: issuer, audience, JWKS URI and required scope. Private single-tenant: `AUTH_STATIC_BEARER_TOKEN`, `AUTH_STATIC_TENANT_ID`, `AUTH_STATIC_SUBJECT` |
-| Database/privacy | `DATABASE_URL`, base64 32-byte `DATA_ENCRYPTION_KEY`; interaction payloads use AES-256-GCM |
-| Media | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds |
-| Providers | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent |
-| Relay | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls |
-| Operations | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage, providers, and registered extensions; `OBSERVABILITY_MODE=manual` (default) or explicit `otel` |
+| Boundary         | Required production variables                                                                                                                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity         | Multi-user OIDC: issuer, audience, JWKS URI and canonical action scopes. Private single-tenant: `AUTH_STATIC_BEARER_TOKEN`, `AUTH_STATIC_TENANT_ID`, `AUTH_STATIC_SUBJECT`, optional `AUTH_STATIC_ROLE` and `AUTH_STATIC_SCOPES` |
+| Database/privacy | `DATABASE_URL`, base64 32-byte `DATA_ENCRYPTION_KEY`; interaction payloads use AES-256-GCM                                                                                                                                       |
+| Media            | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds                                                                                                                                     |
+| Providers        | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent                                                                                                            |
+| Relay            | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls                                                                                                                                                     |
+| Operations       | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage, providers, and registered extensions; `OBSERVABILITY_MODE=manual` (default) or explicit `otel`                                                      |
 
 Run the API with `pnpm start` and the independent transactional-outbox worker with `pnpm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
 
 ## Provider adapters
 
-| Selector | Required settings | Protocol behavior |
-| --- | --- | --- |
-| `mock` | None; development only | Deterministic ASR, intent and TTS fixtures |
-| `openai-compatible` | `OPENAI_API_KEY`, HTTPS `OPENAI_BASE_URL`; `OPENAI_MODEL` when selected for intent | Audio transcriptions, strict-schema Responses intent extraction, and binary speech output |
-| `dashscope` | `DASHSCOPE_API_KEY`, HTTPS `DASHSCOPE_BASE_URL` | Qwen ASR and JSON Object intent over the compatible Chat Completions API; Qwen TTS over the native generation API |
+| Selector            | Required settings                                                                  | Protocol behavior                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `mock`              | None; development only                                                             | Deterministic ASR, intent and TTS fixtures                                                                        |
+| `openai-compatible` | `OPENAI_API_KEY`, HTTPS `OPENAI_BASE_URL`; `OPENAI_MODEL` when selected for intent | Audio transcriptions, strict-schema Responses intent extraction, and binary speech output                         |
+| `dashscope`         | `DASHSCOPE_API_KEY`, HTTPS `DASHSCOPE_BASE_URL`                                    | Qwen ASR and JSON Object intent over the compatible Chat Completions API; Qwen TTS over the native generation API |
 
 OpenAI TTS maps the public `voice=default` to `OPENAI_TTS_VOICE` (default `alloy`) and maps public `format=ogg` to the provider's `opus` response format. `OPENAI_TTS_MAX_BYTES` (or the shared `PROVIDER_TTS_MAX_BYTES`) bounds the binary response.
 
@@ -64,8 +64,8 @@ Existing deployments may keep `ALIYUN_BASE_APIKEY`, `ALIYUN_BASE_URL`, `ALIYUN_B
 
 ## Documentation settings
 
-| Variable | Default | Effect |
-| --- | --- | --- |
+| Variable        | Default                 | Effect                                                                                          |
+| --------------- | ----------------------- | ----------------------------------------------------------------------------------------------- |
 | `DOCS_SITE_URL` | `http://127.0.0.1:4321` | Canonical URL used by the Astro documentation build. Set it to the deployed HTTPS origin in CI. |
 
 Use `pnpm run docs:dev` for live authoring and `pnpm run docs:build` for the production artifact in `artifacts/docs-site/`. The documentation build does not start the CRM API and the CRM runtime does not require Astro.
@@ -73,9 +73,9 @@ Use `pnpm run docs:dev` for live authoring and `pnpm run docs:build` for the pro
 ## Development and production separation
 
 - Development may use loopback HTTP, deterministic providers, synthetic tenants, and the in-memory store.
-- `AUTH_MODE=static` is intended for a private single-tenant operator deployment. The configured token fixes both tenant and actor identity; a conflicting `X-Tenant-Id` is rejected. Rotate the token by replacing the secret and restarting the API. Use OIDC when multiple independent users, browser login, per-user revocation, or delegated scopes are required.
+- `AUTH_MODE=static` is intended for a private single-tenant operator deployment. The configured token fixes tenant, actor, role and action-scope ceiling; a conflicting `X-Tenant-Id` is rejected. `AUTH_STATIC_SCOPES` is a comma/space separated canonical action list or an explicitly supported `crm.*`/`media.*` wildcard. Rotate the token by replacing the secret and restarting the API. Use OIDC when multiple independent users, browser login, per-user revocation, or delegated scopes are required.
 - Staging must use non-production credentials, durable backing services, representative media, and contract-compatible providers.
-- Production requires the open security, staging, resilience, and release checkpoints to be completed. Fail-closed configuration is implementation evidence, not deployment approval.
+- Production requires security, staging, resilience, rollback, and release gates to pass. Fail-closed configuration is implementation evidence, not deployment approval.
 - Never put bearer tokens, API keys, customer audio, transcripts, or production connection strings in `.env.example`, Markdown, tests, or Git history.
 
 ## Startup example

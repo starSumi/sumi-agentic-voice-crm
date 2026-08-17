@@ -61,7 +61,7 @@ Required attributes: `sumi.request_id`, `sumi.tenant_id` (non-PII opaque ID), `s
 - `tts_success_total`, `tts_fallback_total`, `tts_latency_ms`
 - `outbox_pending`, `outbox_retry_total`, `event_consumer_lag`
 
-`GET /metrics` exposes the implemented HTTP metrics and requires `METRICS_BEARER_TOKEN` when configured; production startup requires it. Explicit application/provider/storage/transaction spans are available in manual mode and can be exported through the opt-in OTLP adapter; durable audit/outbox trace propagation and provider/queue metric families remain C4 work rather than current claims.
+`GET /metrics` exposes the implemented HTTP metrics and requires `METRICS_BEARER_TOKEN` when configured; production startup requires it. Explicit application/provider/storage/transaction spans are available in manual mode and can be exported through the opt-in OTLP adapter; durable audit/outbox trace propagation and provider/queue metric families remain production observability work rather than current claims.
 
 ## Replay and incident response
 

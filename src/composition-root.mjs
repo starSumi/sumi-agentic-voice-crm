@@ -1,4 +1,6 @@
 import { createAuthenticator } from "./auth.mjs";
+import authorizationPolicy from "../contracts/authorization-policy.json" with { type: "json" };
+import { evaluateAuthorization } from "./authorization/index.ts";
 import { CrmStore } from "./store.mjs";
 import { createPostgresStore } from "./postgres-store.mjs";
 import { createProviderRuntime } from "./providers.mjs";
@@ -10,6 +12,7 @@ import {
 import { validateProductionConfig } from "./production-config.mjs";
 import { createExtensionRegistry } from "./extensions/index.mjs";
 import { createControlEngine } from "./control/index.mjs";
+import { createProgressEventBus } from "./application/progress-event-bus.ts";
 
 /**
  * The composition root owns process-singleton resources. Request and operation
@@ -19,6 +22,7 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
   const snapshot = Object.freeze({ ...env });
   validateProductionConfig(snapshot);
   const tracer = overrides.tracer ?? createConfiguredTracer({ env: snapshot });
+  const progressEvents = overrides.progressEvents ?? createProgressEventBus();
   const extensions = overrides.extensions ?? createExtensionRegistry();
   const extensionRegistrations = overrides.extensionRegistrations ?? [];
   if (!Array.isArray(extensionRegistrations)) {
@@ -32,6 +36,15 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
       extensions,
       teardownTimeoutMs: snapshot.RUNTIME_TEARDOWN_MS,
     });
+  const policy = overrides.authorizationPolicy ?? authorizationPolicy;
+  const authorize =
+    overrides.authorize ??
+    ((request) => evaluateAuthorization(policy, request));
+  const store =
+    overrides.store ??
+    (snapshot.STORE_PROVIDER === "postgres"
+      ? createPostgresStore({ env: snapshot, authorize })
+      : new CrmStore());
   const runtime = {
     env: snapshot,
     authenticate:
@@ -41,13 +54,17 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
     objectStorage:
       overrides.objectStorage ?? createObjectStorage({ env: snapshot }),
     tracer,
+    progressEvents,
     observability:
       overrides.observability ?? createObservability({ env: snapshot, tracer }),
-    store:
-      overrides.store ??
-      (snapshot.STORE_PROVIDER === "postgres"
-        ? createPostgresStore({ env: snapshot })
-        : new CrmStore()),
+    store,
+    authorize,
+    resolvePrincipal:
+      overrides.resolvePrincipal ??
+      ((identity) =>
+        typeof store.principalFor === "function"
+          ? store.principalFor(identity)
+          : identity),
     extensions,
     control,
   };
@@ -64,6 +81,7 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
         runtime.control,
         runtime.store,
         runtime.objectStorage,
+        runtime.progressEvents,
         runtime.tracer,
       ]) {
         try {

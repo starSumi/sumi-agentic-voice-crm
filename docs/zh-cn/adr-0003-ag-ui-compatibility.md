@@ -12,19 +12,7 @@ contentVersion: 0.1.0
 **决策责任人：** Sumi 平台工程
 **范围：** 可选的 agent-to-UI 流、工具可见性、UI 状态投影和人工确认展示
 
-## 证据
-
-CopilotKit 的 WSL-native 参考快照来自 Windows checkout
-`main@6a5bb62b62b0d351abb35a2fe3bb0fed547a275d`。其中 AG-UI 定义要求客户端
-POST `RunAgentInput`，服务端再按顺序发送生命周期、文本、工具、状态和活动
-SSE 事件；该快照的 runtime 固定使用 `@ag-ui/core`、`@ag-ui/client` 和
-`@ag-ui/encoder` `0.0.57`。
-
-Northstar sparse 快照基于
-`main@2328062960a1e9b4b8bc2eb2817724fc624f8785`，并保留 SHA-256 为
-`af1ae662870fbef78885d357981b0039039844d09d56fa5c8caeccf43d20d548`
-的既有本地 overlay。其 Strands CRM adapter 暴露 AG-UI app，并在选定的写工具
-执行后向 UI 推送完整 CRM 状态快照。
+## 当前边界
 
 Sumi 当前提供同步 OpenAPI `/v1/ask`、持久 ReviewTask、私有音频资产和租户隔离
 CloudEvents。`/v1/events` 返回的是持久领域事件，不是 AG-UI SSE 流；当前 `ask`
@@ -36,7 +24,7 @@ CloudEvents。`/v1/events` 返回的是持久领域事件，不是 AG-UI SSE 流
    CloudEvents 继续作为业务事实来源。
 2. 不为包装现有最终 JSON 响应而直接加入 AG-UI 包；那只会增加第二套 transport
    契约，却没有真实 streaming 或前端工具执行收益。
-3. 选定真实 CopilotKit 或其他 AG-UI 消费端后，先把 `/v1/ask` 抽成与 transport
+3. 选定真实 AG-UI 消费端后，先把 `/v1/ask` 抽成与 transport
    无关的 application service，再增加调用同一服务的可选认证 `/v1/ag-ui` adapter。
 4. adapter 可以发送 `RUN_STARTED`、有界 step/activity、assistant text、租户隔离
    UI 投影以及 `RUN_FINISHED`/`RUN_ERROR`，但不能暴露隐藏思维链，也不能把

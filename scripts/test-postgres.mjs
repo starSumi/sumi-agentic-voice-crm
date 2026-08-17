@@ -111,6 +111,17 @@ try {
   if (!evidence.includes("sumi postgres integration passed")) {
     throw new Error("PostgreSQL test did not emit its acceptance marker");
   }
+  run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-c", `
+    update actors
+    set scopes='["interaction.ask","crm.search","crm.customer.create","crm.deal.update_stage","media.tts.create","media.asset.read","events.read","progress.subscribe"]'::jsonb
+    where tenant_id='00000000-0000-4000-8000-000000000001' and subject='actor-a';
+    insert into actors (id,tenant_id,subject,display_name,role,scopes,status)
+    values
+      ('10000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','actor-reviewer','Actor Reviewer','reviewer','["crm.search","crm.customer.create","crm.deal.update_stage","review.decide","media.asset.read","events.read","progress.subscribe"]'::jsonb,'active'),
+      ('10000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000001','actor-suspended','Actor Suspended','agent','["crm.customer.create"]'::jsonb,'suspended')
+    on conflict (tenant_id,subject) do update
+    set role=excluded.role,scopes=excluded.scopes,status=excluded.status;
+  `], env);
   const runtimeUrl = `postgresql://sumi_app@127.0.0.1:${port}/${database}`;
   run(process.execPath, ["db/tests/postgres-store.integration.mjs"], { ...env, DATABASE_URL: runtimeUrl }, { inherit: true });
   console.log(`postgres integration passed: migration reapplied cleanly, two-tenant RLS and atomic commit/rollback verified on PostgreSQL ${run("psql", ["--version"], env).trim()}`);

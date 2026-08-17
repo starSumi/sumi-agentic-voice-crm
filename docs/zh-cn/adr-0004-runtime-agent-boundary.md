@@ -31,10 +31,14 @@ Sumi 分为两个服务端平面和多个薄客户端适配器：
 
 ## 传输选择
 
-- HTTP/OpenAPI 继续作为当前 Web 客户端和生成 SDK 的命令/查询契约。
-- SSE 作为浏览器进度的默认增量投影。AG-UI 适配器是附加层，调用同一应用服务，不替代 OpenAPI、CloudEvents、PostgreSQL 或 outbox。
+- `contracts/transport-policy.json` 是传输选择与降级策略的可执行规范，`packages/api-client/src/transport.ts` 中的 TypeScript API 必须与其一致。
+- HTTP/OpenAPI 是命令、查询和资产访问的基线；每类客户端的降级链最终都落到 HTTP，因此关闭新传输不会改变业务语义。
+- SSE 是单向进度流降级；只有连接、Origin、背压、取消和恢复行为通过验证后，WebSocket 才承载双向进度与控制。
+- WebTransport 仅作为支持该能力的浏览器和桌面客户端的实验性首选，用于独立流或有界媒体/控制。W3C API 与 IETF 协议仍处于草案阶段，部署必须协商能力并保留 WebSocket、SSE 与 HTTP 降级。
+- gRPC 仅服务于已认证的服务间命令和事件流 adapter，浏览器永不选择 gRPC，也不替代公开 OpenAPI 契约。
+- application core 通过一个按租户过滤、有界的 SPMC 总线发布临时进度；多个传输消费者只做投影，PostgreSQL/outbox 仍是持久事件源。
+- AG-UI 适配器是附加层，调用同一应用服务，不替代 OpenAPI、CloudEvents、PostgreSQL 或 outbox。
 - MCP 是 Agent 工具和文档资源的扩展边界。未来 CRM MCP server 必须是应用服务的薄适配器，并显式映射租户、actor、scope 和幂等。文档 MCP 继续只读，和 CRM mutation 工具分离。
-- gRPC 留给未来真正拆分后的内部服务。现在引入会制造第二套传输/ schema 面，并需要浏览器 gateway。WebSocket 只在确实需要双向低延迟媒体或控制时引入；普通进度不需要它。
 
 ## Protocol 与 API 方向
 

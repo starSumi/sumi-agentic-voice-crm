@@ -20,9 +20,15 @@ contentVersion: 0.1.0
 
 1. The API verifies OIDC JWT signatures through a cached remote JWKS, restricts algorithms, and validates issuer, audience, subject, tenant binding and configured scope. Production rejects development bearer mode and non-HTTPS JWKS.
 2. CRM queries add mandatory tenant predicate; DB role has least privilege; service-to-service mTLS or workload identity.
-3. Tool allowlist and policy decision point; model output is untrusted JSON validated by schema, entity resolver and RBAC.
+3. Authentication and authorization are separate. The policy decision point
+   intersects the RBAC role ceiling with actor and token scopes, then applies
+   tenant, resource, active-principal, human/workload and deployment-network
+   ABAC conditions. Missing attributes and unknown actions fail closed.
+   Application services enforce the decision before side effects; PostgreSQL
+   reloads actor status/scopes and reauthorizes CRM mutations inside the write
+   transaction. Human review never upgrades an unauthorized principal.
 4. Idempotency uniqueness and optimistic version checks; webhook/event consumers deduplicate by event ID.
-5. Size, content type and audio magic-byte validation precede private S3-compatible storage; server-side encryption and 15-900 second signed URLs are enforced. Malware scanning and codec-duration limits remain a C5 deployment gate.
+5. Size, content type and audio magic-byte validation precede private S3-compatible storage; server-side encryption and 15-900 second signed URLs are enforced. Malware scanning and codec-duration limits remain a deployment security gate.
 6. Structured redacted logs, secret manager, rotation, no prompts/audio/phone in telemetry by default.
 7. High-risk actions require explicit human confirmation; TTS answer cannot claim a commit before commit event.
 8. Supply chain: lockfile, dependency audit, SBOM, provenance, signed release artifact and protected main branch.
@@ -32,4 +38,4 @@ contentVersion: 0.1.0
     supervisor owns readiness, the child process group, graceful stop, and hard
     termination. Its lifecycle protocol carries no CRM data or permission ports.
 
-Current automated evidence covers forged/mismatched JWTs, production fail-closed configuration, tenant RLS, MIME spoofing boundaries, provider signed-URL allowlisting and redirect rejection, bounded provider audio, private object behavior, dependency audit and repository secret patterns. Prompt-injection, malware, broader SSRF, rate-limit, retention/deletion and restore exercises remain C5 holds.
+Current automated evidence covers forged/mismatched JWTs, production fail-closed configuration, tenant RLS, MIME spoofing boundaries, provider signed-URL allowlisting and redirect rejection, bounded provider audio, private object behavior, dependency audit and repository secret patterns. Prompt-injection, malware, broader SSRF, rate-limit, retention/deletion and restore exercises remain deployment security holds.
