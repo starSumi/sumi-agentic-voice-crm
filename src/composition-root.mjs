@@ -5,6 +5,8 @@ import { createProviderRuntime } from "./providers.mjs";
 import { createObjectStorage } from "./object-storage.mjs";
 import { createConfiguredTracer, createObservability } from "./observability.mjs";
 import { validateProductionConfig } from "./production-config.mjs";
+import { createExtensionRegistry } from "./extensions/index.mjs";
+import { createControlEngine } from "./control/index.mjs";
 
 /**
  * The composition root owns process-singleton resources. Request and operation
@@ -14,22 +16,31 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
   const snapshot = Object.freeze({ ...env });
   validateProductionConfig(snapshot);
   const tracer = overrides.tracer ?? createConfiguredTracer({ env: snapshot });
+  const extensions = overrides.extensions ?? createExtensionRegistry();
+  const control = overrides.control ?? createControlEngine({ extensions });
   const runtime = {
     env: snapshot,
     authenticate: overrides.authenticate ?? createAuthenticator({ env: snapshot }),
-    providers: overrides.providers ?? createProviderRuntime({ env: snapshot }),
+    providers: overrides.providers ?? createProviderRuntime({ env: snapshot, control }),
     objectStorage: overrides.objectStorage ?? createObjectStorage({ env: snapshot }),
     tracer,
     observability: overrides.observability ?? createObservability({ env: snapshot, tracer }),
     store: overrides.store ?? (snapshot.STORE_PROVIDER === "postgres"
       ? createPostgresStore({ env: snapshot })
       : new CrmStore()),
+    extensions,
+    control,
   };
+  let startPromise;
+  function start() {
+    startPromise ??= control.start();
+    return startPromise;
+  }
   let closePromise;
   function close() {
     closePromise ??= (async () => {
       const errors = [];
-      for (const resource of [runtime.store, runtime.objectStorage, runtime.tracer]) {
+      for (const resource of [runtime.control, runtime.store, runtime.objectStorage, runtime.tracer]) {
         try { await resource?.close?.(); } catch (error) { errors.push(error); }
       }
       if (errors.length > 0) throw new AggregateError(errors, "runtime resource shutdown failed");
@@ -38,6 +49,7 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
   }
   return Object.freeze({
     ...runtime,
+    start,
     close,
   });
 }

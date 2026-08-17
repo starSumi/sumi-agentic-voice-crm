@@ -55,6 +55,7 @@ export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRun
       ...args,
       http_status: ERROR_CODES[args.error_code][0],
     }),
+    abandonInteraction: (args) => store.abandonInteraction?.(args),
     createReview: (args) => store.createReview(args),
     executeCrm: (args) => store.execute(args),
     recordInputAsset: (args) => store.recordInputAsset(args),
@@ -120,12 +121,42 @@ export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRun
     const boundary = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[1] ?? /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[2]; if (!boundary) throw Object.assign(new Error("multipart boundary is required"), { code: "INVALID_REQUEST" });
     const out = {}; for (const part of buf.toString("binary").split(`--${boundary}`).slice(1, -1)) { const i = part.indexOf("\r\n\r\n"); if (i < 0) continue; const head = part.slice(0, i); const payload = part.slice(i + 4).replace(/\r\n$/, ""); const name = /name="([^"]+)"/i.exec(head)?.[1]; if (!name) continue; out[name] = /filename=/i.test(head) ? { data: Buffer.from(payload, "binary"), content_type: /Content-Type:\s*([^\r\n]+)/i.exec(head)?.[1]?.trim() ?? "application/octet-stream" } : payload; } return out;
   }
-  async function authenticateContext(req, res, rid) {
-    const identity = await authenticate(new Headers(req.headers));
-    return createRequestContext({ request_id: rid, traceparent: res.getHeader("traceparent"), identity });
+  function requestSignal(req, res) {
+    const controller = new AbortController();
+    const abort = () => {
+      if (!controller.signal.aborted) {
+        controller.abort(Object.assign(new Error("client disconnected"), {
+          name: "AbortError",
+          code: "UPSTREAM_UNAVAILABLE",
+          breakerEligible: false,
+        }));
+      }
+      cleanup();
+    };
+    const close = () => { if (!res.writableEnded) abort(); };
+    const cleanup = () => {
+      req.removeListener("aborted", abort);
+      res.removeListener("close", close);
+    };
+    req.once("aborted", abort);
+    res.once("close", close);
+    res.once("finish", cleanup);
+    if (req.aborted || req.destroyed || res.destroyed) abort();
+    return controller.signal;
   }
-  async function ask(req, res, rid) {
-    const context = await authenticateContext(req, res, rid);
+  async function authenticateContext(req, res, rid, signal) {
+    signal.throwIfAborted();
+    const identity = await authenticate(new Headers(req.headers), { signal });
+    signal.throwIfAborted();
+    return createRequestContext({
+      request_id: rid,
+      traceparent: res.getHeader("traceparent"),
+      identity,
+      signal,
+    });
+  }
+  async function ask(req, res, rid, signal) {
+    const context = await authenticateContext(req, res, rid, signal);
     const key = validateIdempotencyKey(req.headers["idempotency-key"]);
     const multipart = req.headers["content-type"]?.startsWith("multipart/form-data");
     const raw = await readRequestBody(
@@ -189,8 +220,8 @@ export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRun
     }));
     return json(res, outcome.response.status === "needs_review" ? 202 : 200, outcome.response);
   }
-  async function tts(req, res, rid) {
-    const context = await authenticateContext(req, res, rid);
+  async function tts(req, res, rid, signal) {
+    const context = await authenticateContext(req, res, rid, signal);
     const key = validateIdempotencyKey(req.headers["idempotency-key"]);
     const parsed = validateProtocol(
       "TtsRequest",
@@ -202,8 +233,8 @@ export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRun
     }));
     return json(res, 201, outcome.response);
   }
-  async function reviewDecision(req, res, rid) {
-    const context = await authenticateContext(req, res, rid);
+  async function reviewDecision(req, res, rid, signal) {
+    const context = await authenticateContext(req, res, rid, signal);
     const key = validateIdempotencyKey(req.headers["idempotency-key"]);
     const reviewId = decodeURIComponent(req.url.slice("/v1/reviews/".length, -"/decision".length));
     if (!REVIEW_ID_PATTERN.test(reviewId)) throw Object.assign(new Error("review id is outside the published contract"), { code: "INVALID_REQUEST" });
@@ -221,6 +252,7 @@ export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRun
 const server = createHttpServer(async (req, res) => {
   const rid = requestId();
   const telemetry = observability.begin(req, rid);
+  const signal = requestSignal(req, res);
   let errorCode;
   res.setHeader("traceparent", telemetry.traceparent);
   res.setHeader("x-request-id", rid);
@@ -228,25 +260,30 @@ const server = createHttpServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/health/live") return json(res, 200, { status: "ok", service: "sumi-agentic-voice-crm", request_id: rid });
     if (req.method === "GET" && req.url === "/health/ready") {
-      const [database, objects] = await Promise.all([store.health(), objectStorage.health()]);
+      const [database, objects, extensionStatus] = await Promise.all([
+        store.health(),
+        objectStorage.health(),
+        runtime.extensions?.health?.({ signal }) ?? {},
+      ]);
       const providerStatus = providerReadiness();
-      const ready = !draining && database.ready && objects.ready && providerStatus.ready;
-      return json(res, ready ? 200 : 503, { status: ready ? "ready" : "not_ready", dependencies: { database, objects, providers: providerStatus.statuses }, request_id: rid });
+      const extensionsReady = Object.values(extensionStatus).every(({ ready }) => ready);
+      const ready = !draining && database.ready && objects.ready && providerStatus.ready && extensionsReady;
+      return json(res, ready ? 200 : 503, { status: ready ? "ready" : "not_ready", dependencies: { database, objects, providers: providerStatus.statuses, extensions: extensionStatus }, request_id: rid });
     }
     if (req.method === "GET" && req.url === "/metrics") {
       if (!observability.authorizeMetrics(req.headers.authorization)) throw Object.assign(new Error("metrics authentication required"), { code: "UNAUTHORIZED" });
       res.statusCode = 200; res.setHeader("content-type", "text/plain; version=0.0.4; charset=utf-8"); return res.end(observability.renderMetrics());
     }
     if (req.method === "GET" && req.url === "/v1/events") {
-      const { identity } = await authenticateContext(req, res, rid);
+      const { identity } = await authenticateContext(req, res, rid, signal);
       const events = await store.events(identity.tenant_id, identity.actor_id);
       return json(res, 200, { events: events.filter((event) => validateEvent(event).tenant_id === identity.tenant_id), request_id: rid });
     }
-    if (req.method === "POST" && req.url === "/v1/ask") return await ask(req, res, rid);
-    if (req.method === "POST" && req.url === "/v1/tts/synthesize") return await tts(req, res, rid);
-    if (req.method === "POST" && req.url?.startsWith("/v1/reviews/") && req.url.endsWith("/decision")) return await reviewDecision(req, res, rid);
+    if (req.method === "POST" && req.url === "/v1/ask") return await ask(req, res, rid, signal);
+    if (req.method === "POST" && req.url === "/v1/tts/synthesize") return await tts(req, res, rid, signal);
+    if (req.method === "POST" && req.url?.startsWith("/v1/reviews/") && req.url.endsWith("/decision")) return await reviewDecision(req, res, rid, signal);
     if (req.method === "GET" && req.url?.startsWith("/v1/assets/")) {
-      const { identity } = await authenticateContext(req, res, rid);
+      const { identity } = await authenticateContext(req, res, rid, signal);
       const contentRequest = req.url.endsWith("/content");
       const encodedAssetId = contentRequest
         ? req.url.slice(11, -"/content".length)
@@ -312,9 +349,15 @@ return Object.freeze({
 
 export const createServer = createApp;
 
+export async function createStartedApp(options = {}) {
+  const app = createApp(options);
+  await app.runtime.start?.();
+  return app;
+}
+
 async function main() {
   const port = Number(process.env.PORT || 8080);
-  const app = createApp();
+  const app = await createStartedApp();
   app.listen(port, () => console.log(`sumi-agentic-voice-crm listening on :${port}`));
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.once(signal, () => app.close().catch((error) => { console.error(error); process.exitCode = 1; }));

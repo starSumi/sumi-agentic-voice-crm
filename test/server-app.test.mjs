@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
 import test from "node:test";
 import { createApp, readRequestBody } from "../src/server.mjs";
 import { REQUEST_BODY_LIMITS } from "../src/protocol-policy.mjs";
@@ -31,6 +32,38 @@ test("createApp is transport-injectable and import does not listen", async () =>
   await Promise.all([app.close(), app.close()]);
   assert.equal(app.draining, true);
   assert.deepEqual(closed, ["store", "runtime"]);
+});
+
+test("client disconnect during authentication aborts before provider or store mutation", async () => {
+  const closed = [];
+  let releaseAuthentication;
+  let beginCalls = 0;
+  const runtime = runtimeFixture(closed);
+  runtime.authenticate = async () => await new Promise((resolve) => { releaseAuthentication = resolve; });
+  runtime.store.beginInteraction = async () => { beginCalls += 1; return { replay: false }; };
+  const app = createApp({ runtime });
+  await new Promise((resolve, reject) => { app.server.once("error", reject); app.listen(0, resolve); });
+  const { port } = app.server.address();
+  const request = httpRequest({
+    host: "127.0.0.1",
+    port,
+    path: "/v1/ask",
+    method: "POST",
+    headers: {
+      authorization: "Bearer development-token",
+      "content-type": "application/json",
+      "idempotency-key": "disconnect-during-auth-0001",
+    },
+  });
+  request.on("error", () => {});
+  request.end(JSON.stringify({ input: { type: "text", text: "find Acme" } }));
+  while (!releaseAuthentication) await new Promise((resolve) => setImmediate(resolve));
+  request.destroy();
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseAuthentication({ tenant_id: "tenant_demo", actor_id: "test-actor" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(beginCalls, 0);
+  await app.close();
 });
 
 test("request body reader rejects declared and chunked payloads before buffering beyond the cap", async () => {
