@@ -55,6 +55,9 @@ flowchart TB
   grants only deployment-approved permission ports, and serializes dependency
   startup/rollback/shutdown. Built-ins may run in process only by trusted ID;
   external code requires a trusted process supervisor rather than dynamic import.
+  The Linux Rust supervisor owns the child process group, readiness handshake,
+  cooperative stop and bounded hard termination; Node retains orchestration and
+  application policy.
 - Control Engine: `src/control/` owns extension lifecycle and keyed epoch-aware
   compare-and-swap circuit breakers so stale completions cannot corrupt a newer
   half-open/recovered cycle.

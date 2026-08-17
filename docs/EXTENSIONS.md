@@ -25,6 +25,12 @@ not the manifest, must create the operating-system process and implement gracefu
 the environment snapshot, expose secrets, or claim that JavaScript objects are a
 sandbox.
 
+The production process launcher uses the Linux-only Rust supervisor described in
+[ADR-0006](ADR-0006-rust-runtime-supervisor.md). Its versioned, 64 KiB-bounded
+NDJSON protocol is lifecycle-only. A child is ready only after the explicit
+readiness frame; shutdown owns the whole child process group. The first slice
+allows only `runtime.health` and no permission ports or ambient environment.
+
 Extensions receive only the ports mapped to their approved permission names.
 Capabilities also imply required permissions; for example `tool.crm.write`
 requires `crm.write`, while provider capabilities require network and applicable

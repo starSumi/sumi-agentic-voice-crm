@@ -67,6 +67,12 @@ default drain budget, then aborts request signals and closes remaining
 connections. A non-cooperative in-process resource is reported as a teardown
 failure for the process supervisor; JavaScript does not pretend to kill it.
 
+Process-isolated extensions have an additional owner boundary. Node resolves a
+trusted absolute entrypoint and passes only allowlisted environment values. The
+Rust supervisor creates one process group, waits for an explicit bounded ready
+frame, sends `SIGTERM` on stop, and sends `SIGKILL` after the configured grace.
+Dropping the owner also terminates and waits for a live group.
+
 Conversation state has a separate optimistic lifecycle:
 `ABSENT -> revision 0 -> revision N+1`. A writer supplies the revision it read.
 Only an exact tenant/conversation/revision match replaces the encrypted state;

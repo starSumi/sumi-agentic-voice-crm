@@ -7,15 +7,18 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-Use Node.js `24.18.0` or newer and the repository `packageManager` pin
-`pnpm@10.33.4`. The runtime itself is JavaScript with explicit production
-dependencies; Astro and Starlight are development-only documentation dependencies.
+Use Node.js `24.18.0` or newer, the repository `packageManager` pin
+`pnpm@10.33.4`, and the exact Rust toolchain in `rust-toolchain.toml`. The
+application runtime is JavaScript; the Linux process-lifecycle supervisor is a
+small Rust workspace member. Astro and Starlight are development-only
+documentation dependencies.
 
 ## Optional Nix shell
 
 Linux and WSL2 contributors may enter the pinned development shell with
 `nix develop`. The flake supplies Node 24, Git, jq, OpenSSL, Python, build tools,
-PostgreSQL 17 tools, exact pnpm `10.33.4`, and Docker/Compose clients. It
+PostgreSQL 17 tools, exact pnpm `10.33.4`, Rust, Cargo, Clippy, rustfmt, and
+Docker/Compose clients. It
 deliberately does not run `pnpm install`, start a daemon, start Compose, or
 replace the pnpm lockfile and Docker release path.
 
@@ -24,6 +27,10 @@ nix develop
 pnpm install --frozen-lockfile
 pnpm verify
 ```
+
+`pnpm run rust:check` performs rustfmt, Clippy with warnings denied, and locked
+workspace tests. `pnpm run rust:build` produces the release supervisor binary;
+the normal build copies it into `dist/bin`.
 
 `flake.lock` pins nixpkgs. Update it as a reviewed dependency change and rerun
 both `nix flake check` and the normal pnpm verification gates.

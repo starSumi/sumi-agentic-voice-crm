@@ -20,6 +20,7 @@ flake 提供 Node 24、Git、jq、OpenSSL、Python、构建工具、PostgreSQL 1
 nix develop
 pnpm install --frozen-lockfile
 pnpm verify
+pnpm run rust:check
 ```
 
 `flake.lock` 固定 nixpkgs。更新它属于需要评审的依赖变更，必须同时运行
