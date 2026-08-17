@@ -1,4 +1,4 @@
-import { runWithStagedTimeout } from "../lifecycle/staged-timeout.mjs";
+import { runWithStagedTimeout } from "../lifecycle/staged-timeout.ts";
 import { createGuardianDenialGovernor } from "./guardian-denial-governor.mjs";
 
 export const DEFAULT_GUARDIAN_REVIEW_TIMEOUT_MS = 90_000;

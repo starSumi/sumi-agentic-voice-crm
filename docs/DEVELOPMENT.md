@@ -7,11 +7,13 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-Use Node.js `24.18.0` or newer, the repository `packageManager` pin
+Use Node.js `24.19.0` or newer, the repository `packageManager` pin
 `pnpm@10.33.4`, and the exact Rust toolchain in `rust-toolchain.toml`. The
-application runtime is JavaScript; the Linux process-lifecycle supervisor is a
-small Rust workspace member. Astro and Starlight are development-only
-documentation dependencies.
+application runtime is native ESM migrating to TypeScript's erasable syntax;
+Node executes the typed modules directly while `typecheck:runtime` enforces the
+same boundary statically. The Linux process-lifecycle supervisor is a small
+Rust workspace member. Astro and Starlight are development-only documentation
+dependencies.
 
 ## Optional Nix shell
 
@@ -43,8 +45,7 @@ both `nix flake check` and the normal pnpm verification gates.
 | `contracts/` | Normative OpenAPI and event contracts. |
 | `db/` | Production-target schema and row-level security migration. |
 | `docs/` | Single reviewed source for human Web and agent MCP documentation. |
-| `.agent/` | Versioned engineering governance and checkpoint routing. |
-| User state root selected by `pnpm agent:resume` | Machine-local session identity, agent edges, locks, and retries; never committed. |
+| `.agent/`, `.local/` | Machine-local control-plane state and development evidence; ignored and never used by CI or release. |
 | `test/` | Runtime and contract regression tests. |
 | `scripts/` | Deterministic checks, builds, and cross-product verification. |
 | `flake.nix`, `flake.lock` | Optional pinned Linux/WSL2 development shell; not a release or package-manager replacement. |
@@ -55,17 +56,15 @@ both `nix flake check` and the normal pnpm verification gates.
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm agent:health
-pnpm agent:resume
 pnpm verify:release
 pnpm verify:mcp
 pnpm smoke:docker
 pnpm sbom
 ```
 
-`verify:release` runs the dependency audit, `verify`, and bounded load/fault drills. `verify` covers protocol drift/typecheck, runtime and disposable-PostgreSQL tests, repository/agent checks, the reproducible runtime build, dist smoke, Astro type checks, and static-site projection verification. `verify:mcp` additionally requires a built sibling Sumi-Docs-MCP checkout and exercises all four MCP tools against the generated site. `smoke:docker` is intentionally separate because it requires a usable Docker daemon and remains mandatory release evidence.
+`verify:release` runs the dependency audit, `verify`, and bounded load/fault drills. `verify` covers protocol drift/typecheck, runtime and disposable-PostgreSQL tests, repository checks, the reproducible runtime build, dist smoke, Astro type checks, and static-site projection verification. `verify:mcp` additionally requires a built sibling Sumi-Docs-MCP checkout and exercises all four MCP tools against the generated site. `smoke:docker` is intentionally separate because it requires a usable Docker daemon and remains mandatory release evidence.
 
-`test:postgres` is the C2 database gate. It requires PostgreSQL client/server
+`test:postgres` is the database integration gate. It requires PostgreSQL client/server
 binaries on `PATH`, creates an isolated temporary cluster and database, applies
 the migration twice, exercises two-tenant `FORCE RLS`, commits and rolls back a
 CRM + command + audit + outbox transaction, then destroys the cluster. It must
@@ -73,7 +72,7 @@ never target a shared database.
 
 ## Change sequence
 
-1. Read `AGENTS.md`, the reviewed agent cursor, the owning contract or ADR, and the relevant checkpoint card; then re-probe Git and CI.
+1. Read `AGENTS.md` and the owning contract or ADR; then re-probe Git and CI.
 2. Add a failing test for an externally visible regression or contract change.
 3. Update normative types or contracts before adapters and transport code.
 4. Keep model output untrusted; validate authorization, schema, policy, idempotency, and transaction boundaries outside the model.

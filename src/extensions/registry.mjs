@@ -1,4 +1,4 @@
-import { runWithStagedTimeout } from "../lifecycle/staged-timeout.mjs";
+import { runWithStagedTimeout } from "../lifecycle/staged-timeout.ts";
 import { validateExtensionManifest } from "./manifest.mjs";
 
 function dependencyOrder(descriptors) {

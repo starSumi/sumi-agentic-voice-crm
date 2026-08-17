@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowJs": false,
+    "erasableSyntaxOnly": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": ".",
+    "strict": true,
+    "target": "ESNext",
+    "types": ["node"],
+    "verbatimModuleSyntax": true
+  },
+  "files": [
+    "src/application/progress-event-bus.ts",
+    "src/authorization/errors.ts",
+    "src/authorization/index.ts",
+    "src/authorization/policy.ts",
+    "src/authorization/types.ts",
+    "src/lifecycle/managed-task-registry.ts",
+    "src/lifecycle/staged-timeout.ts"
+  ],
+  "exclude": [".agent", ".local", "artifacts", "dist", "node_modules"]
+}

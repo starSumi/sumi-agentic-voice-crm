@@ -19,7 +19,7 @@ async function createBuildFixture() {
       version: "1.0.0",
       description: "fixture",
       type: "module",
-      engines: { node: ">=24.18.0" },
+      engines: { node: ">=24.19.0" },
       license: "Apache-2.0",
       dependencies: {},
     })}\n`,

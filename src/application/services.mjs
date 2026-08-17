@@ -6,11 +6,9 @@ import {
   assertTtsCommand,
 } from "./commands.mjs";
 import { normalizeUnderstanding } from "./mutation-policy.mjs";
+import { authorizationError } from "../authorization/errors.ts";
 
-const PROGRESS_SINK_KEYS = [
-  "progressSink",
-  "eventSink",
-];
+const PROGRESS_SINK_KEYS = ["progressSink", "eventSink"];
 const NOOP_PROGRESS_SINK = () => {};
 
 function resolveProgressSink(ports = {}) {
@@ -41,7 +39,8 @@ function safeResource(resource) {
 }
 
 function jsonScalar(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
   return undefined;
 }
@@ -93,15 +92,124 @@ async function emitProgress(ports, context, type, fields, conversationId) {
 
 async function traced(ports, context, name, attributes, operation) {
   if (typeof ports.tracer?.runSpan !== "function") return operation();
-  return ports.tracer.runSpan(name, {
-    parent: context.traceparent,
-    signal: context.signal,
-    attributes,
-  }, operation);
+  return ports.tracer.runSpan(
+    name,
+    {
+      parent: context.traceparent,
+      signal: context.signal,
+      attributes,
+    },
+    operation,
+  );
 }
 
 function assertActive(context) {
   context.signal?.throwIfAborted();
+}
+
+function authorizationRequest(context, action, resource) {
+  const identity = context.identity;
+  const principal = {
+    subject_id: opaque(identity.subject_id ?? identity.actor_id),
+    kind: opaque(identity.kind ?? identity.principal_kind, "human"),
+    tenant_id: identity.tenant_id,
+    status: opaque(identity.status),
+    roles: Array.isArray(identity.roles) ? [...identity.roles] : [],
+    actor_scopes: Array.isArray(identity.actor_scopes)
+      ? [...identity.actor_scopes]
+      : [],
+  };
+  if (
+    typeof identity.workload_id === "string" &&
+    identity.workload_id.length > 0
+  ) {
+    principal.workload_id = identity.workload_id;
+  }
+  const decisionContext = {
+    token_scopes: Array.isArray(identity.token_scopes)
+      ? [...identity.token_scopes]
+      : [],
+    request_id: context.request_id,
+  };
+  if (Array.isArray(identity.authentication_methods)) {
+    decisionContext.authentication_methods = [
+      ...identity.authentication_methods,
+    ];
+  }
+  if (
+    typeof identity.network_zone === "string" &&
+    identity.network_zone.length > 0
+  ) {
+    decisionContext.network_zone = identity.network_zone;
+  }
+  const normalizedResource = {
+    type: opaque(resource?.type, "interaction"),
+    id: opaque(resource?.id, context.request_id),
+    tenant_id: opaque(resource?.tenant_id, identity.tenant_id),
+  };
+  if (typeof resource?.owner_id === "string" && resource.owner_id.length > 0) {
+    normalizedResource.owner_id = resource.owner_id;
+  }
+  return Object.freeze({
+    action,
+    principal: Object.freeze(principal),
+    resource: Object.freeze(normalizedResource),
+    context: Object.freeze(decisionContext),
+  });
+}
+
+export async function authorizeAction(ports, context, action, resource) {
+  assertActive(context);
+  if (typeof ports?.authorize !== "function") throw authorizationError();
+  let decision;
+  try {
+    decision = await ports.authorize(
+      authorizationRequest(context, action, resource),
+    );
+  } catch (error) {
+    if (error?.code === "FORBIDDEN") throw authorizationError(error.details);
+    throw error;
+  }
+  assertActive(context);
+  if (decision?.effect !== "allow") throw authorizationError(decision);
+  return decision;
+}
+
+function entityId(understanding, names, fallback) {
+  for (const name of names) {
+    const entity = understanding?.entities?.[name];
+    const candidate =
+      entity && typeof entity === "object" ? entity.value : entity;
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+  }
+  return fallback;
+}
+
+function resourceForIntent(context, understanding) {
+  if (understanding.intent === "crm.customer.create") {
+    return {
+      type: "customer",
+      id: entityId(
+        understanding,
+        ["customer", "customer_id", "name"],
+        context.request_id,
+      ),
+    };
+  }
+  if (understanding.intent === "crm.deal.update_stage") {
+    return {
+      type: "deal",
+      id: entityId(understanding, ["deal", "deal_id"], context.request_id),
+    };
+  }
+  return {
+    type: understanding?.entities?.deal ? "deal" : "customer",
+    id: entityId(
+      understanding,
+      ["customer", "customer_id", "deal", "deal_id", "query"],
+      context.request_id,
+    ),
+  };
 }
 
 function identityArgs(context, idempotencyKey) {
@@ -123,14 +231,21 @@ function result(kind, response) {
 }
 
 function askFingerprint(command) {
-  return sha256(JSON.stringify({
-    input: command.input.type === "audio"
-      ? { type: "audio", sha256: command.input.sha256, content_type: command.input.content_type }
-      : { type: "text", text: command.input.text },
-    locale: command.locale,
-    output_mode: command.outputMode,
-    conversation_id: command.conversationId ?? null,
-  }));
+  return sha256(
+    JSON.stringify({
+      input:
+        command.input.type === "audio"
+          ? {
+              type: "audio",
+              sha256: command.input.sha256,
+              content_type: command.input.content_type,
+            }
+          : { type: "text", text: command.input.text },
+      locale: command.locale,
+      output_mode: command.outputMode,
+      conversation_id: command.conversationId ?? null,
+    }),
+  );
 }
 
 function interactionPayload(command) {
@@ -165,12 +280,28 @@ export class AskService {
     assertAskCommand(command);
     assertActive(context);
     const ports = this.ports;
+    await authorizeAction(ports, context, "interaction.ask", {
+      type: "interaction",
+      id: command.conversationId ?? context.request_id,
+    });
+    if (command.outputMode === "audio" || command.outputMode === "both") {
+      await authorizeAction(ports, context, "media.tts.create", {
+        type: "media_asset",
+        id: `${context.request_id}:tts`,
+      });
+    }
     const storeArgs = identityArgs(context, command.idempotencyKey);
     const requestFingerprint = askFingerprint(command);
-    await emitProgress(ports, context, "interaction.started", {
-      input_type: command.input.type,
-      output_mode: command.outputMode,
-    }, command.conversationId);
+    await emitProgress(
+      ports,
+      context,
+      "interaction.started",
+      {
+        input_type: command.input.type,
+        output_mode: command.outputMode,
+      },
+      command.conversationId,
+    );
     let interaction;
     try {
       interaction = await ports.beginInteraction({
@@ -180,15 +311,22 @@ export class AskService {
         input_payload: interactionPayload(command),
       });
     } catch (error) {
-      await emitProgress(ports, context, "interaction.failed", {
-        error_code: knownErrorCode(error),
-      }, command.conversationId);
+      await emitProgress(
+        ports,
+        context,
+        "interaction.failed",
+        {
+          error_code: knownErrorCode(error),
+        },
+        command.conversationId,
+      );
       throw error;
     }
     if (interaction.replay) {
-      const schema = interaction.response?.status === "needs_review"
-        ? "ReviewResponse"
-        : "AskResponse";
+      const schema =
+        interaction.response?.status === "needs_review"
+          ? "ReviewResponse"
+          : "AskResponse";
       try {
         const validated = ports.validateResponse(schema, interaction.response);
         await emitProgress(
@@ -200,9 +338,15 @@ export class AskService {
         );
         return result("ask.replayed", validated);
       } catch (error) {
-        await emitProgress(ports, context, "interaction.failed", {
-          error_code: knownErrorCode(error),
-        }, command.conversationId);
+        await emitProgress(
+          ports,
+          context,
+          "interaction.failed",
+          {
+            error_code: knownErrorCode(error),
+          },
+          command.conversationId,
+        );
         throw error;
       }
     }
@@ -211,95 +355,157 @@ export class AskService {
       let audioBytes;
       if (command.input.type === "audio") {
         audioBytes = Buffer.from(command.input.data_base64, "base64");
-        const persistedInput = await traced(ports, context, "storage.object", {
-          "storage.kind": ports.storageKind ?? "unknown",
-          "input.type": "audio",
-        }, () => ports.persistInputAudio(audioBytes, {
-          tenantId: context.identity.tenant_id,
-          requestId: context.request_id,
-          contentType: command.input.content_type,
-        }));
+        const persistedInput = await traced(
+          ports,
+          context,
+          "storage.object",
+          {
+            "storage.kind": ports.storageKind ?? "unknown",
+            "input.type": "audio",
+          },
+          () =>
+            ports.persistInputAudio(audioBytes, {
+              tenantId: context.identity.tenant_id,
+              requestId: context.request_id,
+              contentType: command.input.content_type,
+            }),
+        );
         assertActive(context);
         await ports.recordInputAsset({
           ...storeArgs,
           ...persistedInput,
           asset: persistedInput.asset,
         });
-        await emitProgress(ports, context, "input.asset.persisted", {
-          asset_id: opaque(persistedInput.asset_id ?? persistedInput.asset?.asset_id),
-          sha256: opaque(persistedInput.sha256 ?? persistedInput.asset?.sha256),
-          byte_length: finiteNumber(
-            persistedInput.byte_length ?? persistedInput.asset?.byte_length,
-            0,
-          ),
-        }, command.conversationId);
+        await emitProgress(
+          ports,
+          context,
+          "input.asset.persisted",
+          {
+            asset_id: opaque(
+              persistedInput.asset_id ?? persistedInput.asset?.asset_id,
+            ),
+            sha256: opaque(
+              persistedInput.sha256 ?? persistedInput.asset?.sha256,
+            ),
+            byte_length: finiteNumber(
+              persistedInput.byte_length ?? persistedInput.asset?.byte_length,
+              0,
+            ),
+          },
+          command.conversationId,
+        );
       }
 
       const asrStarted = ports.now();
-      const transcriptResult = command.input.type === "audio"
-        ? await traced(ports, context, "provider.asr", {
-            "input.type": "audio",
-            "provider.kind": ports.asrProviderKind ?? "unknown",
-          }, () => ports.transcribe(audioBytes, {
-            locale: command.locale,
-            contentType: command.input.content_type,
-            signal: context.signal,
-          }))
-        : {
-            text: command.input.text,
-            language: command.locale.split("-")[0],
-            confidence: 1,
-            provider: "direct",
-            model: "none",
-            duration_ms: 0,
-          };
+      const transcriptResult =
+        command.input.type === "audio"
+          ? await traced(
+              ports,
+              context,
+              "provider.asr",
+              {
+                "input.type": "audio",
+                "provider.kind": ports.asrProviderKind ?? "unknown",
+              },
+              () =>
+                ports.transcribe(audioBytes, {
+                  locale: command.locale,
+                  contentType: command.input.content_type,
+                  signal: context.signal,
+                }),
+            )
+          : {
+              text: command.input.text,
+              language: command.locale.split("-")[0],
+              confidence: 1,
+              provider: "direct",
+              model: "none",
+              duration_ms: 0,
+            };
       if (!transcriptResult?.text?.trim()) {
-        throw Object.assign(new Error("no speech detected"), { code: "EMPTY_TRANSCRIPT" });
+        throw Object.assign(new Error("no speech detected"), {
+          code: "EMPTY_TRANSCRIPT",
+        });
       }
       assertActive(context);
       await ports.checkpointInteraction({
         ...storeArgs,
         transcript: transcriptResult,
-        provider_invocations: [{
-          operation: "asr",
-          provider: transcriptResult.provider,
-          model: transcriptResult.model,
-          status: "succeeded",
-        }],
+        provider_invocations: [
+          {
+            operation: "asr",
+            provider: transcriptResult.provider,
+            model: transcriptResult.model,
+            status: "succeeded",
+          },
+        ],
         model_versions: { asr: transcriptResult.model },
         latency_ms: { asr: ports.now() - asrStarted },
       });
-      await emitProgress(ports, context, "transcript.created", {
-        language: opaque(transcriptResult.language),
-        provider: opaque(transcriptResult.provider),
-        model: opaque(transcriptResult.model),
-        length: transcriptResult.text.length,
-      }, command.conversationId);
+      await emitProgress(
+        ports,
+        context,
+        "transcript.created",
+        {
+          language: opaque(transcriptResult.language),
+          provider: opaque(transcriptResult.provider),
+          model: opaque(transcriptResult.model),
+          length: transcriptResult.text.length,
+        },
+        command.conversationId,
+      );
 
       const intentStarted = ports.now();
-      const understanding = normalizeUnderstanding(await traced(ports, context, "provider.intent", {
-        "provider.kind": ports.intentProviderKind ?? "unknown",
-      }, () => ports.understand(transcriptResult.text, { locale: command.locale, signal: context.signal })));
-      const intentModel = understanding.source?.model ?? understanding.model ?? "unknown";
+      const understanding = normalizeUnderstanding(
+        await traced(
+          ports,
+          context,
+          "provider.intent",
+          {
+            "provider.kind": ports.intentProviderKind ?? "unknown",
+          },
+          () =>
+            ports.understand(transcriptResult.text, {
+              locale: command.locale,
+              signal: context.signal,
+            }),
+        ),
+      );
+      const intentModel =
+        understanding.source?.model ?? understanding.model ?? "unknown";
       assertActive(context);
+      await authorizeAction(
+        ports,
+        context,
+        understanding.intent,
+        resourceForIntent(context, understanding),
+      );
       await ports.checkpointInteraction({
         ...storeArgs,
         understanding,
-        provider_invocations: [{
-          operation: "intent",
-          provider: ports.intentProviderName,
-          model: intentModel,
-          status: "succeeded",
-        }],
+        provider_invocations: [
+          {
+            operation: "intent",
+            provider: ports.intentProviderName,
+            model: intentModel,
+            status: "succeeded",
+          },
+        ],
         model_versions: { intent: intentModel },
         latency_ms: { intent: ports.now() - intentStarted },
       });
-      await emitProgress(ports, context, "understanding.created", {
-        intent: opaque(understanding.intent),
-        confidence: finiteNumber(understanding.confidence, 0),
-        needs_confirmation: Boolean(understanding.needs_confirmation),
-        model: opaque(intentModel),
-      }, command.conversationId);
+      await emitProgress(
+        ports,
+        context,
+        "understanding.created",
+        {
+          intent: opaque(understanding.intent),
+          confidence: finiteNumber(understanding.confidence, 0),
+          needs_confirmation: Boolean(understanding.needs_confirmation),
+          model: opaque(intentModel),
+        },
+        command.conversationId,
+      );
 
       const response = {
         request_id: context.request_id,
@@ -312,115 +518,204 @@ export class AskService {
         },
         understanding,
         answer: {
-          text: understanding.intent === "crm.deal.update_stage"
-            ? "已更新商机阶段。"
-            : "已解析请求，正在处理。",
+          text:
+            understanding.intent === "crm.deal.update_stage"
+              ? "已更新商机阶段。"
+              : "已解析请求，正在处理。",
           language: command.locale,
         },
       };
 
       if (understanding.needs_confirmation) {
         assertActive(context);
-        response.review_task = await traced(ports, context, "store.transaction", {
-          "db.system": ports.databaseKind ?? "unknown",
-          "app.result": "needs_review",
-        }, () => ports.createReview({
-          ...storeArgs,
-          request_fingerprint: requestFingerprint,
-          understanding,
-        }));
-        await emitProgress(ports, context, "review.required", {
-          review_id: opaque(response.review_task?.id ?? response.review_task?.review_id),
-        }, command.conversationId);
+        response.review_task = await traced(
+          ports,
+          context,
+          "store.transaction",
+          {
+            "db.system": ports.databaseKind ?? "unknown",
+            "app.result": "needs_review",
+          },
+          () =>
+            ports.createReview({
+              ...storeArgs,
+              request_fingerprint: requestFingerprint,
+              understanding,
+            }),
+        );
+        await emitProgress(
+          ports,
+          context,
+          "review.required",
+          {
+            review_id: opaque(
+              response.review_task?.id ?? response.review_task?.review_id,
+            ),
+          },
+          command.conversationId,
+        );
         const validated = ports.validateResponse("ReviewResponse", response);
-        await ports.completeInteraction({ ...storeArgs, response: validated, outcome: "review_required" });
-        await emitProgress(ports, context, "interaction.completed", {
+        await ports.completeInteraction({
+          ...storeArgs,
+          response: validated,
           outcome: "review_required",
-        }, command.conversationId);
+        });
+        await emitProgress(
+          ports,
+          context,
+          "interaction.completed",
+          {
+            outcome: "review_required",
+          },
+          command.conversationId,
+        );
         return result("ask.review_required", validated);
       }
 
       assertActive(context);
-      response.crm = await traced(ports, context, "store.transaction", {
-        "db.system": ports.databaseKind ?? "unknown",
-        "app.operation": "ask",
-      }, () => ports.executeCrm({
-        ...storeArgs,
-        request_fingerprint: requestFingerprint,
-        intent: understanding.intent,
-        entities: understanding.entities,
-      }));
-      await emitProgress(ports, context, "crm.committed", {
-        resource: safeResource(response.crm?.resource),
-        action: opaque(response.crm?.action),
-        aggregate_version: finiteNumber(response.crm?.aggregate_version, 0),
-      }, command.conversationId);
+      response.crm = await traced(
+        ports,
+        context,
+        "store.transaction",
+        {
+          "db.system": ports.databaseKind ?? "unknown",
+          "app.operation": "ask",
+        },
+        () =>
+          ports.executeCrm({
+            ...storeArgs,
+            request_fingerprint: requestFingerprint,
+            intent: understanding.intent,
+            entities: understanding.entities,
+          }),
+      );
+      await emitProgress(
+        ports,
+        context,
+        "crm.committed",
+        {
+          resource: safeResource(response.crm?.resource),
+          action: opaque(response.crm?.action),
+          aggregate_version: finiteNumber(response.crm?.aggregate_version, 0),
+        },
+        command.conversationId,
+      );
       if (command.outputMode === "audio" || command.outputMode === "both") {
         const format = ports.ttsDefaultFormat();
-        const audioFingerprint = sha256(JSON.stringify({
-          text: response.answer.text,
-          language: command.locale,
-          format,
-        }));
+        const audioFingerprint = sha256(
+          JSON.stringify({
+            text: response.answer.text,
+            language: command.locale,
+            format,
+          }),
+        );
         const ttsStarted = ports.now();
-        const generated = await traced(ports, context, "provider.tts", {
-          "output.mode": command.outputMode,
-          "provider.kind": ports.ttsProviderKind ?? "unknown",
-        }, () => ports.synthesize(response.answer.text, {
-          language: command.locale,
-          format,
-          signal: context.signal,
-        }));
-        const persisted = await traced(ports, context, "storage.object", {
-          "storage.kind": ports.storageKind ?? "unknown",
-        }, () => ports.persistAudioAsset(generated, {
-          tenantId: context.identity.tenant_id,
-          kind: "tts",
-        }));
-        assertActive(context);
-        response.audio = await traced(ports, context, "store.transaction", {
-          "db.system": ports.databaseKind ?? "unknown",
-        }, () => ports.recordTts(
-          `${context.identity.tenant_id}:${command.idempotencyKey}:audio:${audioFingerprint}`,
-          audioFingerprint,
-          persisted.asset,
+        const generated = await traced(
+          ports,
+          context,
+          "provider.tts",
           {
-            ...storeArgs,
-            object_key: persisted.object_key,
-            byte_length: persisted.byte_length,
-            sha256: persisted.sha256,
+            "output.mode": command.outputMode,
+            "provider.kind": ports.ttsProviderKind ?? "unknown",
           },
-        ));
-        await emitProgress(ports, context, "tts.asset.created", {
-          asset_id: opaque(response.audio?.asset_id),
-          mime: opaque(response.audio?.mime_type),
-          status: opaque(response.audio?.status),
-        }, command.conversationId);
+          () =>
+            ports.synthesize(response.answer.text, {
+              language: command.locale,
+              format,
+              signal: context.signal,
+            }),
+        );
+        const persisted = await traced(
+          ports,
+          context,
+          "storage.object",
+          {
+            "storage.kind": ports.storageKind ?? "unknown",
+          },
+          () =>
+            ports.persistAudioAsset(generated, {
+              tenantId: context.identity.tenant_id,
+              kind: "tts",
+            }),
+        );
+        assertActive(context);
+        response.audio = await traced(
+          ports,
+          context,
+          "store.transaction",
+          {
+            "db.system": ports.databaseKind ?? "unknown",
+          },
+          () =>
+            ports.recordTts(
+              `${context.identity.tenant_id}:${command.idempotencyKey}:audio:${audioFingerprint}`,
+              audioFingerprint,
+              persisted.asset,
+              {
+                ...storeArgs,
+                object_key: persisted.object_key,
+                byte_length: persisted.byte_length,
+                sha256: persisted.sha256,
+              },
+            ),
+        );
+        await emitProgress(
+          ports,
+          context,
+          "tts.asset.created",
+          {
+            asset_id: opaque(response.audio?.asset_id),
+            mime: opaque(response.audio?.mime_type),
+            status: opaque(response.audio?.status),
+          },
+          command.conversationId,
+        );
         await ports.checkpointInteraction({
           ...storeArgs,
-          provider_invocations: [{
-            operation: "tts",
-            provider: generated.provider,
-            model: generated.model,
-            status: "succeeded",
-          }],
+          provider_invocations: [
+            {
+              operation: "tts",
+              provider: generated.provider,
+              model: generated.model,
+              status: "succeeded",
+            },
+          ],
           model_versions: { tts: generated.model },
           latency_ms: { tts: ports.now() - ttsStarted },
         });
       }
       const validated = ports.validateResponse("AskResponse", response);
-      await ports.completeInteraction({ ...storeArgs, response: validated, outcome: "completed" });
-      await emitProgress(ports, context, "interaction.completed", {
+      await ports.completeInteraction({
+        ...storeArgs,
+        response: validated,
         outcome: "completed",
-      }, command.conversationId);
+      });
+      await emitProgress(
+        ports,
+        context,
+        "interaction.completed",
+        {
+          outcome: "completed",
+        },
+        command.conversationId,
+      );
       return result("ask.completed", validated);
     } catch (error) {
       const errorCode = knownErrorCode(error);
-      if (context.signal?.aborted && typeof ports.abandonInteraction === "function") {
+      if (
+        context.signal?.aborted &&
+        typeof ports.abandonInteraction === "function"
+      ) {
         try {
           await ports.abandonInteraction(storeArgs);
         } catch {}
-        await emitProgress(ports, context, "interaction.cancelled", undefined, command.conversationId);
+        await emitProgress(
+          ports,
+          context,
+          "interaction.cancelled",
+          undefined,
+          command.conversationId,
+        );
       } else {
         try {
           await ports.failInteraction({
@@ -429,9 +724,15 @@ export class AskService {
             error_message: error?.message ?? "request failed",
           });
         } catch {}
-        await emitProgress(ports, context, "interaction.failed", {
-          error_code: errorCode,
-        }, command.conversationId);
+        await emitProgress(
+          ports,
+          context,
+          "interaction.failed",
+          {
+            error_code: errorCode,
+          },
+          command.conversationId,
+        );
       }
       throw error;
     }
@@ -451,13 +752,19 @@ export class TtsService {
     assertRequestContext(context);
     assertTtsCommand(command);
     assertActive(context);
+    await authorizeAction(this.ports, context, "media.tts.create", {
+      type: "media_asset",
+      id: `${context.request_id}:tts`,
+    });
     const key = `${context.identity.tenant_id}:${command.idempotencyKey}`;
-    const fingerprint = sha256(JSON.stringify({
-      text: command.text,
-      language: command.language,
-      voice: command.voice,
-      format: command.format,
-    }));
+    const fingerprint = sha256(
+      JSON.stringify({
+        text: command.text,
+        language: command.language,
+        voice: command.voice,
+        format: command.format,
+      }),
+    );
     const replay = await this.ports.replayTts(key, fingerprint);
     if (replay) {
       const response = this.ports.validateResponse("TtsSynthesizeResponse", {
@@ -470,30 +777,51 @@ export class TtsService {
       });
       return result("tts.replayed", response);
     }
-    const generated = await traced(this.ports, context, "provider.tts", {
-      "output.mode": "audio",
-      "provider.kind": this.ports.ttsProviderKind ?? "unknown",
-    }, () => this.ports.synthesize(command.text, {
-      language: command.language,
-      voice: command.voice,
-      format: command.format,
-      signal: context.signal,
-    }));
-    const persisted = await traced(this.ports, context, "storage.object", {
-      "storage.kind": this.ports.storageKind ?? "unknown",
-    }, () => this.ports.persistAudioAsset(generated, {
-      tenantId: context.identity.tenant_id,
-      kind: "tts",
-    }));
+    const generated = await traced(
+      this.ports,
+      context,
+      "provider.tts",
+      {
+        "output.mode": "audio",
+        "provider.kind": this.ports.ttsProviderKind ?? "unknown",
+      },
+      () =>
+        this.ports.synthesize(command.text, {
+          language: command.language,
+          voice: command.voice,
+          format: command.format,
+          signal: context.signal,
+        }),
+    );
+    const persisted = await traced(
+      this.ports,
+      context,
+      "storage.object",
+      {
+        "storage.kind": this.ports.storageKind ?? "unknown",
+      },
+      () =>
+        this.ports.persistAudioAsset(generated, {
+          tenantId: context.identity.tenant_id,
+          kind: "tts",
+        }),
+    );
     assertActive(context);
-    const asset = await traced(this.ports, context, "store.transaction", {
-      "db.system": this.ports.databaseKind ?? "unknown",
-    }, () => this.ports.recordTts(key, fingerprint, persisted.asset, {
-      ...identityArgs(context, command.idempotencyKey),
-      object_key: persisted.object_key,
-      byte_length: persisted.byte_length,
-      sha256: persisted.sha256,
-    }));
+    const asset = await traced(
+      this.ports,
+      context,
+      "store.transaction",
+      {
+        "db.system": this.ports.databaseKind ?? "unknown",
+      },
+      () =>
+        this.ports.recordTts(key, fingerprint, persisted.asset, {
+          ...identityArgs(context, command.idempotencyKey),
+          object_key: persisted.object_key,
+          byte_length: persisted.byte_length,
+          sha256: persisted.sha256,
+        }),
+    );
     const response = this.ports.validateResponse("TtsSynthesizeResponse", {
       request_id: context.request_id,
       asset,
@@ -521,22 +849,36 @@ export class ReviewService {
     assertRequestContext(context);
     assertReviewCommand(command);
     assertActive(context);
+    await authorizeAction(this.ports, context, "review.decide", {
+      type: "review",
+      id: command.reviewId,
+    });
     if (typeof this.ports.decideReview !== "function") {
       throw Object.assign(
         new Error("review decisions require STORE_PROVIDER=postgres"),
         { code: "UPSTREAM_UNAVAILABLE" },
       );
     }
-    const decision = await traced(this.ports, context, "store.transaction", {
-      "db.system": this.ports.databaseKind ?? "unknown",
-      "app.operation": "review",
-    }, () => this.ports.decideReview({
-      ...identityArgs(context, command.idempotencyKey),
-      review_id: command.reviewId,
-      decision: command.decision,
-      correction: command.correction,
-    }));
-    const response = this.ports.validateResponse("ReviewDecisionResponse", decision);
+    const decision = await traced(
+      this.ports,
+      context,
+      "store.transaction",
+      {
+        "db.system": this.ports.databaseKind ?? "unknown",
+        "app.operation": "review",
+      },
+      () =>
+        this.ports.decideReview({
+          ...identityArgs(context, command.idempotencyKey),
+          review_id: command.reviewId,
+          decision: command.decision,
+          correction: command.correction,
+        }),
+    );
+    const response = this.ports.validateResponse(
+      "ReviewDecisionResponse",
+      decision,
+    );
     await emitProgress(this.ports, context, "review.decided", {
       review_id: opaque(response.review_id ?? command.reviewId),
       decision: command.decision,

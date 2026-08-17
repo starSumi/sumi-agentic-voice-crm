@@ -13,6 +13,12 @@ import { understanding } from "../src/contracts.mjs";
 import { validateProtocol } from "../src/protocol-validation.mjs";
 
 const REQUEST_ID = "req_0123456789abcdef01234567";
+const allowAuthorization = async () => ({
+  effect: "allow",
+  policy_version: "test-policy",
+  reason_codes: ["ALLOW"],
+  obligations: [],
+});
 
 function context(requestId = REQUEST_ID) {
   return createRequestContext({
@@ -58,11 +64,23 @@ function askFixture(overrides = {}) {
     crm: [],
   };
   const ports = {
-    beginInteraction: async (args) => { calls.begin.push(args); return { replay: false }; },
-    checkpointInteraction: async (args) => { calls.checkpoint.push(args); },
-    completeInteraction: async (args) => { calls.complete.push(args); },
-    failInteraction: async (args) => { calls.failed.push(args); },
-    abandonInteraction: async (args) => { calls.abandoned.push(args); },
+    authorize: allowAuthorization,
+    beginInteraction: async (args) => {
+      calls.begin.push(args);
+      return { replay: false };
+    },
+    checkpointInteraction: async (args) => {
+      calls.checkpoint.push(args);
+    },
+    completeInteraction: async (args) => {
+      calls.complete.push(args);
+    },
+    failInteraction: async (args) => {
+      calls.failed.push(args);
+    },
+    abandonInteraction: async (args) => {
+      calls.abandoned.push(args);
+    },
     createReview: async (args) => {
       calls.reviews.push(args);
       return {
@@ -85,7 +103,8 @@ function askFixture(overrides = {}) {
       duration_ms: 1,
     }),
     understand: async (transcript) => readUnderstanding(transcript),
-    synthesize: async () => asset({ data_base64: Buffer.from("audio").toString("base64") }),
+    synthesize: async () =>
+      asset({ data_base64: Buffer.from("audio").toString("base64") }),
     ttsDefaultFormat: () => "mp3",
     persistInputAudio: async () => ({
       asset: asset({ mime_type: "audio/wav" }),
@@ -132,7 +151,10 @@ test("AskService completes a read-only command without HTTP and binds conversati
   assert.equal(calls.complete[0].outcome, "completed");
   assert.equal(calls.begin[0].input_payload.conversation_id, "conversation-a");
   assert.equal(calls.begin[1].input_payload.conversation_id, "conversation-b");
-  assert.notEqual(calls.begin[0].request_fingerprint, calls.begin[1].request_fingerprint);
+  assert.notEqual(
+    calls.begin[0].request_fingerprint,
+    calls.begin[1].request_fingerprint,
+  );
 });
 
 test("AskService forces every mutating understanding through review", async () => {
@@ -150,7 +172,9 @@ test("AskService forces every mutating understanding through review", async () =
   });
   const { service, calls } = askFixture({
     understand: async () => mutation,
-    executeCrm: async () => { throw new Error("mutation bypassed review"); },
+    executeCrm: async () => {
+      throw new Error("mutation bypassed review");
+    },
   });
 
   const outcome = await service.execute(
@@ -178,8 +202,12 @@ test("AskService replays a completed interaction without invoking providers or C
       calls.begin.push(args);
       return { replay: true, response, http_status: 200 };
     },
-    understand: async () => { throw new Error("provider must not run for replay"); },
-    executeCrm: async () => { throw new Error("CRM must not run for replay"); },
+    understand: async () => {
+      throw new Error("provider must not run for replay");
+    },
+    executeCrm: async () => {
+      throw new Error("CRM must not run for replay");
+    },
   });
 
   const outcome = await service.execute(context(), textCommand());
@@ -193,6 +221,7 @@ test("AskService replays a completed interaction without invoking providers or C
 test("TtsService and ReviewService delegate normalized commands to runtime ports", async () => {
   const calls = { synthesize: [], persist: [], record: [], decide: [] };
   const tts = new TtsService({
+    authorize: allowAuthorization,
     replayTts: async () => undefined,
     synthesize: async (...args) => {
       calls.synthesize.push(args);
@@ -214,25 +243,36 @@ test("TtsService and ReviewService delegate normalized commands to runtime ports
     validateResponse: validateProtocol,
   });
   const review = new ReviewService({
+    authorize: allowAuthorization,
     decideReview: async (args) => {
       calls.decide.push(args);
-      return { review_id: args.review_id, status: "approved", decision: { decision: args.decision } };
+      return {
+        review_id: args.review_id,
+        status: "approved",
+        decision: { decision: args.decision },
+      };
     },
     validateResponse: validateProtocol,
   });
 
-  const ttsOutcome = await tts.execute(context(), normalizeTtsCommand({
-    idempotency_key: "tts-key-001",
-    text: " hello ",
-    language: "en-US",
-    format: "mp3",
-  }));
-  const reviewOutcome = await review.execute(context(), normalizeReviewCommand({
-    idempotency_key: "review-key-001",
-    review_id: "rev_abcd",
-    decision: "approve",
-    correction: { entities: { stage: { value: "Closed Won" } } },
-  }));
+  const ttsOutcome = await tts.execute(
+    context(),
+    normalizeTtsCommand({
+      idempotency_key: "tts-key-001",
+      text: " hello ",
+      language: "en-US",
+      format: "mp3",
+    }),
+  );
+  const reviewOutcome = await review.execute(
+    context(),
+    normalizeReviewCommand({
+      idempotency_key: "review-key-001",
+      review_id: "rev_abcd",
+      decision: "approve",
+      correction: { entities: { stage: { value: "Closed Won" } } },
+    }),
+  );
 
   assert.equal(ttsOutcome.kind, "tts.created");
   assert.equal(calls.synthesize[0][0], "hello");
@@ -248,7 +288,11 @@ test("AskService marks provider and storage failures on the interaction", async 
     const failure = Object.assign(new Error("intent provider unavailable"), {
       code: "UPSTREAM_UNAVAILABLE",
     });
-    const { service, calls } = askFixture({ understand: async () => { throw failure; } });
+    const { service, calls } = askFixture({
+      understand: async () => {
+        throw failure;
+      },
+    });
 
     await assert.rejects(service.execute(context(), textCommand()), failure);
     assert.equal(calls.failed.length, 1);
@@ -260,8 +304,12 @@ test("AskService marks provider and storage failures on the interaction", async 
       code: "UPSTREAM_UNAVAILABLE",
     });
     const { service, calls } = askFixture({
-      persistInputAudio: async () => { throw failure; },
-      transcribe: async () => { throw new Error("ASR must not run after storage failure"); },
+      persistInputAudio: async () => {
+        throw failure;
+      },
+      transcribe: async () => {
+        throw new Error("ASR must not run after storage failure");
+      },
     });
     const command = normalizeAskCommand({
       idempotency_key: "audio-key-001",
@@ -283,7 +331,9 @@ test("AskService marks provider and storage failures on the interaction", async 
 
 test("AskService releases its interaction lease when collaborative cancellation wins", async () => {
   const controller = new AbortController();
-  const cancellation = Object.assign(new Error("client disconnected"), { name: "AbortError" });
+  const cancellation = Object.assign(new Error("client disconnected"), {
+    name: "AbortError",
+  });
   const { service, calls } = askFixture({
     understand: async () => {
       controller.abort(cancellation);
@@ -297,7 +347,10 @@ test("AskService releases its interaction lease when collaborative cancellation 
     signal: controller.signal,
   });
 
-  await assert.rejects(service.execute(cancelledContext, textCommand()), cancellation);
+  await assert.rejects(
+    service.execute(cancelledContext, textCommand()),
+    cancellation,
+  );
   assert.equal(calls.abandoned.length, 1);
   assert.equal(calls.failed.length, 0);
   assert.equal(calls.crm.length, 0);

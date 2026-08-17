@@ -35,6 +35,12 @@ function askCommand(overrides = {}) {
 
 function progressPorts(overrides = {}) {
   return {
+    authorize: async () => ({
+      effect: "allow",
+      policy_version: "test-policy",
+      reason_codes: ["ALLOW"],
+      obligations: [],
+    }),
     now: () => 1_800_000_000_000,
     intentProviderName: "intent-provider",
     beginInteraction: async () => ({ replay: false }),
@@ -61,14 +67,15 @@ function progressPorts(overrides = {}) {
       model: "asr-model",
       duration_ms: 7,
     }),
-    understand: async () => understanding({
-      intent: "crm.search",
-      confidence: 0.95,
-      entities: { customer: { value: "private customer entity" } },
-      transcript: TRANSCRIPT,
-      language: "en",
-      model: "intent-model",
-    }),
+    understand: async () =>
+      understanding({
+        intent: "crm.search",
+        confidence: 0.95,
+        entities: { customer: { value: "private customer entity" } },
+        transcript: TRANSCRIPT,
+        language: "en",
+        model: "intent-model",
+      }),
     executeCrm: async () => ({
       action: "read_only",
       resource: { type: "search", id: "result_progress" },
@@ -107,47 +114,88 @@ function progressPorts(overrides = {}) {
 
 test("AskService emits ordered, flat, redacted progress milestones", async () => {
   const events = [];
-  const service = new AskService(progressPorts({
-    progressSink: (event) => events.push(event),
-  }));
+  const service = new AskService(
+    progressPorts({
+      progressSink: (event) => events.push(event),
+    }),
+  );
 
   const outcome = await service.execute(context(), askCommand());
 
   assert.equal(outcome.kind, "ask.completed");
-  assert.deepEqual(events.map((event) => event.type), [
-    "interaction.started",
-    "input.asset.persisted",
-    "transcript.created",
-    "understanding.created",
-    "crm.committed",
-    "tts.asset.created",
-    "interaction.completed",
-  ]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    [
+      "interaction.started",
+      "input.asset.persisted",
+      "transcript.created",
+      "understanding.created",
+      "crm.committed",
+      "tts.asset.created",
+      "interaction.completed",
+    ],
+  );
   for (const event of events) {
     assert.equal(event.request_id, REQUEST_ID);
     assert.equal(event.tenant_id, "tenant_progress");
     assert.equal(event.actor_id, "actor_progress");
     assert.equal(event.conversation_id, "conversation_progress");
     assert.equal(typeof event.occurred_at, "string");
-    assert.ok(Object.values(event).every((value) => value === null || ["string", "number", "boolean"].includes(typeof value)));
+    assert.ok(
+      Object.values(event).every(
+        (value) =>
+          value === null ||
+          ["string", "number", "boolean"].includes(typeof value),
+      ),
+    );
     assert.doesNotThrow(() => JSON.stringify(event));
   }
 
   assert.deepEqual(
-    Object.fromEntries(Object.entries(events[1]).filter(([key]) => ["asset_id", "sha256", "byte_length"].includes(key))),
-    { asset_id: "ast_input_progress", sha256: "a".repeat(64), byte_length: AUDIO_BYTES.length },
+    Object.fromEntries(
+      Object.entries(events[1]).filter(([key]) =>
+        ["asset_id", "sha256", "byte_length"].includes(key),
+      ),
+    ),
+    {
+      asset_id: "ast_input_progress",
+      sha256: "a".repeat(64),
+      byte_length: AUDIO_BYTES.length,
+    },
   );
   assert.deepEqual(
-    Object.fromEntries(Object.entries(events[2]).filter(([key]) => ["language", "provider", "model", "length"].includes(key))),
-    { language: "en", provider: "asr-provider", model: "asr-model", length: TRANSCRIPT.length },
+    Object.fromEntries(
+      Object.entries(events[2]).filter(([key]) =>
+        ["language", "provider", "model", "length"].includes(key),
+      ),
+    ),
+    {
+      language: "en",
+      provider: "asr-provider",
+      model: "asr-model",
+      length: TRANSCRIPT.length,
+    },
   );
   assert.deepEqual(
-    Object.fromEntries(Object.entries(events[3]).filter(([key]) => ["intent", "confidence", "needs_confirmation", "model"].includes(key))),
-    { intent: "crm.search", confidence: 0.95, needs_confirmation: false, model: "intent-model" },
+    Object.fromEntries(
+      Object.entries(events[3]).filter(([key]) =>
+        ["intent", "confidence", "needs_confirmation", "model"].includes(key),
+      ),
+    ),
+    {
+      intent: "crm.search",
+      confidence: 0.95,
+      needs_confirmation: false,
+      model: "intent-model",
+    },
   );
   assert.equal(events[4].resource, "search/result_progress");
   assert.deepEqual(
-    Object.fromEntries(Object.entries(events[5]).filter(([key]) => ["asset_id", "mime", "status"].includes(key))),
+    Object.fromEntries(
+      Object.entries(events[5]).filter(([key]) =>
+        ["asset_id", "mime", "status"].includes(key),
+      ),
+    ),
     { asset_id: "ast_tts_progress", mime: "audio/mpeg", status: "ready" },
   );
 
@@ -160,47 +208,61 @@ test("AskService emits ordered, flat, redacted progress milestones", async () =>
     "signature=private",
     "private/storage",
   ]) {
-    assert.equal(serialized.includes(forbidden), false, `progress leaked ${forbidden}`);
+    assert.equal(
+      serialized.includes(forbidden),
+      false,
+      `progress leaked ${forbidden}`,
+    );
   }
 });
 
 test("AskService emits review, replay, and failure milestones", async (t) => {
   await t.test("review required", async () => {
     const events = [];
-    const service = new AskService(progressPorts({
-      progressSink: (event) => events.push(event),
-      understand: async () => understanding({
-        intent: "crm.deal.update_stage",
-        confidence: 0.9,
-        entities: { deal: { value: "private-deal" } },
-        transcript: TRANSCRIPT,
-        language: "en",
-        model: "intent-model",
+    const service = new AskService(
+      progressPorts({
+        progressSink: (event) => events.push(event),
+        understand: async () =>
+          understanding({
+            intent: "crm.deal.update_stage",
+            confidence: 0.9,
+            entities: { deal: { value: "private-deal" } },
+            transcript: TRANSCRIPT,
+            language: "en",
+            model: "intent-model",
+          }),
       }),
-    }));
-    const outcome = await service.execute(context(), askCommand({ output_mode: "text" }));
+    );
+    const outcome = await service.execute(
+      context(),
+      askCommand({ output_mode: "text" }),
+    );
     assert.equal(outcome.kind, "ask.review_required");
-    assert.deepEqual(events.slice(-2).map((event) => event.type), [
-      "review.required",
-      "interaction.completed",
-    ]);
+    assert.deepEqual(
+      events.slice(-2).map((event) => event.type),
+      ["review.required", "interaction.completed"],
+    );
     assert.equal(events.at(-2).review_id, "rev_progress");
   });
 
   await t.test("replay", async () => {
     const events = [];
     const response = { request_id: REQUEST_ID, status: "completed" };
-    const service = new AskService(progressPorts({
-      progressSink: (event) => events.push(event),
-      beginInteraction: async () => ({ replay: true, response }),
-      transcribe: async () => { throw new Error("provider ran during replay"); },
-    }));
+    const service = new AskService(
+      progressPorts({
+        progressSink: (event) => events.push(event),
+        beginInteraction: async () => ({ replay: true, response }),
+        transcribe: async () => {
+          throw new Error("provider ran during replay");
+        },
+      }),
+    );
     const outcome = await service.execute(context(), askCommand());
     assert.equal(outcome.kind, "ask.replayed");
-    assert.deepEqual(events.map((event) => event.type), [
-      "interaction.started",
-      "interaction.replayed",
-    ]);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["interaction.started", "interaction.replayed"],
+    );
   });
 
   await t.test("failed", async () => {
@@ -208,40 +270,60 @@ test("AskService emits review, replay, and failure milestones", async (t) => {
     const failure = Object.assign(new Error("private prompt and transcript"), {
       code: "UPSTREAM_UNAVAILABLE",
     });
-    const service = new AskService(progressPorts({
-      progressSink: (event) => events.push(event),
-      understand: async () => { throw failure; },
-    }));
+    const service = new AskService(
+      progressPorts({
+        progressSink: (event) => events.push(event),
+        understand: async () => {
+          throw failure;
+        },
+      }),
+    );
     await assert.rejects(service.execute(context(), askCommand()), failure);
     assert.equal(events.at(-1).type, "interaction.failed");
     assert.equal(events.at(-1).error_code, "UPSTREAM_UNAVAILABLE");
-    assert.equal(JSON.stringify(events.at(-1)).includes(failure.message), false);
+    assert.equal(
+      JSON.stringify(events.at(-1)).includes(failure.message),
+      false,
+    );
   });
 });
 
 test("sink failures are isolated and TTS/Review services emit milestones", async () => {
-  const failingSink = async () => { throw new Error("sink unavailable"); };
+  const failingSink = async () => {
+    throw new Error("sink unavailable");
+  };
   const ask = new AskService(progressPorts({ progressSink: failingSink }));
-  const askOutcome = await ask.execute(context(), askCommand({ output_mode: "text" }));
+  const askOutcome = await ask.execute(
+    context(),
+    askCommand({ output_mode: "text" }),
+  );
   assert.equal(askOutcome.kind, "ask.completed");
 
   const events = [];
-  const ports = progressPorts({ eventSink: { emit: (event) => events.push(event) } });
+  const ports = progressPorts({
+    eventSink: { emit: (event) => events.push(event) },
+  });
   const tts = new TtsService(ports);
   const review = new ReviewService(ports);
-  await tts.execute(context(), normalizeTtsCommand({
-    idempotency_key: "tts-progress-key",
-    text: "speak safely",
-    language: "en-US",
-    format: "mp3",
-  }));
-  await review.execute(context(), normalizeReviewCommand({
-    idempotency_key: "review-progress-key",
-    review_id: "rev_progress",
-    decision: "approve",
-  }));
-  assert.deepEqual(events.map((event) => event.type), [
-    "tts.asset.created",
-    "review.decided",
-  ]);
+  await tts.execute(
+    context(),
+    normalizeTtsCommand({
+      idempotency_key: "tts-progress-key",
+      text: "speak safely",
+      language: "en-US",
+      format: "mp3",
+    }),
+  );
+  await review.execute(
+    context(),
+    normalizeReviewCommand({
+      idempotency_key: "review-progress-key",
+      review_id: "rev_progress",
+      decision: "approve",
+    }),
+  );
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["tts.asset.created", "review.decided"],
+  );
 });

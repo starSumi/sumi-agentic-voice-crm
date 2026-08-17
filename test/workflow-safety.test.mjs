@@ -8,7 +8,7 @@ test("protected workflow jobs reject package managers and repository execution",
     "- run: npm audit",
     "- run: pnpm run verify",
     "- run: pnpm exec node scripts/check.mjs",
-    "- run: node scripts/check-agent.mjs",
+    "- run: node scripts/verify-docs-mcp.mjs",
   ]) {
     assert.equal(containsRepositoryCodeExecution(command), true, command);
   }

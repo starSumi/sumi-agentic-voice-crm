@@ -1,6 +1,6 @@
 import { createExtensionRegistry } from "../extensions/index.mjs";
-import { createManagedTaskRegistry } from "../lifecycle/managed-task-registry.mjs";
-import { runWithStagedTimeout } from "../lifecycle/staged-timeout.mjs";
+import { createManagedTaskRegistry } from "../lifecycle/managed-task-registry.ts";
+import { runWithStagedTimeout } from "../lifecycle/staged-timeout.ts";
 import { CasCircuitBreaker } from "./cas-circuit-breaker.mjs";
 
 export class ControlEngine {

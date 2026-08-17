@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runWithStagedTimeout, StagedTimeoutError } from "../src/lifecycle/staged-timeout.mjs";
+import { runWithStagedTimeout, StagedTimeoutError } from "../src/lifecycle/staged-timeout.ts";
 
 test("staged timeout requests cooperative abort before the hard deadline", async () => {
   let observedAbort = false;

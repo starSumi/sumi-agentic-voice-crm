@@ -11,7 +11,7 @@ contentVersion: 0.1.0
 
 | 现象 | 检查 | 安全处理 |
 | --- | --- | --- |
-| `pnpm install --frozen-lockfile` 拒绝运行时 | `node --version`、`pnpm --version` 与 `.nvmrc` | 使用 Node `24.18.0` 或更高版本和 pnpm `10.33.4`。 |
+| `pnpm install --frozen-lockfile` 拒绝运行时 | `node --version`、`pnpm --version` 与 `.nvmrc` | 使用 Node `24.19.0` 或更高版本和 pnpm `10.33.4`。 |
 | Astro 报 frontmatter 缺失 | 指向的 `docs/` 文件 | 补齐 title、docId、locale、audience 和 contentVersion。 |
 | Web 有页面但 MCP 没有 | `astro.config.mjs` 映射 | 显式增加 source、machine 和 page 后重建。 |
 | MCP URL 为 404 | routes map 与 `--base-url` | 对齐 machine path 和页面 route，并保留 base URL 尾部 `/`。 |

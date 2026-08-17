@@ -4,7 +4,7 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 RUN cargo build --release --locked --package sumi-runtime-supervisor
 
-FROM node:24.18.0-bookworm-slim AS build
+FROM node:24.19.0-bookworm-slim AS build
 WORKDIR /workspace
 COPY package.json LICENSE ./
 COPY pnpm-lock.yaml ./
@@ -23,7 +23,7 @@ COPY src ./src
 COPY --from=rust-build /workspace/target/release/sumi-runtime-supervisor ./target/release/sumi-runtime-supervisor
 RUN node scripts/build.mjs
 
-FROM node:24.18.0-bookworm-slim AS runtime
+FROM node:24.19.0-bookworm-slim AS runtime
 WORKDIR /app
 COPY --from=build --chown=node:node /workspace/dist ./dist
 COPY --from=build --chown=node:node /workspace/node_modules ./node_modules

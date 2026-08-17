@@ -7,7 +7,7 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-使用 Node.js `24.18.0` 或更高版本和仓库固定的 `pnpm@10.33.4`。运行时是标准库 JavaScript；Astro 和 Starlight 只负责文档。
+使用 Node.js `24.19.0` 或更高版本和仓库固定的 `pnpm@10.33.4`。应用运行时是原生 ESM，并迁向 TypeScript 可擦除语法；Node 直接执行类型化模块，`typecheck:runtime` 提供静态门禁。Astro 和 Starlight 只负责文档。
 
 ## 可选 Nix 开发环境
 
@@ -36,8 +36,7 @@ pnpm run rust:check
 | `contracts/` | OpenAPI 与事件协议权威来源。 |
 | `db/` | 生产目标 schema 与 RLS migration。 |
 | `docs/` | Web 与 MCP 共用的唯一评审内容源。 |
-| `.agent/` | 版本化工程治理和检查点路由。 |
-| `pnpm agent:resume` 选择的用户状态根 | 机器本地的会话 ID、agent 关系、锁和重试，不能提交。 |
+| `.agent/`、`.local/` | 机器本地控制面状态与开发证据；Git、CI 和发布均忽略。 |
 | `test/` | 运行时和契约回归测试。 |
 | `flake.nix`、`flake.lock` | 可选的 Linux/WSL2 开发环境，不替代发布或包管理链路。 |
 | `artifacts/docs-site/` | 生成的站点和 `_mcp` 投影，不提交。 |
@@ -47,13 +46,11 @@ pnpm run rust:check
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm agent:health
-pnpm agent:resume
 pnpm verify
 pnpm verify:mcp
 ```
 
-开始开发前读取评审后的 cursor 与当前检查点，并重新探测 Git 和 CI。变更公开行为前先增加失败测试；先改规范类型或契约，再改 adapter 和 transport；模型输出始终是不可信输入；行为或运维流程改变时同步核心中英文文档。无法运行的门必须明确报告，不能用状态文档代替证据。
+开始开发前读取 `AGENTS.md` 与相关契约或 ADR，并重新探测 Git 和 CI。变更公开行为前先增加失败测试；先改规范类型或契约，再改 adapter 和 transport；模型输出始终是不可信输入；行为或运维流程改变时同步核心中英文文档。无法运行的门必须明确报告，不能用本地状态代替证据。
 
 协议消费者必须运行 `pnpm run contract:consumer-check`：前端只能从
 `packages/api-client/src/api.ts` 导入操作、从 `packages/api-client/src/protocol.ts` 导入类型，不能手写 `/v1/` 请求或

@@ -19,8 +19,13 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/application/conversation-state.mjs",
   "src/application/index.mjs",
   "src/application/mutation-policy.mjs",
+  "src/application/progress-event-bus.ts",
   "src/application/services.mjs",
   "src/auth.mjs",
+  "src/authorization/errors.ts",
+  "src/authorization/index.ts",
+  "src/authorization/policy.ts",
+  "src/authorization/types.ts",
   "src/composition-root.mjs",
   "src/control/cas-circuit-breaker.mjs",
   "src/control/engine.mjs",
@@ -33,8 +38,8 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/extensions/manifest.mjs",
   "src/extensions/registry.mjs",
   "src/extensions/rust-process-supervisor.mjs",
-  "src/lifecycle/staged-timeout.mjs",
-  "src/lifecycle/managed-task-registry.mjs",
+  "src/lifecycle/staged-timeout.ts",
+  "src/lifecycle/managed-task-registry.ts",
   "src/mutation-policy.mjs",
   "src/object-storage.mjs",
   "src/observability.mjs",
@@ -73,9 +78,12 @@ async function walkFiles(root, directory = root) {
   );
   for (const entry of entries) {
     const absolutePath = join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...await walkFiles(root, absolutePath));
-    else if (entry.isFile()) files.push(relative(root, absolutePath).replaceAll("\\", "/"));
-    else throw new Error(`release input must be a regular file: ${absolutePath}`);
+    if (entry.isDirectory())
+      files.push(...(await walkFiles(root, absolutePath)));
+    else if (entry.isFile())
+      files.push(relative(root, absolutePath).replaceAll("\\", "/"));
+    else
+      throw new Error(`release input must be a regular file: ${absolutePath}`);
   }
   return files;
 }
@@ -94,7 +102,10 @@ async function createManifest(stageRoot, packageMetadata) {
     });
   }
   const contentSet = files
-    .map(({ path, bytes, sha256: digest, executable }) => `${path}\0${bytes}\0${digest}\0${executable}`)
+    .map(
+      ({ path, bytes, sha256: digest, executable }) =>
+        `${path}\0${bytes}\0${digest}\0${executable}`,
+    )
     .join("\n");
   return {
     schema_version: "sumi.runtime-build-manifest.v1",
@@ -140,15 +151,18 @@ export async function verifyBuildManifest(root) {
     const bytes = await readFile(absolutePath);
     const metadata = await stat(absolutePath);
     if (
-      bytes.length !== entry.bytes
-      || sha256(bytes) !== entry.sha256
-      || ((metadata.mode & 0o111) !== 0) !== entry.executable
+      bytes.length !== entry.bytes ||
+      sha256(bytes) !== entry.sha256 ||
+      ((metadata.mode & 0o111) !== 0) !== entry.executable
     ) {
       throw new Error(`runtime build manifest digest mismatch: ${entry.path}`);
     }
   }
   const contentSet = manifest.files
-    .map(({ path, bytes, sha256: digest, executable }) => `${path}\0${bytes}\0${digest}\0${executable}`)
+    .map(
+      ({ path, bytes, sha256: digest, executable }) =>
+        `${path}\0${bytes}\0${digest}\0${executable}`,
+    )
     .join("\n");
   if (sha256(contentSet) !== manifest.content_set_sha256) {
     throw new Error("runtime build aggregate digest mismatch");
@@ -173,7 +187,8 @@ async function promoteDirectory(stageRoot, outputRoot) {
       if (movedExistingOutput) await rename(backupRoot, outputRoot);
       throw error;
     }
-    if (movedExistingOutput) await rm(backupRoot, { recursive: true, force: true });
+    if (movedExistingOutput)
+      await rm(backupRoot, { recursive: true, force: true });
   } catch (error) {
     await rm(stageRoot, { recursive: true, force: true });
     throw error;
@@ -189,7 +204,9 @@ export async function buildRuntime({
   const resolvedRoot = resolve(root);
   const outputRoot = resolve(resolvedRoot, output);
   if (dirname(outputRoot) !== resolvedRoot || basename(outputRoot) !== output) {
-    throw new Error("build output must be one direct child of the repository root");
+    throw new Error(
+      "build output must be one direct child of the repository root",
+    );
   }
   const stageRoot = resolve(
     resolvedRoot,
@@ -207,7 +224,10 @@ export async function buildRuntime({
     engines: packageMetadata.engines,
     license: packageMetadata.license,
     dependencies: packageMetadata.dependencies,
-    scripts: { start: "node src/server.mjs", "start:outbox": "node src/outbox-worker.mjs" },
+    scripts: {
+      start: "node src/server.mjs",
+      "start:outbox": "node src/outbox-worker.mjs",
+    },
   };
 
   await rm(stageRoot, { recursive: true, force: true });
@@ -237,11 +257,11 @@ export async function buildRuntime({
     }
     for (const binary of runtimeBinaries) {
       if (
-        !binary
-        || typeof binary.source !== "string"
-        || typeof binary.target !== "string"
-        || binary.target.startsWith("/")
-        || binary.target.includes("..")
+        !binary ||
+        typeof binary.source !== "string" ||
+        typeof binary.target !== "string" ||
+        binary.target.startsWith("/") ||
+        binary.target.includes("..")
       ) {
         throw new Error("runtime binary mapping is invalid");
       }
@@ -269,7 +289,8 @@ export async function buildRuntime({
   }
 }
 
-const isMain = process.argv[1] &&
+const isMain =
+  process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   try {

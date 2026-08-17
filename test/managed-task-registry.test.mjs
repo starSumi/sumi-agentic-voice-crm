@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   ManagedTaskTimeoutError,
   createManagedTaskRegistry,
-} from "../src/lifecycle/managed-task-registry.mjs";
+} from "../src/lifecycle/managed-task-registry.ts";
 
 test("managed tasks receive cooperative cancellation and close idempotently", async () => {
   const registry = createManagedTaskRegistry({ teardownTimeoutMs: 50 });

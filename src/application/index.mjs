@@ -12,3 +12,8 @@ export {
   requiresReview,
 } from "./mutation-policy.mjs";
 export { AskService, ReviewService, TtsService } from "./services.mjs";
+export {
+  createProgressEventBus,
+  ProgressBackpressureError,
+  ProgressEventBus,
+} from "./progress-event-bus.ts";

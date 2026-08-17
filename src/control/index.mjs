@@ -15,4 +15,4 @@ export {
   ManagedTaskRegistry,
   ManagedTaskTimeoutError,
   createManagedTaskRegistry,
-} from "../lifecycle/managed-task-registry.mjs";
+} from "../lifecycle/managed-task-registry.ts";

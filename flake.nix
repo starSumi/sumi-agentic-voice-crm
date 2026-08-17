@@ -49,12 +49,12 @@
               export SUMI_NIX_SHELL=1
               node -e '
                 const actual = process.versions.node.split(".").map(Number);
-                const minimum = [24, 18, 0];
+                const minimum = [24, 19, 0];
                 const meetsMinimum = actual[0] > minimum[0]
                   || (actual[0] === minimum[0] && (actual[1] > minimum[1]
                     || (actual[1] === minimum[1] && actual[2] >= minimum[2])));
                 if (!meetsMinimum) {
-                  console.error(`Sumi requires Node >=24.18.0; Nix supplied ''${process.versions.node}`);
+                  console.error(`Sumi requires Node >=24.19.0; Nix supplied ''${process.versions.node}`);
                   process.exit(1);
                 }
               '
@@ -83,7 +83,7 @@
             test "$(sed -n 's/^channel = \"\(.*\)\"/\1/p' "$src/rust-toolchain.toml")" = "1.96.0"
             test ! -e "$src/package-lock.json"
             test "$(jq -r .packageManager "$src/package.json")" = "pnpm@10.33.4"
-            test "$(jq -r .volta.node "$src/package.json")" = "24.18.0"
+            test "$(jq -r .volta.node "$src/package.json")" = "24.19.0"
             touch "$out"
           '';
         }
