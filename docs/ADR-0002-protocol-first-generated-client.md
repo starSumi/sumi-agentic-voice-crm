@@ -45,8 +45,9 @@ JSON-RPC transport.
 6. CI runs generation in an isolated temporary directory and fails when the
    committed projections drift. It also type-checks the generated frontend
    package and runs contract tests against the live route.
-7. Frontend consumers use `packages/api-client/src/index.ts` as the only API
-   transport facade. The manifest-driven `contract:consumer-check` gate rejects
+7. Frontend consumers import operations from `packages/api-client/src/api.ts`
+   and data/event types from `packages/api-client/src/protocol.ts`. The root
+   index is compatibility-only. The manifest-driven `contract:consumer-check` gate rejects
    raw HTTP, literal `/v1/` URLs and duplicate transport DTOs in consumer roots.
 8. Breaking changes require a major protocol/event version, consumer inventory,
    deprecation window, migration plan and rollback to the last compatible

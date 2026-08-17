@@ -1,19 +1,21 @@
 import {
   ask,
-  type AskRequest,
-  type AskResponse,
   configureClient,
   decideReview,
   getAssetContent,
-  type AudioInput,
-  type ErrorEnvelope,
-  type Locale,
-  type ReviewDecisionRequest,
-  type ReviewDecisionResponse,
-  type ReviewResponse,
-  type TtsAsset,
-  type Understanding,
-} from "../../packages/api-client/src/index";
+} from "../../packages/api-client/src/api";
+import type {
+  AskRequest,
+  AskResponse,
+  AudioInput,
+  ErrorEnvelope,
+  Locale,
+  ReviewDecisionRequest,
+  ReviewDecisionResponse,
+  ReviewResponse,
+  TtsAsset,
+  Understanding,
+} from "../../packages/api-client/src/protocol";
 
 type UiPhase = "idle" | "capturing" | "submitting" | "awaiting_review" | "completed" | "error";
 type ApiResult<TData> = { data?: TData; error?: unknown };

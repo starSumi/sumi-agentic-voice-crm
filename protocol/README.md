@@ -8,7 +8,7 @@ copy of API types.
 
 | Surface | Normative source | Generated consumers |
 | --- | --- | --- |
-| HTTP request/response/error | `contracts/openapi.yaml` (OpenAPI 3.1) | `packages/api-client/src/generated/`, `protocol/schema/json/openapi.bundle.json` |
+| HTTP request/response/error | `contracts/openapi.yaml` (OpenAPI 3.1) | `packages/api-client/src/generated/`, stable `api.ts`/`protocol.ts` facades, `protocol/schema/json/openapi.bundle.json` |
 | Domain event envelope/type registry | `contracts/events.yaml` | `protocol/schema/json/events.bundle.json`, event validators and broker bindings |
 | Persistence | `db/migrations/*.sql` | migration/runtime checks; never inferred from UI types |
 
@@ -23,7 +23,8 @@ contracts/openapi.yaml ──parse/normalize─> protocol/schema/json/openapi.bu
 contracts/events.yaml  ──parse/normalize─> protocol/schema/json/events.bundle.json
                                   │
                                   └─ openapi-ts ──> packages/api-client/src/generated/*
-                                       └─ frontend imports only packages/api-client/src/index.ts
+                                       ├─ protocol.ts: data/event types only
+                                       └─ api.ts: HTTP operations and client policy
 ```
 
 The server compiles its input validators from the JSON bundle. The
@@ -36,6 +37,10 @@ typed broker consumers. CI regenerates all projections in a clean temporary
 directory and fails on byte drift, including file additions and removals.
 Generated files are checked in for version-pinned consumers, reviewable API
 diffs, and offline builds; they must never be edited by hand.
+
+New consumers import operations from `@sumi/voice-crm-api-client/api` and data
+types from `@sumi/voice-crm-api-client/protocol`. The root entrypoint remains a
+compatibility facade. This logical split does not create a second schema source.
 
 ## Change procedure
 

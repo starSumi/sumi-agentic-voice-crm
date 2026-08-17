@@ -198,13 +198,15 @@ async function sourceFiles(rootPath) {
   return found.sort();
 }
 
-function canonicalApiIndex({ root, file, specifier }) {
+function canonicalApiModule({ root, file, specifier }) {
   const normalizedSpecifier = slash(specifier).replace(/\.tsx?$/, "").replace(/\.m?js$/, "");
-  if (normalizedSpecifier === "packages/api-client/src/index" || normalizedSpecifier === "@sumi/api-client") return true;
-  if (!specifier.startsWith(".")) return false;
+  const packageMatch = /^(?:packages\/api-client\/src|@sumi\/voice-crm-api-client)(?:\/(api|protocol))?$/.exec(normalizedSpecifier);
+  if (packageMatch) return packageMatch[1] ?? "index";
+  if (!specifier.startsWith(".")) return undefined;
   const resolved = resolve(dirname(file), specifier);
   const rel = relativePath(root, resolved).replace(/\.(tsx?|m?js)$/, "");
-  return rel === "packages/api-client/src/index";
+  const localMatch = /^packages\/api-client\/src\/(index|api|protocol)$/.exec(rel);
+  return localMatch?.[1];
 }
 
 function parseImports(source, commentsMasked, code) {
@@ -236,7 +238,7 @@ function checkSource({ root, file, source }) {
   const violations = [];
   const add = (index, rule, message) => violations.push({ path, line: lineAt(source, index), rule, message });
 
-  for (const match of code.matchAll(/\bfetch\s*\(/g)) add(match.index, "raw-fetch", "use an operation from packages/api-client/src/index");
+  for (const match of code.matchAll(/\bfetch\s*\(/g)) add(match.index, "raw-fetch", "use an operation from packages/api-client/src/api");
   for (const match of code.matchAll(/\b(?:axios|ky|ofetch|XMLHttpRequest)\b/g)) add(match.index, "transport-library", "raw transport clients are not allowed in consumer roots");
   for (const token of strings) if (token.value.includes("/v1/")) add(token.start, "literal-v1-url", "use the generated SDK instead of a literal /v1/ URL");
 
@@ -251,10 +253,10 @@ function checkSource({ root, file, source }) {
   const operationNamespaces = new Set();
   let canonicalSdkOperation = false;
   for (const entry of imports) {
-    const canonical = canonicalApiIndex({ root, file, specifier: entry.specifier });
+    const canonical = canonicalApiModule({ root, file, specifier: entry.specifier });
     for (const [local, imported] of entry.names) if (API_OPERATIONS.has(imported)) operationAliases.add(local);
     if (entry.namespace) operationNamespaces.add(entry.namespace);
-    if (canonical) {
+    if (canonical === "api" || canonical === "index") {
       for (const [, imported] of entry.names) if (API_OPERATIONS.has(imported)) {
         canonicalSdkOperation = true;
       }
@@ -268,7 +270,7 @@ function checkSource({ root, file, source }) {
   }
 
   const apiCall = /\bfetch\s*\(|\b(?:axios|ky|ofetch)\s*(?:\.\s*[A-Za-z_$][\w$]*)?\s*\(|\bnew\s+XMLHttpRequest\s*\(|\b(?:client|apiClient|http)\s*\.\s*(?:get|post|put|patch|delete|request)\s*\(/.test(code) || operationCall || strings.some((token) => token.value.includes("/v1/"));
-  if (apiCall && !canonicalSdkOperation) add(0, "missing-sdk-operation", "API calls must import an operation from packages/api-client/src/index");
+  if (apiCall && !canonicalSdkOperation) add(0, "missing-sdk-operation", "API calls must import an operation from packages/api-client/src/api");
   return violations;
 }
 

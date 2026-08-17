@@ -4,7 +4,7 @@
 
 - This repository is the owned implementation of the Sumi Agentic Voice CRM reference platform.
 - `src/` is runtime source; `contracts/` is the protocol source of truth; `docs/` is design and operating evidence.
-- Frontend consumers under the manifest-declared roots must import operations and types from `packages/api-client/src/index.ts`; do not hand-write transport DTOs or raw `/v1/` HTTP calls. Run `pnpm run contract:consumer-check` after consumer changes.
+- Frontend consumers under the manifest-declared roots import operations from `packages/api-client/src/api.ts` and data/event types from `packages/api-client/src/protocol.ts`; the root index is compatibility-only. Do not hand-write transport DTOs or raw `/v1/` HTTP calls. Run `pnpm run contract:consumer-check` after consumer changes.
 - `docs/` is also the single reviewed content source for the Starlight Web site and Sumi Docs MCP projection. Do not maintain a copied content tree under `src/`.
 - `.agent/` contains versioned project governance, maintainer ownership, and the reviewed handoff cursor. Live session state belongs outside the repository under `CODEX_HOME`, `XDG_STATE_HOME`, or `LOCALAPPDATA` according to `pnpm run agent:resume`; ignored `.agent-runtime/` is only an explicit local fallback.
 - External projects (`saathi-crm`, Northstar/CopilotKit) are inspiration and comparative evidence only. Do not copy their source, prose, screenshots, or credentials.
