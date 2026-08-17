@@ -66,6 +66,36 @@ test("client disconnect during authentication aborts before provider or store mu
   await app.close();
 });
 
+test("application shutdown bounds HTTP drain and aborts a stuck request", async () => {
+  const closed = [];
+  let authenticationStarted;
+  const started = new Promise((resolve) => { authenticationStarted = resolve; });
+  const runtime = runtimeFixture(closed);
+  runtime.authenticate = async (_headers, { signal }) => {
+    authenticationStarted();
+    await new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  };
+  const app = createApp({ runtime, teardownTimeoutMs: 10 });
+  await new Promise((resolve, reject) => { app.server.once("error", reject); app.listen(0, resolve); });
+  const request = httpRequest({
+    host: "127.0.0.1",
+    port: app.server.address().port,
+    path: "/v1/ask",
+    method: "POST",
+    headers: {
+      authorization: "Bearer development-token",
+      "content-type": "application/json",
+      "idempotency-key": "shutdown-during-auth-0001",
+    },
+  });
+  request.on("error", () => {});
+  request.end(JSON.stringify({ input: { type: "text", text: "find Acme" } }));
+  await started;
+  await app.close();
+  assert.equal(app.draining, true);
+  assert.deepEqual(closed, ["store", "runtime"]);
+});
+
 test("request body reader rejects declared and chunked payloads before buffering beyond the cap", async () => {
   await assert.rejects(
     readRequestBody({ headers: { "content-length": String(REQUEST_BODY_LIMITS.ttsJson + 1) } }, REQUEST_BODY_LIMITS.ttsJson),

@@ -1,4 +1,5 @@
 import { createExtensionRegistry } from "../extensions/index.mjs";
+import { createManagedTaskRegistry } from "../lifecycle/managed-task-registry.mjs";
 import { runWithStagedTimeout } from "../lifecycle/staged-timeout.mjs";
 import { CasCircuitBreaker } from "./cas-circuit-breaker.mjs";
 
@@ -7,8 +8,9 @@ export class ControlEngine {
   #startPromise;
   #closePromise;
 
-  constructor({ extensions = createExtensionRegistry(), now = () => Date.now() } = {}) {
+  constructor({ extensions = createExtensionRegistry(), tasks, teardownTimeoutMs, now = () => Date.now() } = {}) {
     this.extensions = extensions;
+    this.tasks = tasks ?? createManagedTaskRegistry({ teardownTimeoutMs, now });
     this.now = now;
   }
 
@@ -43,8 +45,18 @@ export class ControlEngine {
   }
 
   close(options) {
-    this.#closePromise ??= this.extensions.stopAll(options);
+    this.#closePromise ??= (async () => {
+      const errors = [];
+      for (const resource of [this.tasks, this.extensions]) {
+        try { await resource.close(options); } catch (error) { errors.push(error); }
+      }
+      if (errors.length) throw new AggregateError(errors, "control engine shutdown failed");
+    })();
     return this.#closePromise;
+  }
+
+  taskSnapshot() {
+    return this.tasks.snapshot();
   }
 
   snapshot() {

@@ -37,6 +37,7 @@ test("container smoke verifies the image command, production dependencies and re
     "await import('jose')",
     "await import('@aws-sdk/client-s3')",
     "await import('./dist/src/outbox-relay.mjs')",
+    "003_conversation_revision_cas.sql",
     '"--publish",',
     "health/ready",
     'assert.equal(runtimeUser, "node"',

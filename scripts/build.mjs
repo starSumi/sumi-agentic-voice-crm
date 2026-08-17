@@ -15,6 +15,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 const DEFAULT_RUNTIME_SOURCES = [
   "src/application/commands.mjs",
   "src/application/attachments.mjs",
+  "src/application/conversation-state.mjs",
   "src/application/index.mjs",
   "src/application/mutation-policy.mjs",
   "src/application/services.mjs",
@@ -22,6 +23,8 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/composition-root.mjs",
   "src/control/cas-circuit-breaker.mjs",
   "src/control/engine.mjs",
+  "src/control/guardian-denial-governor.mjs",
+  "src/control/guardian-review.mjs",
   "src/control/index.mjs",
   "src/contracts.mjs",
   "src/data-cipher.mjs",
@@ -29,6 +32,7 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/extensions/manifest.mjs",
   "src/extensions/registry.mjs",
   "src/lifecycle/staged-timeout.mjs",
+  "src/lifecycle/managed-task-registry.mjs",
   "src/mutation-policy.mjs",
   "src/object-storage.mjs",
   "src/observability.mjs",
@@ -190,6 +194,11 @@ export async function buildRuntime({
     await cp(join(resolvedRoot, "contracts"), join(stageRoot, "contracts"), {
       recursive: true,
     });
+    await cp(
+      join(resolvedRoot, "db", "migrations"),
+      join(stageRoot, "db", "migrations"),
+      { recursive: true },
+    );
     await cp(
       join(resolvedRoot, "protocol", "schema", "json"),
       join(stageRoot, "protocol", "schema", "json"),

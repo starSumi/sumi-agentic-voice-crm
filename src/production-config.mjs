@@ -59,6 +59,7 @@ export function validateProductionConfig(env = process.env, { component = "api" 
   requirePositiveInteger(env, "PROVIDER_SOFT_TIMEOUT_MS", 120_000);
   requirePositiveInteger(env, "PROVIDER_HARD_GRACE_MS", 30_000);
   requirePositiveInteger(env, "INTERACTION_LEASE_MS", 900_000);
+  requirePositiveInteger(env, "RUNTIME_TEARDOWN_MS", 30_000);
   for (const name of ["OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "METRICS_BEARER_TOKEN"]) requireValue(env, name);
   requireHttps(env, "PUBLIC_BASE_URL");
   if (env.AUTH_MODE === "oidc") {

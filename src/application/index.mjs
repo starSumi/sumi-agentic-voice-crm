@@ -5,6 +5,7 @@ export {
   normalizeTtsCommand,
 } from "./commands.mjs";
 export { createAttachmentRef, createTtsAsset } from "./attachments.mjs";
+export { ConversationStateService, MAX_CONVERSATION_STATE_BYTES } from "./conversation-state.mjs";
 export {
   isMutatingIntent,
   normalizeUnderstanding,

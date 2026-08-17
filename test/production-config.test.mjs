@@ -72,6 +72,7 @@ test("production API configuration supports mixed providers and DashScope aliase
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, PROVIDER_SOFT_TIMEOUT_MS: "120001" }), /no greater than/);
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, PROVIDER_HARD_GRACE_MS: "30001" }), /no greater than/);
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, INTERACTION_LEASE_MS: "900001" }), /no greater than/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, RUNTIME_TEARDOWN_MS: "30001" }), /no greater than/);
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_AUDIO_HOST_SUFFIXES: "not-a-domain" }), /DNS suffixes/);
 });
 

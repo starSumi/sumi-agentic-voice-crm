@@ -103,3 +103,26 @@ test("control engine applies staged timeout through the keyed circuit", async ()
   );
   assert.equal(engine.snapshot()["provider.intent.test"].failures, 1);
 });
+
+test("control engine owns managed tasks and closes them before extensions", async () => {
+  const lifecycle = [];
+  const extensions = {
+    startAll: async () => lifecycle.push("extensions:start"),
+    close: async () => lifecycle.push("extensions:close"),
+  };
+  const engine = createControlEngine({ extensions, teardownTimeoutMs: 50 });
+  await engine.start();
+  let started;
+  const ready = new Promise((resolve) => { started = resolve; });
+  engine.tasks.start("worker", async (signal) => {
+    started();
+    await new Promise((resolve, reject) => signal.addEventListener("abort", () => {
+      lifecycle.push("task:stop");
+      reject(signal.reason);
+    }, { once: true }));
+  });
+  await ready;
+  await engine.close();
+  assert.deepEqual(lifecycle, ["extensions:start", "task:stop", "extensions:close"]);
+  assert.equal(engine.taskSnapshot().state, "closed");
+});

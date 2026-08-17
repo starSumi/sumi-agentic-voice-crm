@@ -54,6 +54,58 @@ try {
     (error) => error.code === "IDEMPOTENCY_CONFLICT",
   );
 
+  const conversation = await store.initializeConversationState({
+    ...identity,
+    conversation_id: "runtime-conversation-0001",
+    state: { active_customer_id: first.resource.id, turn_count: 0 },
+  });
+  assert.deepEqual(conversation, {
+    created: true,
+    conversation_id: "runtime-conversation-0001",
+    revision: 0,
+    state: { active_customer_id: first.resource.id, turn_count: 0 },
+  });
+  assert.deepEqual(await store.replaceConversationStateIfCurrent({
+    ...identity,
+    conversation_id: conversation.conversation_id,
+    expected_revision: 0,
+    state: { active_customer_id: first.resource.id, turn_count: 1 },
+  }), { replaced: true, conversation_id: conversation.conversation_id, revision: 1 });
+  assert.deepEqual(await store.replaceConversationStateIfCurrent({
+    ...identity,
+    conversation_id: conversation.conversation_id,
+    expected_revision: 0,
+    state: { stale: true },
+  }), { replaced: false });
+  assert.deepEqual(await store.conversationState({
+    ...identity,
+    conversation_id: conversation.conversation_id,
+  }), {
+    conversation_id: conversation.conversation_id,
+    revision: 1,
+    state: { active_customer_id: first.resource.id, turn_count: 1 },
+  });
+  assert.equal(await store.conversationState({
+    tenant_id: "00000000-0000-4000-8000-000000000002",
+    actor_id: "actor-b",
+    conversation_id: conversation.conversation_id,
+  }), undefined);
+  const conversationInspection = await store.pool.connect();
+  try {
+    await conversationInspection.query("begin");
+    await conversationInspection.query("select set_config('app.tenant_id', $1, true)", [identity.tenant_id]);
+    const rawState = (await conversationInspection.query(
+      "select state_ciphertext,revision from conversation_states where tenant_id=$1 and conversation_id=$2",
+      [identity.tenant_id, conversation.conversation_id],
+    )).rows[0];
+    assert.equal(Number(rawState.revision), 1);
+    assert.match(rawState.state_ciphertext, /^v1\./);
+    assert.doesNotMatch(rawState.state_ciphertext, /active_customer_id/);
+    await conversationInspection.query("rollback");
+  } finally {
+    conversationInspection.release();
+  }
+
   const review = await store.createReview({
     ...identity,
     request_id: "req_runtime_postgres_0004",

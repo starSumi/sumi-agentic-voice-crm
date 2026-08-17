@@ -14,6 +14,7 @@ import { ERROR_CODES, errorEnvelope, requestId, validateAudioInput, validateIdem
 import { validateEvent, validateProtocol } from "./protocol-validation.mjs";
 import { persistAudioAsset, persistInputAudio } from "./object-storage.mjs";
 import { DEFAULT_AUDIO_OUTPUT_MODE, DEFAULT_LOCALE, REQUEST_BODY_LIMITS, REVIEW_ID_PATTERN } from "./protocol-policy.mjs";
+import { DEFAULT_TEARDOWN_TIMEOUT_MS } from "./control/index.mjs";
 
 function payloadTooLarge(limit) {
   return Object.assign(new Error("request body exceeds " + limit + " bytes"), {
@@ -37,12 +38,24 @@ export async function readRequestBody(req, maxBytes) {
   return Buffer.concat(chunks, total);
 }
 
-export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRuntime } = {}) {
+function teardownTimeout(value) {
+  const parsed = Number(value ?? DEFAULT_TEARDOWN_TIMEOUT_MS);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 30_000) {
+    throw new Error("RUNTIME_TEARDOWN_MS must be a positive integer no greater than 30000");
+  }
+  return parsed;
+}
+
+export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRuntime, teardownTimeoutMs } = {}) {
   const runtime = suppliedRuntime ?? runtimeFactory();
   const { store, authenticate, objectStorage, observability } = runtime;
   const providers = runtime.providers;
   const { providerReadiness } = providers;
   let draining = false;
+  const shutdownController = new AbortController();
+  const resolvedTeardownTimeoutMs = teardownTimeout(
+    teardownTimeoutMs ?? runtime.env?.RUNTIME_TEARDOWN_MS,
+  );
   const json = (res, status, body) => { res.statusCode = status; res.setHeader("content-type", "application/json; charset=utf-8"); res.end(JSON.stringify(body)); };
   const askService = new AskService({
     beginInteraction: (args) => store.beginInteraction(args),
@@ -134,13 +147,20 @@ export function createApp({ runtime: suppliedRuntime, runtimeFactory = createRun
       cleanup();
     };
     const close = () => { if (!res.writableEnded) abort(); };
+    const stopForShutdown = () => {
+      if (!controller.signal.aborted) controller.abort(shutdownController.signal.reason);
+      cleanup();
+    };
     const cleanup = () => {
       req.removeListener("aborted", abort);
       res.removeListener("close", close);
+      shutdownController.signal.removeEventListener("abort", stopForShutdown);
     };
     req.once("aborted", abort);
     res.once("close", close);
     res.once("finish", cleanup);
+    if (shutdownController.signal.aborted) stopForShutdown();
+    else shutdownController.signal.addEventListener("abort", stopForShutdown, { once: true });
     if (req.aborted || req.destroyed || res.destroyed) abort();
     return controller.signal;
   }
@@ -327,15 +347,33 @@ let shutdownPromise;
 async function shutdown() {
   if (shutdownPromise) return shutdownPromise;
   draining = true;
-  shutdownPromise = new Promise((resolve, reject) => {
+  shutdownPromise = (async () => {
     if (!server.listening) {
-      return runtime.close().then(resolve, reject);
+      shutdownController.abort(Object.assign(new Error("runtime is closing"), {
+        name: "AbortError",
+        breakerEligible: false,
+      }));
+      return await runtime.close({ timeoutMs: resolvedTeardownTimeoutMs });
     }
-    server.close(async (error) => {
-      if (error) return reject(error);
-      try { await runtime.close(); resolve(); } catch (closeError) { reject(closeError); }
+    let timer;
+    const serverClosed = new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
     });
-  });
+    server.closeIdleConnections?.();
+    timer = setTimeout(() => {
+      shutdownController.abort(Object.assign(new Error("runtime teardown deadline reached"), {
+        name: "AbortError",
+        code: "UPSTREAM_UNAVAILABLE",
+        breakerEligible: false,
+      }));
+      server.closeAllConnections?.();
+    }, resolvedTeardownTimeoutMs);
+    const errors = [];
+    try { await serverClosed; } catch (error) { errors.push(error); }
+    finally { clearTimeout(timer); }
+    try { await runtime.close({ timeoutMs: resolvedTeardownTimeoutMs }); } catch (error) { errors.push(error); }
+    if (errors.length) throw new AggregateError(errors, "application shutdown failed");
+  })();
   return shutdownPromise;
 }
 return Object.freeze({

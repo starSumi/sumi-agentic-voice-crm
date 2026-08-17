@@ -42,6 +42,56 @@ export class PostgresCrmStore {
     catch (error) { return { ready: false, provider: "postgres", reason: error?.code ?? "database_unavailable" }; }
   }
 
+  async initializeConversationState({ tenant_id, actor_id, conversation_id, state }) {
+    return await this.#transaction({ tenant_id, actor_id }, async (client, actorUuid) => {
+      const ciphertext = this.cipher.encrypt(state, `${tenant_id}:conversation:${conversation_id}`);
+      const inserted = await client.query(
+        `insert into conversation_states (tenant_id,conversation_id,revision,state_ciphertext,updated_by)
+         values ($1,$2,0,$3,$4) on conflict (tenant_id,conversation_id) do nothing returning revision`,
+        [tenant_id, conversation_id, ciphertext, actorUuid],
+      );
+      const row = inserted.rowCount === 1
+        ? { revision: inserted.rows[0].revision, state_ciphertext: ciphertext }
+        : (await client.query(
+          "select revision,state_ciphertext from conversation_states where tenant_id=$1 and conversation_id=$2",
+          [tenant_id, conversation_id],
+        )).rows[0];
+      return {
+        created: inserted.rowCount === 1,
+        conversation_id,
+        revision: Number(row.revision),
+        state: this.cipher.decrypt(row.state_ciphertext, `${tenant_id}:conversation:${conversation_id}`),
+      };
+    });
+  }
+
+  async conversationState({ tenant_id, actor_id, conversation_id }) {
+    return await this.#transaction({ tenant_id, actor_id }, async (client) => {
+      const row = (await client.query(
+        "select revision,state_ciphertext from conversation_states where tenant_id=$1 and conversation_id=$2",
+        [tenant_id, conversation_id],
+      )).rows[0];
+      return row ? {
+        conversation_id,
+        revision: Number(row.revision),
+        state: this.cipher.decrypt(row.state_ciphertext, `${tenant_id}:conversation:${conversation_id}`),
+      } : undefined;
+    });
+  }
+
+  async replaceConversationStateIfCurrent({ tenant_id, actor_id, conversation_id, expected_revision, state }) {
+    return await this.#transaction({ tenant_id, actor_id }, async (client, actorUuid) => {
+      const ciphertext = this.cipher.encrypt(state, `${tenant_id}:conversation:${conversation_id}`);
+      const updated = await client.query(
+        `update conversation_states set revision=revision+1,state_ciphertext=$4,updated_by=$5,updated_at=now()
+         where tenant_id=$1 and conversation_id=$2 and revision=$3 returning revision`,
+        [tenant_id, conversation_id, expected_revision, ciphertext, actorUuid],
+      );
+      if (updated.rowCount !== 1) return { replaced: false };
+      return { replaced: true, conversation_id, revision: Number(updated.rows[0].revision) };
+    });
+  }
+
   async #transaction(identity, work, { requireActor = true } = {}) {
     if (!UUID.test(identity.tenant_id)) throw Object.assign(new Error("PostgreSQL mode requires a UUID tenant claim"), { code: "FORBIDDEN" });
     const client = await this.pool.connect();

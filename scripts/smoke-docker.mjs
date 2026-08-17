@@ -62,7 +62,7 @@ try {
     image,
     "--input-type=module",
     "-e",
-    `import { existsSync } from 'node:fs'; ${rootDevDependencyChecks} await import('ajv'); await import('ajv-formats'); await import('pg'); await import('jose'); await import('@aws-sdk/client-s3'); await import('@aws-sdk/s3-request-presigner'); await import('./dist/src/outbox-relay.mjs'); console.log('production dependencies importable and root devDependencies absent');`,
+    `import { existsSync } from 'node:fs'; ${rootDevDependencyChecks} if (!existsSync('dist/db/migrations/003_conversation_revision_cas.sql')) throw new Error('ordered database migrations missing from runtime'); await import('ajv'); await import('ajv-formats'); await import('pg'); await import('jose'); await import('@aws-sdk/client-s3'); await import('@aws-sdk/s3-request-presigner'); await import('./dist/src/outbox-relay.mjs'); console.log('production dependencies and migrations present; root devDependencies absent');`,
   ]);
   const runtimeUser = docker(["run", "--rm", "--entrypoint", "id", image, "-un"]).stdout.trim();
   assert.equal(runtimeUser, "node", "the runtime image must run as the unprivileged node user");

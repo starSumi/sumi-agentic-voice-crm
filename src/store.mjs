@@ -3,7 +3,7 @@ import { now, sha256 } from "./contracts.mjs";
 import { validateEvent } from "./protocol-validation.mjs";
 
 export class CrmStore {
-  #idempotency = new Map(); #tts = new Map(); #assets = new Map(); #assetObjects = new Map(); #interactions = new Map(); #interactionWal = []; #events = []; #audits = []; #outbox = []; #reviews = new Map(); #reviewIdempotency = new Map(); #deals = new Map(); #customers = new Map();
+  #idempotency = new Map(); #tts = new Map(); #assets = new Map(); #assetObjects = new Map(); #interactions = new Map(); #interactionWal = []; #conversations = new Map(); #events = []; #audits = []; #outbox = []; #reviews = new Map(); #reviewIdempotency = new Map(); #deals = new Map(); #customers = new Map();
   constructor({ clock = () => Date.now(), interactionLeaseMs = 30_000 } = {}) {
     if (!Number.isSafeInteger(interactionLeaseMs) || interactionLeaseMs <= 0) throw new TypeError("interactionLeaseMs must be a positive integer");
     this.clock = clock;
@@ -132,6 +132,27 @@ export class CrmStore {
       interaction.lease_expires_at = this.clock() + this.interactionLeaseMs;
     }
     return { asset_id: asset.asset_id, object_key, byte_length, sha256: assetSha256 };
+  }
+  initializeConversationState({ tenant_id, actor_id, conversation_id, state }) {
+    const key = `${tenant_id}:${conversation_id}`;
+    const previous = this.#conversations.get(key);
+    if (previous) return { created: false, conversation_id, revision: previous.revision, state: structuredClone(previous.state) };
+    const conversation = { tenant_id, actor_id, conversation_id, revision: 0, state: structuredClone(state), updated_at: now() };
+    this.#conversations.set(key, conversation);
+    return { created: true, conversation_id, revision: 0, state: structuredClone(state) };
+  }
+  conversationState({ tenant_id, conversation_id }) {
+    const row = this.#conversations.get(`${tenant_id}:${conversation_id}`);
+    return row ? { conversation_id, revision: row.revision, state: structuredClone(row.state) } : undefined;
+  }
+  replaceConversationStateIfCurrent({ tenant_id, actor_id, conversation_id, expected_revision, state }) {
+    const row = this.#conversations.get(`${tenant_id}:${conversation_id}`);
+    if (!row || row.revision !== expected_revision) return { replaced: false };
+    row.actor_id = actor_id;
+    row.state = structuredClone(state);
+    row.revision += 1;
+    row.updated_at = now();
+    return { replaced: true, conversation_id, revision: row.revision };
   }
   execute({ tenant_id, actor_id, idempotency_key, intent, entities, request_id, request_fingerprint }) {
     const fingerprint = request_fingerprint ?? sha256(JSON.stringify({ intent, entities }));

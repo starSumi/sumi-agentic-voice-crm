@@ -8,6 +8,7 @@ import { buildRuntime, verifyBuildManifest } from "../scripts/build.mjs";
 async function createBuildFixture() {
   const root = await mkdtemp(join(tmpdir(), "sumi-runtime-build-"));
   await mkdir(join(root, "contracts"), { recursive: true });
+  await mkdir(join(root, "db", "migrations"), { recursive: true });
   await mkdir(join(root, "protocol", "schema", "json"), { recursive: true });
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(
@@ -24,6 +25,7 @@ async function createBuildFixture() {
   );
   await writeFile(join(root, "LICENSE"), "fixture license\n");
   await writeFile(join(root, "contracts", "openapi.yaml"), "openapi: 3.1.0\n");
+  await writeFile(join(root, "db", "migrations", "001_fixture.sql"), "select 1;\n");
   await writeFile(join(root, "protocol", "schema", "json", "openapi.bundle.json"), "{}\n");
   await writeFile(join(root, "protocol", "protocol.manifest.json"), "{}\n");
   await writeFile(join(root, "src", "server.mjs"), "export const ready = true;\n");
@@ -39,6 +41,7 @@ test("runtime build manifest binds every relative path to its content digest", a
 
   assert.equal(manifest.schema_version, "sumi.runtime-build-manifest.v1");
   assert.equal(manifest.files.some((entry) => entry.path.startsWith("dist/")), false);
+  assert.equal(manifest.files.some((entry) => entry.path === "db/migrations/001_fixture.sql"), true);
   assert.equal(manifest.files.every((entry) => /^[a-f0-9]{64}$/.test(entry.sha256)), true);
   assert.deepEqual(await verifyBuildManifest(join(root, "dist")), manifest);
 

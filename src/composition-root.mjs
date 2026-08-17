@@ -17,7 +17,10 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
   validateProductionConfig(snapshot);
   const tracer = overrides.tracer ?? createConfiguredTracer({ env: snapshot });
   const extensions = overrides.extensions ?? createExtensionRegistry();
-  const control = overrides.control ?? createControlEngine({ extensions });
+  const control = overrides.control ?? createControlEngine({
+    extensions,
+    teardownTimeoutMs: snapshot.RUNTIME_TEARDOWN_MS,
+  });
   const runtime = {
     env: snapshot,
     authenticate: overrides.authenticate ?? createAuthenticator({ env: snapshot }),
@@ -37,11 +40,13 @@ export function createRuntime({ env = process.env, overrides = {} } = {}) {
     return startPromise;
   }
   let closePromise;
-  function close() {
+  function close(options) {
     closePromise ??= (async () => {
       const errors = [];
       for (const resource of [runtime.control, runtime.store, runtime.objectStorage, runtime.tracer]) {
-        try { await resource?.close?.(); } catch (error) { errors.push(error); }
+        try {
+          await resource?.close?.(resource === runtime.control ? options : undefined);
+        } catch (error) { errors.push(error); }
       }
       if (errors.length > 0) throw new AggregateError(errors, "runtime resource shutdown failed");
     })();
