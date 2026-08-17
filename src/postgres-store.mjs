@@ -14,6 +14,14 @@ function idempotencyConflict() {
   return Object.assign(new Error("idempotency key was reused with a different request"), { code: "IDEMPOTENCY_CONFLICT" });
 }
 
+function positiveInteger(value, fallback, name, max) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > max) {
+    throw new Error(`${name} must be a positive integer no greater than ${max}`);
+  }
+  return parsed;
+}
+
 /**
  * Durable CRM command adapter. Every public operation opens a transaction,
  * binds PostgreSQL RLS using transaction-local claims, and commits business
@@ -25,6 +33,7 @@ export class PostgresCrmStore {
     if (!pool && !resolvedConnectionString) throw new Error("DATABASE_URL is required when STORE_PROVIDER=postgres");
     this.pool = pool ?? new Pool({ connectionString: resolvedConnectionString, max: Number(env.DATABASE_POOL_MAX || 10) });
     this.cipher = cipher ?? new DataCipher({ env: { ...env, STORE_PROVIDER: "postgres" } });
+    this.interactionLeaseMs = positiveInteger(env.INTERACTION_LEASE_MS, 30_000, "INTERACTION_LEASE_MS", 900_000);
   }
 
   async close() { await this.pool.end(); }
@@ -206,14 +215,24 @@ export class PostgresCrmStore {
       const inputCiphertext = this.cipher.encrypt(input_payload, `${tenant_id}:input`);
       const inserted = await client.query(
         `insert into voice_interactions
-          (tenant_id,request_id,actor_id,input_type,status,idempotency_key,request_fingerprint,input_payload_ciphertext)
-         values ($1,$2,$3,$4,'processing',$5,$6,$7)
+          (tenant_id,request_id,actor_id,input_type,status,idempotency_key,request_fingerprint,input_payload_ciphertext,lease_owner,lease_expires_at)
+         values ($1,$2,$3,$4,'processing',$5,$6,$7,$2,now() + ($8::bigint * interval '1 millisecond'))
          on conflict (tenant_id,idempotency_key) where idempotency_key is not null do nothing returning id`,
-        [tenant_id, request_id, actorUuid, input_type, idempotency_key, request_fingerprint, inputCiphertext],
+        [tenant_id, request_id, actorUuid, input_type, idempotency_key, request_fingerprint, inputCiphertext, this.interactionLeaseMs],
       );
-      if (inserted.rowCount === 1) return { replay: false };
+      if (inserted.rowCount === 1) {
+        await this.#appendInteractionWal(client, {
+          tenant_id,
+          interaction_id: inserted.rows[0].id,
+          request_id,
+          entry_type: "started",
+          payload: { input_type, idempotency_key_hash: sha256(idempotency_key) },
+        });
+        return { replay: false };
+      }
       const previous = await client.query(
-        `select request_fingerprint,status,response_ciphertext,error_code,error_message_ciphertext,http_status
+        `select id,request_id,request_fingerprint,status,response_ciphertext,error_code,error_message_ciphertext,http_status,
+                lease_expires_at,recovery_count
          from voice_interactions where tenant_id=$1 and idempotency_key=$2 for update`,
         [tenant_id, idempotency_key],
       );
@@ -225,6 +244,33 @@ export class PostgresCrmStore {
       if (row.status === "failed") {
         const detail = this.cipher.decrypt(row.error_message_ciphertext, `${tenant_id}:error`);
         throw Object.assign(new Error(detail?.message ?? "interaction failed"), { code: row.error_code ?? "UPSTREAM_UNAVAILABLE" });
+      }
+      if (row.status === "processing") {
+        const recovered = await client.query(
+          `update voice_interactions set
+             request_id=$3,actor_id=$4,input_type=$5,input_payload_ciphertext=$6,
+             transcript_ciphertext=null,understanding_ciphertext=null,response_ciphertext=null,
+             provider_invocations='[]'::jsonb,model_versions='{}'::jsonb,latency_ms='{}'::jsonb,
+             error_code=null,error_message_ciphertext=null,http_status=null,completed_at=null,input_asset_id=null,
+             lease_owner=$3,lease_expires_at=now() + ($7::bigint * interval '1 millisecond'),
+             recovery_count=recovery_count+1,updated_at=now()
+           where tenant_id=$1 and id=$2 and status='processing' and lease_expires_at <= now()
+           returning id,recovery_count`,
+          [tenant_id, row.id, request_id, actorUuid, input_type, inputCiphertext, this.interactionLeaseMs],
+        );
+        if (recovered.rowCount === 1) {
+          await this.#appendInteractionWal(client, {
+            tenant_id,
+            interaction_id: row.id,
+            request_id,
+            entry_type: "recovered",
+            payload: {
+              previous_request_id_hash: sha256(row.request_id),
+              recovery_count: recovered.rows[0].recovery_count,
+            },
+          });
+          return { replay: false, recovered: true };
+        }
       }
       throw conflict("interaction with this idempotency key is still processing");
     });
@@ -241,11 +287,26 @@ export class PostgresCrmStore {
            provider_invocations=provider_invocations || $5::jsonb,
            model_versions=model_versions || $6::jsonb,
            latency_ms=latency_ms || $7::jsonb,
-           input_asset_id=coalesce($8,input_asset_id),updated_at=now()
-         where tenant_id=$1 and request_id=$2 and status='processing'`,
-        [tenant_id, request_id, transcriptCiphertext, understandingCiphertext, JSON.stringify(provider_invocations), JSON.stringify(model_versions), JSON.stringify(latency_ms), input_asset_id ?? null],
+           input_asset_id=coalesce($8,input_asset_id),
+           lease_expires_at=now() + ($9::bigint * interval '1 millisecond'),updated_at=now()
+         where tenant_id=$1 and request_id=$2 and status='processing'
+           and lease_owner=$2 and lease_expires_at > now()
+         returning id`,
+        [tenant_id, request_id, transcriptCiphertext, understandingCiphertext, JSON.stringify(provider_invocations), JSON.stringify(model_versions), JSON.stringify(latency_ms), input_asset_id ?? null, this.interactionLeaseMs],
       );
       if (updated.rowCount !== 1) throw conflict("interaction checkpoint target is not processing");
+      await this.#appendInteractionWal(client, {
+        tenant_id,
+        interaction_id: updated.rows[0].id,
+        request_id,
+        entry_type: "checkpointed",
+        payload: {
+          transcript: transcript !== undefined,
+          understanding: understanding !== undefined,
+          provider_operations: provider_invocations.map(({ operation, status }) => ({ operation, status })),
+          input_asset: Boolean(input_asset_id),
+        },
+      });
     });
   }
 
@@ -254,22 +315,66 @@ export class PostgresCrmStore {
       const ciphertext = this.cipher.encrypt(response, `${tenant_id}:response`);
       const status = response.status === "needs_review" ? "needs_review" : "completed";
       const updated = await client.query(
-        `update voice_interactions set status=$3,response_ciphertext=$4,http_status=$5,completed_at=now(),updated_at=now()
-         where tenant_id=$1 and request_id=$2 and status='processing'`,
+        `update voice_interactions set status=$3,response_ciphertext=$4,http_status=$5,completed_at=now(),
+           lease_owner=null,lease_expires_at=null,updated_at=now()
+         where tenant_id=$1 and request_id=$2 and status='processing' and lease_owner=$2
+           and lease_expires_at > now()
+         returning id`,
         [tenant_id, request_id, status, ciphertext, http_status],
       );
       if (updated.rowCount !== 1) throw conflict("interaction completion target is not processing");
+      await this.#appendInteractionWal(client, {
+        tenant_id,
+        interaction_id: updated.rows[0].id,
+        request_id,
+        entry_type: "completed",
+        payload: { status, http_status },
+      });
     });
   }
 
   async failInteraction({ tenant_id, actor_id, request_id, error_code, error_message, http_status }) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const ciphertext = this.cipher.encrypt({ message: error_message }, `${tenant_id}:error`);
-      await client.query(
-        `update voice_interactions set status='failed',error_code=$3,error_message_ciphertext=$4,http_status=$5,completed_at=now(),updated_at=now()
-         where tenant_id=$1 and request_id=$2 and status='processing'`,
+      const updated = await client.query(
+        `update voice_interactions set status='failed',error_code=$3,error_message_ciphertext=$4,http_status=$5,
+           completed_at=now(),lease_owner=null,lease_expires_at=null,updated_at=now()
+         where tenant_id=$1 and request_id=$2 and status='processing' and lease_owner=$2
+           and lease_expires_at > now()
+         returning id`,
         [tenant_id, request_id, error_code, ciphertext, http_status],
       );
+      if (updated.rowCount === 1) {
+        await this.#appendInteractionWal(client, {
+          tenant_id,
+          interaction_id: updated.rows[0].id,
+          request_id,
+          entry_type: "failed",
+          payload: { error_code, http_status },
+        });
+      }
+    });
+  }
+
+  async abandonInteraction({ tenant_id, actor_id, request_id }) {
+    return await this.#transaction({ tenant_id, actor_id }, async (client) => {
+      const released = await client.query(
+        `update voice_interactions set lease_expires_at=now(),updated_at=now()
+         where tenant_id=$1 and request_id=$2 and status='processing' and lease_owner=$2
+           and lease_expires_at > now()
+         returning id`,
+        [tenant_id, request_id],
+      );
+      if (released.rowCount === 1) {
+        await this.#appendInteractionWal(client, {
+          tenant_id,
+          interaction_id: released.rows[0].id,
+          request_id,
+          entry_type: "abandoned",
+          payload: { reason: "request_cancelled" },
+        });
+      }
+      return { released: released.rowCount === 1 };
     });
   }
 
@@ -282,7 +387,14 @@ export class PostgresCrmStore {
          returning id,external_asset_id`,
         [tenant_id, request_id, object_key, asset.asset_id, asset.mime_type, byte_length, assetSha256, asset.expires_at],
       );
-      await client.query("update voice_interactions set input_asset_id=$3,updated_at=now() where tenant_id=$1 and request_id=$2", [tenant_id, request_id, inserted.rows[0].id]);
+      const interaction = await client.query(
+        `update voice_interactions set input_asset_id=$3,
+           lease_expires_at=now() + ($4::bigint * interval '1 millisecond'),updated_at=now()
+         where tenant_id=$1 and request_id=$2 and status='processing' and lease_owner=$2 and lease_expires_at > now()
+         returning id`,
+        [tenant_id, request_id, inserted.rows[0].id, this.interactionLeaseMs],
+      );
+      if (interaction.rowCount !== 1) throw conflict("input asset interaction lease was lost");
       return { asset_id: inserted.rows[0].external_asset_id, object_key, byte_length, sha256: assetSha256 };
     });
   }
@@ -335,6 +447,19 @@ export class PostgresCrmStore {
     }, { requireActor: false });
   }
 
+  async releaseOutboxLeases({ tenant_id, worker_id, outbox_ids }) {
+    if (!Array.isArray(outbox_ids) || outbox_ids.length === 0) return { released: 0 };
+    return await this.#transaction({ tenant_id }, async (client) => {
+      const released = await client.query(
+        `update outbox_events set locked_at=null,lock_owner=null
+         where tenant_id=$1 and lock_owner=$2 and id = any($3::uuid[])
+           and published_at is null and dead_lettered_at is null`,
+        [tenant_id, worker_id, outbox_ids],
+      );
+      return { released: released.rowCount };
+    }, { requireActor: false });
+  }
+
   async events(tenant_id, actor_id) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const rows = await client.query(
@@ -361,6 +486,22 @@ export class PostgresCrmStore {
       `insert into outbox_events (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,request_id,payload)
        values ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
       [tenant_id, intent === "crm.review.requested" ? "crm.review.requested.v1" : intent === "tts.asset.created" ? "tts.asset.created.v1" : "crm.command.committed.v1", result.resource?.type ?? "command", result.resource?.id ?? request_id, result.aggregate_version, request_id, JSON.stringify({ intent, result, aggregate_version: result.aggregate_version, request_id })],
+    );
+  }
+
+  async #appendInteractionWal(client, {
+    tenant_id,
+    interaction_id,
+    request_id,
+    entry_type,
+    payload,
+  }) {
+    const ciphertext = this.cipher.encrypt(payload, `${tenant_id}:interaction-wal`);
+    await client.query(
+      `insert into interaction_wal (tenant_id,interaction_id,request_id,sequence,entry_type,payload_ciphertext)
+       select $1,$2,$3,coalesce(max(sequence),0)+1,$4,$5
+       from interaction_wal where tenant_id=$1 and interaction_id=$2`,
+      [tenant_id, interaction_id, request_id, entry_type, ciphertext],
     );
   }
 

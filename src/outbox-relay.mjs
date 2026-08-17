@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createControlEngine } from "./control/index.mjs";
 
 function positiveInteger(value, fallback, name) {
   const parsed = Number(value ?? fallback);
@@ -27,22 +28,33 @@ export function outboxConfig(env = process.env) {
 }
 
 export class OutboxRelay {
-  constructor({ store, config, fetchImpl = fetch, workerId = `relay-${randomUUID()}`, onResult = () => {} }) {
-    this.store = store; this.config = config; this.fetch = fetchImpl; this.workerId = workerId; this.onResult = onResult;
+  constructor({ store, config, fetchImpl = fetch, workerId = `relay-${randomUUID()}`, onResult = () => {}, control = createControlEngine() }) {
+    this.store = store; this.config = config; this.fetch = fetchImpl; this.workerId = workerId; this.onResult = onResult; this.control = control;
   }
 
-  async runOnce() {
+  async runOnce({ signal } = {}) {
     const result = { claimed: 0, published: 0, failed: 0, dead_lettered: 0 };
     for (const tenant_id of this.config.tenantIds) {
+      signal?.throwIfAborted();
       const rows = await this.store.claimOutbox({ tenant_id, worker_id: this.workerId, batch_size: this.config.batchSize, lock_timeout_ms: this.config.lockTimeoutMs });
       result.claimed += rows.length;
-      for (const row of rows) {
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index];
         try {
-          await this.#publish(row.event);
+          await this.#publish(row.event, signal);
           await this.store.markOutboxPublished({ tenant_id, worker_id: this.workerId, outbox_id: row.outbox_id });
           result.published += 1;
           this.onResult({ status: "published", tenant_id, outbox_id: row.outbox_id, event_id: row.event.id });
         } catch (error) {
+          if (signal?.aborted || error?.circuitOpen === true) {
+            await this.store.releaseOutboxLeases?.({
+              tenant_id,
+              worker_id: this.workerId,
+              outbox_ids: rows.slice(index).map(({ outbox_id }) => outbox_id),
+            });
+            if (signal?.aborted) throw signal.reason ?? error;
+            break;
+          }
           const failure = await this.store.markOutboxFailed({ tenant_id, worker_id: this.workerId, outbox_id: row.outbox_id, error: error?.message ?? error, max_attempts: this.config.maxAttempts });
           result.failed += 1;
           if (failure.dead_lettered) result.dead_lettered += 1;
@@ -53,13 +65,31 @@ export class OutboxRelay {
     return result;
   }
 
-  async #publish(event) {
+  async #publish(event, signal) {
     const body = JSON.stringify(event);
     const headers = { "content-type": "application/cloudevents+json", "idempotency-key": event.id };
     if (this.config.bearerToken) headers.authorization = `Bearer ${this.config.bearerToken}`;
     if (this.config.hmacSecret) headers["x-sumi-signature"] = `sha256=${createHmac("sha256", this.config.hmacSecret).update(body).digest("hex")}`;
-    const response = await this.fetch(this.config.target, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) throw new Error(`outbox target returned HTTP ${response.status}`);
+    const target = new URL(this.config.target);
+    await this.control.run(`outbox.publish.${target.host}`, async (operationSignal) => {
+      const response = await this.fetch(this.config.target, {
+        method: "POST",
+        headers,
+        body,
+        signal: operationSignal,
+      });
+      if (!response.ok) {
+        throw Object.assign(new Error(`outbox target returned HTTP ${response.status}`), {
+          breakerEligible: response.status >= 500 || response.status === 429,
+        });
+      }
+    }, {
+      signal,
+      softTimeoutMs: 10_000,
+      hardGraceMs: 2_000,
+      label: "outbox publish",
+      breaker: { threshold: 3, cooldownMs: 30_000 },
+    });
   }
 }
 

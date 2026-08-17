@@ -100,6 +100,10 @@ async function traced(ports, context, name, attributes, operation) {
   }, operation);
 }
 
+function assertActive(context) {
+  context.signal?.throwIfAborted();
+}
+
 function identityArgs(context, idempotencyKey) {
   return {
     ...context.identity,
@@ -159,6 +163,7 @@ export class AskService {
   async execute(context, command) {
     assertRequestContext(context);
     assertAskCommand(command);
+    assertActive(context);
     const ports = this.ports;
     const storeArgs = identityArgs(context, command.idempotencyKey);
     const requestFingerprint = askFingerprint(command);
@@ -214,6 +219,7 @@ export class AskService {
           requestId: context.request_id,
           contentType: command.input.content_type,
         }));
+        assertActive(context);
         await ports.recordInputAsset({
           ...storeArgs,
           ...persistedInput,
@@ -237,6 +243,7 @@ export class AskService {
           }, () => ports.transcribe(audioBytes, {
             locale: command.locale,
             contentType: command.input.content_type,
+            signal: context.signal,
           }))
         : {
             text: command.input.text,
@@ -249,6 +256,7 @@ export class AskService {
       if (!transcriptResult?.text?.trim()) {
         throw Object.assign(new Error("no speech detected"), { code: "EMPTY_TRANSCRIPT" });
       }
+      assertActive(context);
       await ports.checkpointInteraction({
         ...storeArgs,
         transcript: transcriptResult,
@@ -271,8 +279,9 @@ export class AskService {
       const intentStarted = ports.now();
       const understanding = normalizeUnderstanding(await traced(ports, context, "provider.intent", {
         "provider.kind": ports.intentProviderKind ?? "unknown",
-      }, () => ports.understand(transcriptResult.text, { locale: command.locale })));
+      }, () => ports.understand(transcriptResult.text, { locale: command.locale, signal: context.signal })));
       const intentModel = understanding.source?.model ?? understanding.model ?? "unknown";
+      assertActive(context);
       await ports.checkpointInteraction({
         ...storeArgs,
         understanding,
@@ -311,6 +320,7 @@ export class AskService {
       };
 
       if (understanding.needs_confirmation) {
+        assertActive(context);
         response.review_task = await traced(ports, context, "store.transaction", {
           "db.system": ports.databaseKind ?? "unknown",
           "app.result": "needs_review",
@@ -330,6 +340,7 @@ export class AskService {
         return result("ask.review_required", validated);
       }
 
+      assertActive(context);
       response.crm = await traced(ports, context, "store.transaction", {
         "db.system": ports.databaseKind ?? "unknown",
         "app.operation": "ask",
@@ -358,6 +369,7 @@ export class AskService {
         }, () => ports.synthesize(response.answer.text, {
           language: command.locale,
           format,
+          signal: context.signal,
         }));
         const persisted = await traced(ports, context, "storage.object", {
           "storage.kind": ports.storageKind ?? "unknown",
@@ -365,6 +377,7 @@ export class AskService {
           tenantId: context.identity.tenant_id,
           kind: "tts",
         }));
+        assertActive(context);
         response.audio = await traced(ports, context, "store.transaction", {
           "db.system": ports.databaseKind ?? "unknown",
         }, () => ports.recordTts(
@@ -403,16 +416,23 @@ export class AskService {
       return result("ask.completed", validated);
     } catch (error) {
       const errorCode = knownErrorCode(error);
-      try {
-        await ports.failInteraction({
-          ...storeArgs,
+      if (context.signal?.aborted && typeof ports.abandonInteraction === "function") {
+        try {
+          await ports.abandonInteraction(storeArgs);
+        } catch {}
+        await emitProgress(ports, context, "interaction.cancelled", undefined, command.conversationId);
+      } else {
+        try {
+          await ports.failInteraction({
+            ...storeArgs,
+            error_code: errorCode,
+            error_message: error?.message ?? "request failed",
+          });
+        } catch {}
+        await emitProgress(ports, context, "interaction.failed", {
           error_code: errorCode,
-          error_message: error?.message ?? "request failed",
-        });
-      } catch {}
-      await emitProgress(ports, context, "interaction.failed", {
-        error_code: errorCode,
-      }, command.conversationId);
+        }, command.conversationId);
+      }
       throw error;
     }
   }
@@ -430,6 +450,7 @@ export class TtsService {
   async execute(context, command) {
     assertRequestContext(context);
     assertTtsCommand(command);
+    assertActive(context);
     const key = `${context.identity.tenant_id}:${command.idempotencyKey}`;
     const fingerprint = sha256(JSON.stringify({
       text: command.text,
@@ -456,6 +477,7 @@ export class TtsService {
       language: command.language,
       voice: command.voice,
       format: command.format,
+      signal: context.signal,
     }));
     const persisted = await traced(this.ports, context, "storage.object", {
       "storage.kind": this.ports.storageKind ?? "unknown",
@@ -463,6 +485,7 @@ export class TtsService {
       tenantId: context.identity.tenant_id,
       kind: "tts",
     }));
+    assertActive(context);
     const asset = await traced(this.ports, context, "store.transaction", {
       "db.system": this.ports.databaseKind ?? "unknown",
     }, () => this.ports.recordTts(key, fingerprint, persisted.asset, {
@@ -497,6 +520,7 @@ export class ReviewService {
   async execute(context, command) {
     assertRequestContext(context);
     assertReviewCommand(command);
+    assertActive(context);
     if (typeof this.ports.decideReview !== "function") {
       throw Object.assign(
         new Error("review decisions require STORE_PROVIDER=postgres"),

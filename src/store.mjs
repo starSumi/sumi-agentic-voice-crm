@@ -3,8 +3,13 @@ import { now, sha256 } from "./contracts.mjs";
 import { validateEvent } from "./protocol-validation.mjs";
 
 export class CrmStore {
-  #idempotency = new Map(); #tts = new Map(); #assets = new Map(); #assetObjects = new Map(); #interactions = new Map(); #events = []; #audits = []; #outbox = []; #reviews = new Map(); #reviewIdempotency = new Map(); #deals = new Map(); #customers = new Map();
-  constructor() { this.#deals.set("tenant_demo:d1", { id: "d1", name: "Acme renewal", stage: "Proposal", version: 1 }); }
+  #idempotency = new Map(); #tts = new Map(); #assets = new Map(); #assetObjects = new Map(); #interactions = new Map(); #interactionWal = []; #events = []; #audits = []; #outbox = []; #reviews = new Map(); #reviewIdempotency = new Map(); #deals = new Map(); #customers = new Map();
+  constructor({ clock = () => Date.now(), interactionLeaseMs = 30_000 } = {}) {
+    if (!Number.isSafeInteger(interactionLeaseMs) || interactionLeaseMs <= 0) throw new TypeError("interactionLeaseMs must be a positive integer");
+    this.clock = clock;
+    this.interactionLeaseMs = interactionLeaseMs;
+    this.#deals.set("tenant_demo:d1", { id: "d1", name: "Acme renewal", stage: "Proposal", version: 1 });
+  }
   async health() { return { ready: true, provider: "memory" }; }
   replay(key) { const entry = this.#idempotency.get(key); return entry ? { ...entry, result: structuredClone(entry.result) } : undefined; }
   replayTts(key, fingerprint) { const previous = this.#tts.get(key); if (previous && previous.fingerprint !== fingerprint) throw Object.assign(new Error("idempotency key was reused with a different TTS request"), { code: "IDEMPOTENCY_CONFLICT" }); return previous ? structuredClone(previous.result) : undefined; }
@@ -37,38 +42,95 @@ export class CrmStore {
       if (previous.request_fingerprint !== request_fingerprint) throw Object.assign(new Error("idempotency key was reused with a different request"), { code: "IDEMPOTENCY_CONFLICT" });
       if (previous.status === "completed" || previous.status === "needs_review") return { replay: true, response: structuredClone(previous.response), http_status: previous.http_status };
       if (previous.status === "failed") throw Object.assign(new Error(previous.error_message), { code: previous.error_code });
+      if (previous.status === "processing" && previous.lease_expires_at <= this.clock()) {
+        const previousRequestId = previous.request_id;
+        Object.assign(previous, {
+          actor_id,
+          request_id,
+          input_type,
+          input_payload: structuredClone(input_payload),
+          status: "processing",
+          provider_invocations: [],
+          model_versions: {},
+          latency_ms: {},
+          lease_owner: request_id,
+          lease_expires_at: this.clock() + this.interactionLeaseMs,
+          recovery_count: (previous.recovery_count ?? 0) + 1,
+        });
+        for (const field of ["transcript", "understanding", "response", "error_code", "error_message", "http_status", "completed_at", "input_asset_id"]) delete previous[field];
+        this.#appendInteractionWal(previous, "recovered", {
+          previous_request_id_hash: sha256(previousRequestId),
+          recovery_count: previous.recovery_count,
+        });
+        return { replay: false, recovered: true };
+      }
       throw Object.assign(new Error("interaction with this idempotency key is still processing"), { code: "CRM_CONFLICT" });
     }
-    this.#interactions.set(key, { tenant_id, actor_id, request_id, idempotency_key, request_fingerprint, input_type, input_payload: structuredClone(input_payload), status: "processing", provider_invocations: [], created_at: now() });
+    const interaction = { tenant_id, actor_id, request_id, idempotency_key, request_fingerprint, input_type, input_payload: structuredClone(input_payload), status: "processing", provider_invocations: [], model_versions: {}, latency_ms: {}, lease_owner: request_id, lease_expires_at: this.clock() + this.interactionLeaseMs, recovery_count: 0, created_at: now() };
+    this.#interactions.set(key, interaction);
+    this.#appendInteractionWal(interaction, "started", { input_type, idempotency_key_hash: sha256(idempotency_key) });
     return { replay: false };
   }
-  checkpointInteraction({ tenant_id, idempotency_key, transcript, understanding, provider_invocations, model_versions, latency_ms, input_asset_id }) {
+  checkpointInteraction({ tenant_id, request_id, idempotency_key, transcript, understanding, provider_invocations, model_versions, latency_ms, input_asset_id }) {
     const row = this.#interactions.get(`${tenant_id}:${idempotency_key}`);
     if (!row) throw new Error("interaction was not started");
+    if (row.status !== "processing" || row.lease_owner !== request_id || row.lease_expires_at <= this.clock()) {
+      throw Object.assign(new Error("interaction checkpoint lease was lost"), { code: "CRM_CONFLICT" });
+    }
     if (transcript !== undefined) row.transcript = structuredClone(transcript);
     if (understanding !== undefined) row.understanding = structuredClone(understanding);
     if (provider_invocations) row.provider_invocations.push(...structuredClone(provider_invocations));
     if (model_versions) row.model_versions = { ...row.model_versions, ...model_versions };
     if (latency_ms) row.latency_ms = { ...row.latency_ms, ...latency_ms };
     if (input_asset_id) row.input_asset_id = input_asset_id;
+    row.lease_expires_at = this.clock() + this.interactionLeaseMs;
+    this.#appendInteractionWal(row, "checkpointed", {
+      transcript: transcript !== undefined,
+      understanding: understanding !== undefined,
+      provider_operations: (provider_invocations ?? []).map(({ operation, status }) => ({ operation, status })),
+      input_asset: Boolean(input_asset_id),
+    });
   }
-  completeInteraction({ tenant_id, idempotency_key, response, http_status }) {
+  completeInteraction({ tenant_id, request_id, idempotency_key, response, http_status }) {
     const row = this.#interactions.get(`${tenant_id}:${idempotency_key}`);
     if (!row) throw new Error("interaction was not started");
+    if (row.status !== "processing" || row.lease_owner !== request_id || row.lease_expires_at <= this.clock()) throw Object.assign(new Error("interaction completion lease was lost"), { code: "CRM_CONFLICT" });
     row.status = response.status === "needs_review" ? "needs_review" : "completed";
-    row.response = structuredClone(response); row.http_status = http_status; row.completed_at = now();
+    row.response = structuredClone(response); row.http_status = http_status; row.completed_at = now(); row.lease_owner = undefined; row.lease_expires_at = undefined;
+    this.#appendInteractionWal(row, "completed", { status: row.status, http_status });
   }
-  failInteraction({ tenant_id, idempotency_key, error_code, error_message, http_status }) {
+  failInteraction({ tenant_id, request_id, idempotency_key, error_code, error_message, http_status }) {
     const row = this.#interactions.get(`${tenant_id}:${idempotency_key}`);
-    if (!row || row.status !== "processing") return;
-    Object.assign(row, { status: "failed", error_code, error_message, http_status, completed_at: now() });
+    if (!row || row.status !== "processing" || row.lease_owner !== request_id || row.lease_expires_at <= this.clock()) return;
+    Object.assign(row, { status: "failed", error_code, error_message, http_status, completed_at: now(), lease_owner: undefined, lease_expires_at: undefined });
+    this.#appendInteractionWal(row, "failed", { error_code, http_status });
+  }
+  abandonInteraction({ tenant_id, request_id, idempotency_key }) {
+    const row = this.#interactions.get(`${tenant_id}:${idempotency_key}`);
+    if (!row || row.status !== "processing" || row.lease_owner !== request_id || row.lease_expires_at <= this.clock()) {
+      return { released: false };
+    }
+    row.lease_expires_at = this.clock();
+    this.#appendInteractionWal(row, "abandoned", { reason: "request_cancelled" });
+    return { released: true };
   }
   interactionFor(tenant_id, idempotency_key) {
     const row = this.#interactions.get(`${tenant_id}:${idempotency_key}`);
     return row ? structuredClone(row) : undefined;
   }
-  recordInputAsset({ tenant_id, actor_id, request_id, asset, object_key, byte_length, sha256: assetSha256 }) {
+  interactionWal(tenant_id, idempotency_key) {
+    return structuredClone(this.#interactionWal.filter((entry) => entry.tenant_id === tenant_id && entry.idempotency_key === idempotency_key));
+  }
+  recordInputAsset({ tenant_id, actor_id, request_id, idempotency_key, asset, object_key, byte_length, sha256: assetSha256 }) {
+    const interaction = this.#interactions.get(`${tenant_id}:${idempotency_key}`);
+    if (interaction && (interaction.lease_owner !== request_id || interaction.lease_expires_at <= this.clock())) {
+      throw Object.assign(new Error("input asset interaction lease was lost"), { code: "CRM_CONFLICT" });
+    }
     this.recordAsset({ tenant_id, actor_id, request_id, asset: { ...asset, url: `/v1/assets/${asset.asset_id}` }, object_key });
+    if (interaction) {
+      interaction.input_asset_id = asset.asset_id;
+      interaction.lease_expires_at = this.clock() + this.interactionLeaseMs;
+    }
     return { asset_id: asset.asset_id, object_key, byte_length, sha256: assetSha256 };
   }
   execute({ tenant_id, actor_id, idempotency_key, intent, entities, request_id, request_fingerprint }) {
@@ -116,6 +178,18 @@ export class CrmStore {
   events() { return structuredClone(this.#events); }
   audits() { return structuredClone(this.#audits); }
   outbox() { return structuredClone(this.#outbox); }
+  #appendInteractionWal(row, entry_type, payload) {
+    const sequence = this.#interactionWal.filter((entry) => entry.tenant_id === row.tenant_id && entry.idempotency_key === row.idempotency_key).length + 1;
+    this.#interactionWal.push({
+      tenant_id: row.tenant_id,
+      idempotency_key: row.idempotency_key,
+      request_id: row.request_id,
+      sequence,
+      entry_type,
+      payload: structuredClone(payload),
+      created_at: now(),
+    });
+  }
   #commit(tenant_id, actor_id, key, intent, request_id, result, fingerprint) {
     const event = this.#event("crm.command.committed.v1", tenant_id, `${result.resource?.type ?? "command"}/${result.resource?.id ?? key}`, { actor_id, intent, result, aggregate_version: result.aggregate_version, request_id });
     const audit = { audit_id: randomUUID(), tenant_id, actor_id, request_id, action: intent, resource: result.resource, decision: "committed", created_at: now() };

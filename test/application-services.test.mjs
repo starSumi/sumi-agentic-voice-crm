@@ -53,6 +53,7 @@ function askFixture(overrides = {}) {
     checkpoint: [],
     complete: [],
     failed: [],
+    abandoned: [],
     reviews: [],
     crm: [],
   };
@@ -61,6 +62,7 @@ function askFixture(overrides = {}) {
     checkpointInteraction: async (args) => { calls.checkpoint.push(args); },
     completeInteraction: async (args) => { calls.complete.push(args); },
     failInteraction: async (args) => { calls.failed.push(args); },
+    abandonInteraction: async (args) => { calls.abandoned.push(args); },
     createReview: async (args) => {
       calls.reviews.push(args);
       return {
@@ -277,4 +279,26 @@ test("AskService marks provider and storage failures on the interaction", async 
     assert.equal(calls.failed.length, 1);
     assert.equal(calls.failed[0].error_code, "UPSTREAM_UNAVAILABLE");
   });
+});
+
+test("AskService releases its interaction lease when collaborative cancellation wins", async () => {
+  const controller = new AbortController();
+  const cancellation = Object.assign(new Error("client disconnected"), { name: "AbortError" });
+  const { service, calls } = askFixture({
+    understand: async () => {
+      controller.abort(cancellation);
+      return readUnderstanding();
+    },
+  });
+  const cancelledContext = createRequestContext({
+    request_id: REQUEST_ID,
+    traceparent: "00-test",
+    identity: { tenant_id: "tenant_demo", actor_id: "actor-a" },
+    signal: controller.signal,
+  });
+
+  await assert.rejects(service.execute(cancelledContext, textCommand()), cancellation);
+  assert.equal(calls.abandoned.length, 1);
+  assert.equal(calls.failed.length, 0);
+  assert.equal(calls.crm.length, 0);
 });

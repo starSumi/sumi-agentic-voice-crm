@@ -8,6 +8,36 @@ const identity = {
 };
 
 try {
+  const upgradedInteraction = {
+    tenant_id: "00000000-0000-4000-8000-000000000090",
+    actor_id: "actor-upgrade",
+    request_id: "req_upgrade_processing_recovered",
+    idempotency_key: "upgrade-processing",
+    request_fingerprint: "9".repeat(64),
+    input_type: "text",
+    input_payload: { text: "recover historical processing row" },
+  };
+  assert.deepEqual(await store.beginInteraction(upgradedInteraction), { replay: false, recovered: true });
+  await store.failInteraction({
+    ...upgradedInteraction,
+    error_code: "UPSTREAM_UNAVAILABLE",
+    error_message: "upgrade fixture stop",
+    http_status: 503,
+  });
+  const upgradeInspection = await store.pool.connect();
+  try {
+    await upgradeInspection.query("begin");
+    await upgradeInspection.query("select set_config('app.tenant_id', $1, true)", [upgradedInteraction.tenant_id]);
+    const upgradeTypes = (await upgradeInspection.query(
+      "select w.entry_type from interaction_wal w join voice_interactions i on i.id=w.interaction_id where i.tenant_id=$1 and i.idempotency_key=$2 order by w.sequence",
+      [upgradedInteraction.tenant_id, upgradedInteraction.idempotency_key],
+    )).rows.map(({ entry_type }) => entry_type);
+    assert.deepEqual(upgradeTypes, ["recovered", "failed"]);
+    await upgradeInspection.query("rollback");
+  } finally {
+    upgradeInspection.release();
+  }
+
   const command = {
     ...identity,
     request_id: "req_runtime_postgres_0001",
@@ -76,12 +106,109 @@ try {
   try {
     await inspection.query("begin");
     await inspection.query("select set_config('app.tenant_id', $1, true)", [identity.tenant_id]);
-    const raw = (await inspection.query("select input_payload_ciphertext,transcript_ciphertext,understanding_ciphertext,response_ciphertext from voice_interactions where tenant_id=$1 and request_id=$2", [identity.tenant_id, interaction.request_id])).rows[0];
-    assert.ok(Object.values(raw).every((value) => String(value).startsWith("v1.")));
+    const raw = (await inspection.query("select id,input_payload_ciphertext,transcript_ciphertext,understanding_ciphertext,response_ciphertext from voice_interactions where tenant_id=$1 and request_id=$2", [identity.tenant_id, interaction.request_id])).rows[0];
+    assert.ok([
+      raw.input_payload_ciphertext,
+      raw.transcript_ciphertext,
+      raw.understanding_ciphertext,
+      raw.response_ciphertext,
+    ].every((value) => String(value).startsWith("v1.")));
     assert.doesNotMatch(JSON.stringify(raw), /private interaction|private transcript|private answer/);
+    const journal = await inspection.query(
+      "select sequence,entry_type,payload_ciphertext from interaction_wal where tenant_id=$1 and interaction_id=$2 order by sequence",
+      [identity.tenant_id, raw.id],
+    );
+    assert.deepEqual(journal.rows.map(({ sequence, entry_type }) => ({ sequence: Number(sequence), entry_type })), [
+      { sequence: 1, entry_type: "started" },
+      { sequence: 2, entry_type: "checkpointed" },
+      { sequence: 3, entry_type: "completed" },
+    ]);
+    assert.ok(journal.rows.every(({ payload_ciphertext }) => payload_ciphertext.startsWith("v1.")));
+    await inspection.query("savepoint wal_immutability");
+    await assert.rejects(
+      inspection.query("update interaction_wal set entry_type='failed' where tenant_id=$1 and interaction_id=$2", [identity.tenant_id, raw.id]),
+      (error) => error.code === "55000" && /append-only/.test(error.message),
+    );
+    await inspection.query("rollback to savepoint wal_immutability");
     await inspection.query("rollback");
   } finally {
     inspection.release();
+  }
+
+  const stale = {
+    ...identity,
+    request_id: "req_runtime_stale_0001",
+    idempotency_key: "runtime-stale-0001",
+    request_fingerprint: "b".repeat(64),
+    input_type: "text",
+    input_payload: { text: "recover me" },
+  };
+
+  const abandoned = {
+    ...identity,
+    request_id: "req_runtime_abandoned_0001",
+    idempotency_key: "runtime-abandoned-0001",
+    request_fingerprint: "a".repeat(64),
+    input_type: "text",
+    input_payload: { text: "cancel me" },
+  };
+  assert.deepEqual(await store.beginInteraction(abandoned), { replay: false });
+  assert.deepEqual(await store.abandonInteraction(abandoned), { released: true });
+  const abandonedRecovery = { ...abandoned, request_id: "req_runtime_abandoned_0002" };
+  assert.deepEqual(await store.beginInteraction(abandonedRecovery), { replay: false, recovered: true });
+  await store.failInteraction({ ...abandonedRecovery, error_code: "UPSTREAM_UNAVAILABLE", error_message: "fixture stop", http_status: 503 });
+  const abandonedInspection = await store.pool.connect();
+  try {
+    await abandonedInspection.query("begin");
+    await abandonedInspection.query("select set_config('app.tenant_id', $1, true)", [identity.tenant_id]);
+    const abandonedTypes = (await abandonedInspection.query(
+      "select w.entry_type from interaction_wal w join voice_interactions i on i.id=w.interaction_id where i.tenant_id=$1 and i.idempotency_key=$2 order by w.sequence",
+      [identity.tenant_id, abandoned.idempotency_key],
+    )).rows.map(({ entry_type }) => entry_type);
+    assert.deepEqual(abandonedTypes, ["started", "abandoned", "recovered", "failed"]);
+    await abandonedInspection.query("rollback");
+  } finally {
+    abandonedInspection.release();
+  }
+
+  assert.deepEqual(await store.beginInteraction(stale), { replay: false });
+  const lease = await store.pool.connect();
+  try {
+    await lease.query("begin");
+    await lease.query("select set_config('app.tenant_id', $1, true)", [identity.tenant_id]);
+    await lease.query(
+      "update voice_interactions set lease_expires_at=now()-interval '1 second' where tenant_id=$1 and request_id=$2",
+      [identity.tenant_id, stale.request_id],
+    );
+    await lease.query("commit");
+  } finally {
+    lease.release();
+  }
+  await assert.rejects(
+    store.completeInteraction({ ...stale, response: { status: "completed", request_id: stale.request_id }, http_status: 200 }),
+    (error) => error.code === "CRM_CONFLICT",
+  );
+  await store.failInteraction({ ...stale, error_code: "UPSTREAM_UNAVAILABLE", error_message: "late failure", http_status: 503 });
+  const recovered = { ...stale, request_id: "req_runtime_stale_0002" };
+  assert.deepEqual(await store.beginInteraction(recovered), { replay: false, recovered: true });
+  await store.failInteraction({ ...recovered, error_code: "UPSTREAM_UNAVAILABLE", error_message: "fixture recovery stop", http_status: 503 });
+  const recoveryInspection = await store.pool.connect();
+  try {
+    await recoveryInspection.query("begin");
+    await recoveryInspection.query("select set_config('app.tenant_id', $1, true)", [identity.tenant_id]);
+    const recoveredRow = (await recoveryInspection.query(
+      "select id,recovery_count from voice_interactions where tenant_id=$1 and request_id=$2",
+      [identity.tenant_id, recovered.request_id],
+    )).rows[0];
+    assert.equal(recoveredRow.recovery_count, 1);
+    const types = (await recoveryInspection.query(
+      "select entry_type from interaction_wal where tenant_id=$1 and interaction_id=$2 order by sequence",
+      [identity.tenant_id, recoveredRow.id],
+    )).rows.map(({ entry_type }) => entry_type);
+    assert.deepEqual(types, ["started", "recovered", "failed"]);
+    await recoveryInspection.query("rollback");
+  } finally {
+    recoveryInspection.release();
   }
 
   const decision = await store.decideReview({
@@ -117,7 +244,23 @@ try {
   const claimed = await store.claimOutbox({ tenant_id: identity.tenant_id, worker_id: "integration-worker", batch_size: 100 });
   assert.ok(claimed.length >= 3);
   await store.markOutboxFailed({ tenant_id: identity.tenant_id, worker_id: "integration-worker", outbox_id: claimed[0].outbox_id, error: "fixture failure", max_attempts: 1 });
-  for (const row of claimed.slice(1)) await store.markOutboxPublished({ tenant_id: identity.tenant_id, worker_id: "integration-worker", outbox_id: row.outbox_id });
+  const releasable = claimed.slice(1);
+  assert.deepEqual(await store.releaseOutboxLeases({
+    tenant_id: identity.tenant_id,
+    worker_id: "integration-worker",
+    outbox_ids: releasable.map(({ outbox_id }) => outbox_id),
+  }), { released: releasable.length });
+  const reclaimed = await store.claimOutbox({
+    tenant_id: identity.tenant_id,
+    worker_id: "integration-worker-2",
+    batch_size: 100,
+  });
+  assert.deepEqual(
+    reclaimed.map(({ outbox_id }) => outbox_id).sort(),
+    releasable.map(({ outbox_id }) => outbox_id).sort(),
+  );
+  assert.ok(reclaimed.every(({ attempts }) => Number(attempts) === 0));
+  for (const row of reclaimed) await store.markOutboxPublished({ tenant_id: identity.tenant_id, worker_id: "integration-worker-2", outbox_id: row.outbox_id });
   console.log("postgres runtime adapter passed: encrypted interaction replay, durable CRM/TTS, tenant assets, reviews and outbox leases verified");
 } finally {
   await store.close();
