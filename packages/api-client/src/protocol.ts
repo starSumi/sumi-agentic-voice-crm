@@ -14,6 +14,8 @@ export type {
   AudioAskRequest,
   AudioInput,
   ErrorEnvelope,
+  EventStreamEnvelope,
+  EventStreamResponse,
   IdempotencyKey,
   Locale,
   MultipartAskMetadata,

@@ -21,6 +21,9 @@ import type {
   GetAssetData,
   GetAssetErrors,
   GetAssetResponses,
+  ListEventsData,
+  ListEventsErrors,
+  ListEventsResponses,
   SynthesizeData,
   SynthesizeErrors,
   SynthesizeResponses,
@@ -137,5 +140,23 @@ export const getAssetContent = <ThrowOnError extends boolean = false>(
   >({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/v1/assets/{asset_id}/content",
+    ...options,
+  });
+
+/**
+ * List tenant-scoped durable domain events
+ *
+ * Returns the HTTP projection of the normative CloudEvents envelope. Event semantics and event type evolution remain owned by events.yaml.
+ */
+export const listEvents = <ThrowOnError extends boolean = false>(
+  options?: Options<ListEventsData, ThrowOnError>,
+): RequestResult<ListEventsResponses, ListEventsErrors, ThrowOnError> =>
+  (options?.client ?? client).get<
+    ListEventsResponses,
+    ListEventsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/events",
     ...options,
   });

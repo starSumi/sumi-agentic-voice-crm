@@ -84,6 +84,7 @@
     "/v1/ask": {
       "post": {
         "operationId": "ask",
+        "x-sumi-action": "interaction.ask",
         "summary": "Ask the agent using text or audio",
         "parameters": [
           {
@@ -181,6 +182,7 @@
     "/v1/tts/synthesize": {
       "post": {
         "operationId": "synthesize",
+        "x-sumi-action": "media.tts.create",
         "summary": "Synthesize a text response into an audio asset",
         "security": [
           {
@@ -252,6 +254,7 @@
     "/v1/reviews/{review_id}/decision": {
       "post": {
         "operationId": "decideReview",
+        "x-sumi-action": "review.decide",
         "summary": "Approve or reject a low-confidence agent decision",
         "security": [
           {
@@ -319,6 +322,7 @@
     "/v1/assets/{asset_id}": {
       "get": {
         "operationId": "getAsset",
+        "x-sumi-action": "media.asset.read",
         "summary": "Resolve tenant-scoped attachment metadata",
         "description": "Returns only opaque attachment metadata. The response never includes an object-storage key, credentials or signed URL query parameters.",
         "security": [
@@ -363,6 +367,7 @@
     "/v1/assets/{asset_id}/content": {
       "get": {
         "operationId": "getAssetContent",
+        "x-sumi-action": "media.asset.read",
         "summary": "Download tenant-scoped attachment content",
         "description": "Authenticated binary retrieval for clients that cannot attach bearer credentials to media elements. Clients should fetch this operation and create a local object URL; raw bytes are never returned by getAsset.",
         "security": [
@@ -405,6 +410,45 @@
           },
           "400": {
             "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "x-sumi-action": "events.read",
+        "summary": "List tenant-scoped durable domain events",
+        "description": "Returns the HTTP projection of the normative CloudEvents envelope. Event semantics and event type evolution remain owned by events.yaml.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TenantId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant event stream snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStreamResponse"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Error"
@@ -564,6 +608,98 @@
             "format": "uri-reference",
             "maxLength": 2048,
             "pattern": "^(?:/(?!/)[^\\s?#]*|https?://[^\\s?#]+)$"
+          }
+        }
+      },
+      "EventStreamEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "HTTP projection of the normative events.yaml envelope.",
+        "required": [
+          "specversion",
+          "id",
+          "type",
+          "source",
+          "subject",
+          "time",
+          "datacontenttype",
+          "tenant_id",
+          "request_id",
+          "data"
+        ],
+        "properties": {
+          "specversion": {
+            "const": "1.0"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^evt_[0-9a-fA-F-]{36}$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "voice.request.received.v1",
+              "voice.transcript.created.v1",
+              "voice.understanding.created.v1",
+              "crm.command.committed.v1",
+              "crm.review.requested.v1",
+              "tts.asset.created.v1",
+              "voice.request.failed.v1"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "const": "urn:sumi:voice-crm/crm",
+            "format": "uri"
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "datacontenttype": {
+            "const": "application/json"
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "traceparent": {
+            "type": "string",
+            "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "EventStreamResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "events",
+          "request_id"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventStreamEnvelope"
+            }
+          },
+          "request_id": {
+            "$ref": "#/components/schemas/RequestId"
           }
         }
       },

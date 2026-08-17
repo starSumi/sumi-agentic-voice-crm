@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.sumi.invalid/transport-policy/v1/schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "core",
+    "semantics",
+    "profiles",
+    "transports",
+    "projection_bus",
+    "lifecycle_hooks",
+    "invariants",
+    "standards"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "sumi.transport-policy.v1" },
+    "core": { "const": "single-application-core" },
+    "semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "protocol_types",
+        "http_api",
+        "api_client",
+        "durable_events",
+        "transport_selection",
+        "application_core"
+      ],
+      "properties": {
+        "protocol": { "const": "transport-neutral" },
+        "protocol_types": {
+          "const": "packages/api-client/src/protocol.ts"
+        },
+        "http_api": { "const": "contracts/openapi.yaml" },
+        "api_client": { "const": "packages/api-client/src/api.ts" },
+        "durable_events": { "const": "contracts/events.yaml" },
+        "transport_selection": {
+          "const": "packages/api-client/src/transport.ts"
+        },
+        "application_core": { "const": "src/application" }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["browser", "desktop", "tui", "service"],
+      "properties": {
+        "browser": { "$ref": "#/$defs/transportChain" },
+        "desktop": { "$ref": "#/$defs/transportChain" },
+        "tui": { "$ref": "#/$defs/transportChain" },
+        "service": { "$ref": "#/$defs/transportChain" }
+      }
+    },
+    "transports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["http", "sse", "websocket", "webtransport", "grpc"],
+      "properties": {
+        "http": { "$ref": "#/$defs/transport" },
+        "sse": { "$ref": "#/$defs/transport" },
+        "websocket": { "$ref": "#/$defs/transport" },
+        "webtransport": { "$ref": "#/$defs/transport" },
+        "grpc": { "$ref": "#/$defs/transport" }
+      }
+    },
+    "projection_bus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pattern", "implementation", "delivery", "durable_source"],
+      "properties": {
+        "pattern": { "const": "spmc" },
+        "implementation": { "const": "src/application/progress-event-bus.ts" },
+        "delivery": { "const": "bounded-ephemeral" },
+        "durable_source": { "const": "postgresql-outbox" }
+      }
+    },
+    "lifecycle_hooks": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "start" },
+        { "const": "ready" },
+        { "const": "drain" },
+        { "const": "close" }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "core-never-imports-client-transport",
+          "adapters-never-write-business-state-directly",
+          "protocol-types-contain-no-network-io",
+          "fallback-only-on-transport-availability-failure",
+          "tenant-filter-before-subscribe",
+          "abortsignal-propagates-through-every-adapter",
+          "ephemeral-events-never-replace-outbox",
+          "grpc-never-selected-for-browser"
+        ]
+      }
+    },
+    "standards": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "http",
+        "sse",
+        "websocket",
+        "webtransport_api",
+        "webtransport_protocol",
+        "grpc"
+      ],
+      "properties": {
+        "http": { "$ref": "#/$defs/standard" },
+        "sse": { "$ref": "#/$defs/standard" },
+        "websocket": { "$ref": "#/$defs/standard" },
+        "webtransport_api": { "$ref": "#/$defs/standard" },
+        "webtransport_protocol": { "$ref": "#/$defs/standard" },
+        "grpc": { "$ref": "#/$defs/standard" }
+      }
+    }
+  },
+  "$defs": {
+    "kind": { "enum": ["webtransport", "websocket", "sse", "grpc", "http"] },
+    "transportChain": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/kind" }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "direction",
+        "scope",
+        "clients",
+        "fallback",
+        "enable_when"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["implemented", "framing-only", "planned", "experimental"]
+        },
+        "direction": {
+          "enum": [
+            "request-response",
+            "server-to-client",
+            "bidirectional",
+            "bidirectional-multistream"
+          ]
+        },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "command",
+              "query",
+              "asset",
+              "progress",
+              "control",
+              "media",
+              "internal-command",
+              "internal-event-stream"
+            ]
+          }
+        },
+        "clients": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["browser", "desktop", "tui", "service"] }
+        },
+        "fallback": { "$ref": "#/$defs/transportChain" },
+        "enable_when": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "standard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "maturity"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https://" },
+        "maturity": {
+          "enum": [
+            "standard",
+            "living-standard",
+            "working-draft",
+            "internet-draft",
+            "project-specification"
+          ]
+        }
+      }
+    }
+  }
+}

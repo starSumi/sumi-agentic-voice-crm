@@ -1,0 +1,118 @@
+{
+  "$schema": "./transport-policy.schema.json",
+  "schema_version": "sumi.transport-policy.v1",
+  "core": "single-application-core",
+  "semantics": {
+    "protocol": "transport-neutral",
+    "protocol_types": "packages/api-client/src/protocol.ts",
+    "http_api": "contracts/openapi.yaml",
+    "api_client": "packages/api-client/src/api.ts",
+    "durable_events": "contracts/events.yaml",
+    "transport_selection": "packages/api-client/src/transport.ts",
+    "application_core": "src/application"
+  },
+  "profiles": {
+    "browser": ["webtransport", "websocket", "sse", "http"],
+    "desktop": ["webtransport", "websocket", "sse", "http"],
+    "tui": ["websocket", "sse", "http"],
+    "service": ["grpc", "http"]
+  },
+  "transports": {
+    "http": {
+      "status": "implemented",
+      "direction": "request-response",
+      "scope": ["command", "query", "asset"],
+      "clients": ["browser", "desktop", "tui", "service"],
+      "fallback": ["http"],
+      "enable_when": ["always"]
+    },
+    "sse": {
+      "status": "framing-only",
+      "direction": "server-to-client",
+      "scope": ["progress"],
+      "clients": ["browser", "desktop", "tui"],
+      "fallback": ["http"],
+      "enable_when": [
+        "authenticated-progress-endpoint",
+        "proxy-streaming-verified"
+      ]
+    },
+    "websocket": {
+      "status": "planned",
+      "direction": "bidirectional",
+      "scope": ["progress", "control"],
+      "clients": ["browser", "desktop", "tui"],
+      "fallback": ["sse", "http"],
+      "enable_when": [
+        "bidirectional-control-required",
+        "origin-and-backpressure-tests-pass"
+      ]
+    },
+    "webtransport": {
+      "status": "experimental",
+      "direction": "bidirectional-multistream",
+      "scope": ["progress", "control", "media"],
+      "clients": ["browser", "desktop"],
+      "fallback": ["websocket", "sse", "http"],
+      "enable_when": [
+        "http3-endpoint-available",
+        "draft-version-negotiated",
+        "fallback-chain-verified"
+      ]
+    },
+    "grpc": {
+      "status": "planned",
+      "direction": "bidirectional",
+      "scope": ["internal-command", "internal-event-stream"],
+      "clients": ["service"],
+      "fallback": ["http"],
+      "enable_when": [
+        "independent-service-boundary-exists",
+        "protobuf-compatibility-gate-passes"
+      ]
+    }
+  },
+  "projection_bus": {
+    "pattern": "spmc",
+    "implementation": "src/application/progress-event-bus.ts",
+    "delivery": "bounded-ephemeral",
+    "durable_source": "postgresql-outbox"
+  },
+  "lifecycle_hooks": ["start", "ready", "drain", "close"],
+  "invariants": [
+    "core-never-imports-client-transport",
+    "adapters-never-write-business-state-directly",
+    "protocol-types-contain-no-network-io",
+    "fallback-only-on-transport-availability-failure",
+    "tenant-filter-before-subscribe",
+    "abortsignal-propagates-through-every-adapter",
+    "ephemeral-events-never-replace-outbox",
+    "grpc-never-selected-for-browser"
+  ],
+  "standards": {
+    "http": {
+      "url": "https://www.rfc-editor.org/rfc/rfc9110",
+      "maturity": "standard"
+    },
+    "sse": {
+      "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html",
+      "maturity": "living-standard"
+    },
+    "websocket": {
+      "url": "https://www.rfc-editor.org/rfc/rfc6455",
+      "maturity": "standard"
+    },
+    "webtransport_api": {
+      "url": "https://www.w3.org/TR/webtransport/",
+      "maturity": "working-draft"
+    },
+    "webtransport_protocol": {
+      "url": "https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/",
+      "maturity": "internet-draft"
+    },
+    "grpc": {
+      "url": "https://grpc.io/docs/what-is-grpc/core-concepts/",
+      "maturity": "project-specification"
+    }
+  }
+}

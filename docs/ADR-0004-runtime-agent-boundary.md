@@ -51,19 +51,31 @@ credentials, signed URL query strings, raw transcripts, or customer entities.
 
 ## Transport choices
 
-- HTTP/OpenAPI remains the command and query contract for the current web
-  client and generated SDK.
-- SSE is the default incremental projection for browser-facing progress. An
-  AG-UI adapter is additive and calls the same application service; it does not
-  replace OpenAPI, CloudEvents, PostgreSQL, or the outbox.
+- `contracts/transport-policy.json` is the executable transport-selection and
+  fallback policy. The TypeScript API in `packages/api-client/src/transport.ts`
+  must match it.
+- HTTP/OpenAPI remains the baseline command, query, and asset contract. Every
+  client profile terminates at HTTP so deployment can disable newer transports
+  without changing business behavior.
+- SSE is the unidirectional progress fallback. WebSocket adds bidirectional
+  progress/control only when connection, origin, backpressure, cancellation,
+  and resume behavior are verified.
+- WebTransport is an experimental first preference for capable browser and
+  desktop clients that require independent streams or bounded media/control
+  flow. Its W3C API and IETF protocols are still drafts, so deployment must
+  negotiate support and preserve WebSocket, SSE, and HTTP fallback.
+- gRPC is limited to authenticated service-to-service command and event-stream
+  adapters. It is never selected for a browser and does not replace the public
+  OpenAPI contract.
+- The application core publishes bounded ephemeral progress through one
+  tenant-filtered SPMC bus. Multiple transport consumers may project that
+  stream, while PostgreSQL/outbox remains the durable event source.
+- An AG-UI adapter is additive and calls the same application service; it does
+  not replace OpenAPI, CloudEvents, PostgreSQL, or the outbox.
 - MCP is an extension boundary for agent tools and documentation resources. A
   future CRM MCP server must be a thin adapter over application services with
   explicit tenant, actor, scope, and idempotency mapping. The documentation MCP
   server remains read-only and separate from CRM mutation tools.
-- gRPC is reserved for a later, independently deployed internal service split.
-  Introducing it now would create a second transport/schema surface and require
-  a browser gateway. WebSocket is reserved for a proven need for bidirectional,
-  low-latency media or control; ordinary progress does not justify it.
 
 ## Protocol and API direction
 

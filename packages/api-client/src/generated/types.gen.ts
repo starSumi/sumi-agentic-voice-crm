@@ -34,6 +34,37 @@ export type AttachmentRef = {
   url?: string;
 };
 
+/**
+ * HTTP projection of the normative events.yaml envelope.
+ */
+export type EventStreamEnvelope = {
+  specversion: "1.0";
+  id: string;
+  type:
+    | "voice.request.received.v1"
+    | "voice.transcript.created.v1"
+    | "voice.understanding.created.v1"
+    | "crm.command.committed.v1"
+    | "crm.review.requested.v1"
+    | "tts.asset.created.v1"
+    | "voice.request.failed.v1";
+  source: "urn:sumi:voice-crm/crm";
+  subject: string;
+  time: string;
+  datacontenttype: "application/json";
+  tenant_id: string;
+  request_id: string;
+  traceparent?: string;
+  data: {
+    [key: string]: unknown;
+  };
+};
+
+export type EventStreamResponse = {
+  events: Array<EventStreamEnvelope>;
+  request_id: RequestId;
+};
+
 export type TextInput = {
   type: "text";
   text: string;
@@ -531,3 +562,42 @@ export type GetAssetContentResponses = {
 
 export type GetAssetContentResponse =
   GetAssetContentResponses[keyof GetAssetContentResponses];
+
+export type ListEventsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/events";
+};
+
+export type ListEventsErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type ListEventsError = ListEventsErrors[keyof ListEventsErrors];
+
+export type ListEventsResponses = {
+  /**
+   * Tenant event stream snapshot
+   */
+  200: EventStreamResponse;
+};
+
+export type ListEventsResponse = ListEventsResponses[keyof ListEventsResponses];
