@@ -84,6 +84,17 @@ test("verification wires the generated-client consumer boundary", async () => {
   assert.equal(manifest.commands.consumer_check, "pnpm run contract:consumer-check");
 });
 
+test("verification enforces the mixed-language duplication gate", async () => {
+  assert.equal(packageJson.devDependencies.jscpd, "5.0.12");
+  assert.equal(packageJson.scripts.duplication, "jscpd");
+  assert.match(packageJson.scripts.verify, /pnpm run duplication/);
+
+  const config = JSON.parse(await readFile(".jscpd.json", "utf8"));
+  assert.equal(config.exitCode, 1);
+  assert.deepEqual(config.format, ["javascript", "typescript", "tsx", "rust"]);
+  assert.ok(config.ignore.includes("**/packages/api-client/src/generated/**"));
+});
+
 async function listInstructionFiles(directory = ".") {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
