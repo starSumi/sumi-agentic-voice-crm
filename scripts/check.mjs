@@ -23,6 +23,7 @@ const runtimeSources = [
   "src/control/index.mjs",
   "src/contracts.mjs",
   "src/data-cipher.mjs",
+  "src/event-consumer.mjs",
   "src/extensions/index.mjs",
   "src/extensions/manifest.mjs",
   "src/extensions/registry.mjs",
@@ -30,6 +31,8 @@ const runtimeSources = [
   "src/lifecycle/managed-task-registry.ts",
   "src/lifecycle/staged-timeout.ts",
   "src/mutation-policy.mjs",
+  "src/message-job-queue.mjs",
+  "src/message-job-worker.mjs",
   "src/object-storage.mjs",
   "src/observability.mjs",
   "src/outbox-relay.mjs",
@@ -70,6 +73,7 @@ const required = [
   "db/migrations/002_interaction_control_wal.sql",
   "db/migrations/003_conversation_revision_cas.sql",
   "db/migrations/004_authorization_principal.sql",
+  "db/migrations/005_message_jobs_and_inbox.sql",
   "db/tests/001_rls_and_atomicity.sql",
   "protocol/protocol.manifest.json",
   "protocol/protocol-manifest.schema.json",
@@ -192,6 +196,20 @@ for (const marker of [
 ])
   if (!conversationCas.includes(marker))
     throw new Error(`conversation CAS marker missing: ${marker}`);
+const messageJobs = await readFile(
+  "db/migrations/005_message_jobs_and_inbox.sql",
+  "utf8",
+);
+for (const marker of [
+  "create table if not exists message_jobs",
+  "status in ('inbound','job_queued'",
+  "create table if not exists message_job_transitions",
+  "create table if not exists event_consumer_receipts",
+  "force row level security",
+  "create policy tenant_isolation",
+])
+  if (!messageJobs.includes(marker))
+    throw new Error(`message jobs marker missing: ${marker}`);
 const source = await readFile("src/server.mjs", "utf8");
 if (/(sk-[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9_-]{20,})/.test(source))
   throw new Error("possible credential in source");

@@ -22,6 +22,15 @@ function idempotencyConflict() {
   );
 }
 
+function messageJobUuid(value) {
+  const raw =
+    typeof value === "string" && value.startsWith("job_")
+      ? value.slice(4)
+      : value;
+  if (!UUID.test(raw)) throw conflict("message job id is invalid");
+  return raw;
+}
+
 function crmResource(action, { tenant_id, request_id, entities = {} }) {
   if (action === "crm.deal.update_stage") {
     return { type: "deal", id: entities.deal?.value ?? request_id, tenant_id };
@@ -37,6 +46,14 @@ function positiveInteger(value, fallback, name, max) {
     );
   }
   return parsed;
+}
+
+function requiredString(value, name, max = 256) {
+  if (typeof value !== "string" || value.length === 0 || value.length > max)
+    throw new TypeError(
+      `${name} must be a non-empty string no longer than ${max} characters`,
+    );
+  return value;
 }
 
 /**
@@ -86,6 +103,426 @@ export class PostgresCrmStore {
         reason: error?.code ?? "database_unavailable",
       };
     }
+  }
+
+  async enqueueMessageJob({
+    tenant_id,
+    actor_id,
+    request_id,
+    idempotency_key,
+    request_fingerprint,
+    payload,
+  }) {
+    return await this.#transaction(
+      { tenant_id, actor_id },
+      async (client, actorUuid) => {
+        const payloadCiphertext = this.cipher.encrypt(
+          payload,
+          `${tenant_id}:message-job:${idempotency_key}`,
+        );
+        const inserted = await client.query(
+          `insert into message_jobs
+             (tenant_id,actor_id,request_id,idempotency_key,request_fingerprint,status,payload_ciphertext)
+           values ($1,$2,$3,$4,$5,'inbound',$6) on conflict (tenant_id,idempotency_key) do nothing returning *`,
+          [
+            tenant_id,
+            actorUuid,
+            request_id,
+            idempotency_key,
+            request_fingerprint,
+            payloadCiphertext,
+          ],
+        );
+        if (inserted.rowCount === 1) {
+          const row = inserted.rows[0];
+          await this.#appendMessageTransition(client, {
+            tenant_id,
+            job_id: row.id,
+            status: "inbound",
+          });
+          await client.query(
+            `update message_jobs set status='job_queued',updated_at=now()
+             where tenant_id=$1 and id=$2`,
+            [tenant_id, row.id],
+          );
+          await this.#appendMessageTransition(client, {
+            tenant_id,
+            job_id: row.id,
+            status: "job_queued",
+          });
+          return {
+            duplicate: false,
+            job: this.#messageJob({ ...row, status: "job_queued" }, tenant_id),
+          };
+        }
+        const previous = (
+          await client.query(
+            "select * from message_jobs where tenant_id=$1 and idempotency_key=$2 for update",
+            [tenant_id, idempotency_key],
+          )
+        ).rows[0];
+        if (!previous || previous.request_fingerprint !== request_fingerprint)
+          throw idempotencyConflict();
+        return { duplicate: true, job: this.#messageJob(previous, tenant_id) };
+      },
+    );
+  }
+
+  async claimMessageJobs({
+    tenant_id,
+    worker_id,
+    batch_size = 10,
+    lease_ms = this.interactionLeaseMs,
+  }) {
+    requiredString(worker_id, "worker_id");
+    const batchSize = positiveInteger(batch_size, 10, "batch_size", 1000);
+    const leaseMs = positiveInteger(
+      lease_ms,
+      this.interactionLeaseMs,
+      "lease_ms",
+      900_000,
+    );
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const rows = await client.query(
+          `select * from message_jobs
+           where tenant_id=$1 and (
+             status='job_queued'
+             or (status='retry_wait' and next_attempt_at <= now())
+             or (status='running' and lease_expires_at <= now())
+           )
+           order by created_at,id
+           for update skip locked limit $2`,
+          [tenant_id, batchSize],
+        );
+        const claimed = [];
+        for (const row of rows.rows) {
+          const updated = await client.query(
+            `update message_jobs set status='running',worker_id=$3,attempts=attempts+1,
+               lease_expires_at=now()+($4::bigint * interval '1 millisecond'),
+               next_attempt_at=null,updated_at=now()
+             where tenant_id=$1 and id=$2
+             returning *`,
+            [tenant_id, row.id, worker_id, leaseMs],
+          );
+          const claimedRow = updated.rows[0];
+          await this.#appendMessageTransition(client, {
+            tenant_id,
+            job_id: row.id,
+            status: "running",
+            worker_id,
+            reason: row.status === "running" ? "lease_reclaimed" : "claimed",
+          });
+          claimed.push(this.#messageJob(claimedRow, tenant_id));
+        }
+        return claimed;
+      },
+      { requireActor: false },
+    );
+  }
+
+  async getMessageJob({ tenant_id, actor_id, job_id, idempotency_key }) {
+    const databaseJobId = job_id ? messageJobUuid(job_id) : undefined;
+    return await this.#transaction(
+      { tenant_id, actor_id },
+      async (client) => {
+        const row = (
+          await client.query(
+            `select * from message_jobs where tenant_id=$1 and
+             (id::text=$2 or ($3::text is not null and idempotency_key=$3))
+             order by created_at desc limit 1`,
+            [tenant_id, databaseJobId ?? "", idempotency_key ?? null],
+          )
+        ).rows[0];
+        return row ? this.#messageJob(row, tenant_id) : undefined;
+      },
+      { requireActor: actor_id !== undefined },
+    );
+  }
+
+  async messageJobTransitions({ tenant_id, actor_id, job_id }) {
+    const databaseJobId = messageJobUuid(job_id);
+    return await this.#transaction(
+      { tenant_id, actor_id },
+      async (client) => {
+        const rows = await client.query(
+          `select sequence,status,worker_id,reason,created_at
+             from message_job_transitions
+            where tenant_id=$1 and job_id=$2 order by sequence`,
+          [tenant_id, databaseJobId],
+        );
+        return rows.rows.map((row) => ({
+          sequence: Number(row.sequence),
+          status: row.status,
+          worker_id: row.worker_id ?? undefined,
+          reason: row.reason ?? undefined,
+          created_at: new Date(row.created_at).toISOString(),
+        }));
+      },
+      { requireActor: actor_id !== undefined },
+    );
+  }
+
+  async completeMessageJob({ tenant_id, job_id, worker_id, result }) {
+    const databaseJobId = messageJobUuid(job_id);
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const row = (
+          await client.query(
+            `select * from message_jobs where tenant_id=$1 and id=$2 for update`,
+            [tenant_id, databaseJobId],
+          )
+        ).rows[0];
+        this.#assertMessageJobLease(row, worker_id);
+        const resultCiphertext = this.cipher.encrypt(
+          result ?? null,
+          `${tenant_id}:message-job-result:${databaseJobId}`,
+        );
+        const updated = await client.query(
+          `update message_jobs set status='succeeded',result_ciphertext=$3,
+             worker_id=null,lease_expires_at=null,completed_at=now(),updated_at=now()
+           where tenant_id=$1 and id=$2 returning *`,
+          [tenant_id, databaseJobId, resultCiphertext],
+        );
+        await this.#appendMessageTransition(client, {
+          tenant_id,
+          job_id: databaseJobId,
+          status: "succeeded",
+          worker_id,
+        });
+        return this.#messageJob(updated.rows[0], tenant_id);
+      },
+      { requireActor: false },
+    );
+  }
+
+  async failMessageJob({
+    tenant_id,
+    job_id,
+    worker_id,
+    error_code = "UPSTREAM_UNAVAILABLE",
+    error_message,
+    max_attempts = 8,
+  }) {
+    const databaseJobId = messageJobUuid(job_id);
+    const maxAttempts = positiveInteger(max_attempts, 8, "max_attempts", 1000);
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const row = (
+          await client.query(
+            "select * from message_jobs where tenant_id=$1 and id=$2 for update",
+            [tenant_id, databaseJobId],
+          )
+        ).rows[0];
+        this.#assertMessageJobLease(row, worker_id);
+        const attempts = Number(row.attempts);
+        const deadLetter = attempts >= maxAttempts;
+        const delaySeconds = Math.min(3600, 2 ** Math.min(attempts, 12));
+        const errorCiphertext = this.cipher.encrypt(
+          {
+            message: String(error_message ?? "message job failed").slice(
+              0,
+              2000,
+            ),
+          },
+          `${tenant_id}:message-job-error:${databaseJobId}`,
+        );
+        const updated = await client.query(
+          `update message_jobs set status=$3,error_code=$4,error_message_ciphertext=$5,
+             worker_id=null,lease_expires_at=null,
+             next_attempt_at=case when $6 then null else now()+($7::integer * interval '1 second') end,
+             completed_at=case when $6 then now() else null end,updated_at=now()
+           where tenant_id=$1 and id=$2 returning *`,
+          [
+            tenant_id,
+            databaseJobId,
+            deadLetter ? "dead_letter" : "retry_wait",
+            error_code,
+            errorCiphertext,
+            deadLetter,
+            delaySeconds,
+          ],
+        );
+        await this.#appendMessageTransition(client, {
+          tenant_id,
+          job_id: databaseJobId,
+          status: deadLetter ? "dead_letter" : "retry_wait",
+          worker_id,
+          reason: error_code,
+        });
+        return this.#messageJob(updated.rows[0], tenant_id);
+      },
+      { requireActor: false },
+    );
+  }
+
+  async releaseMessageJob({
+    tenant_id,
+    job_id,
+    worker_id,
+    reason = "cancelled",
+  }) {
+    const databaseJobId = messageJobUuid(job_id);
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const row = (
+          await client.query(
+            "select * from message_jobs where tenant_id=$1 and id=$2 for update",
+            [tenant_id, databaseJobId],
+          )
+        ).rows[0];
+        this.#assertMessageJobLease(row, worker_id);
+        const updated = await client.query(
+          `update message_jobs set status='job_queued',worker_id=null,lease_expires_at=null,updated_at=now()
+           where tenant_id=$1 and id=$2 returning *`,
+          [tenant_id, databaseJobId],
+        );
+        await this.#appendMessageTransition(client, {
+          tenant_id,
+          job_id: databaseJobId,
+          status: "job_queued",
+          worker_id,
+          reason,
+        });
+        return this.#messageJob(updated.rows[0], tenant_id);
+      },
+      { requireActor: false },
+    );
+  }
+
+  async messageJobStats({ tenant_id }) {
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const rows = await client.query(
+          "select status,count(*)::integer as count from message_jobs where tenant_id=$1 group by status",
+          [tenant_id],
+        );
+        const stats = Object.fromEntries(
+          [
+            "inbound",
+            "job_queued",
+            "running",
+            "succeeded",
+            "retry_wait",
+            "dead_letter",
+            "cancelled",
+          ].map((status) => [status, 0]),
+        );
+        for (const row of rows.rows) stats[row.status] = Number(row.count);
+        return stats;
+      },
+      { requireActor: false },
+    );
+  }
+
+  async claimEventDelivery({
+    tenant_id,
+    consumer_id,
+    event_id,
+    event_type,
+    worker_id,
+    lease_ms = this.interactionLeaseMs,
+  }) {
+    requiredString(consumer_id, "consumer_id");
+    requiredString(event_id, "event_id");
+    requiredString(worker_id, "worker_id");
+    const leaseMs = positiveInteger(
+      lease_ms,
+      this.interactionLeaseMs,
+      "lease_ms",
+      900_000,
+    );
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const existing = (
+          await client.query(
+            `select * from event_consumer_receipts
+             where tenant_id=$1 and consumer_id=$2 and event_id=$3 for update`,
+            [tenant_id, consumer_id, event_id],
+          )
+        ).rows[0];
+        if (existing?.status === "completed")
+          return { duplicate: true, status: "completed" };
+        if (
+          existing?.status === "claimed" &&
+          existing.lease_expires_at > new Date() &&
+          existing.lease_owner !== worker_id
+        ) {
+          return { duplicate: false, claimed: false, status: "claimed" };
+        }
+        if (!existing) {
+          await client.query(
+            `insert into event_consumer_receipts
+               (tenant_id,consumer_id,event_id,event_type,status,attempts,lease_owner,lease_expires_at)
+             values ($1,$2,$3,$4,'claimed',1,$5,now()+($6::bigint * interval '1 millisecond'))`,
+            [
+              tenant_id,
+              consumer_id,
+              event_id,
+              event_type ?? null,
+              worker_id,
+              leaseMs,
+            ],
+          );
+        } else {
+          await client.query(
+            `update event_consumer_receipts set status='claimed',event_type=coalesce($4,event_type),
+               attempts=attempts+1,lease_owner=$5,lease_expires_at=now()+($6::bigint * interval '1 millisecond'),
+               claimed_at=now(),completed_at=null
+             where tenant_id=$1 and consumer_id=$2 and event_id=$3`,
+            [
+              tenant_id,
+              consumer_id,
+              event_id,
+              event_type ?? null,
+              worker_id,
+              leaseMs,
+            ],
+          );
+        }
+        return { duplicate: false, claimed: true, status: "claimed" };
+      },
+      { requireActor: false },
+    );
+  }
+
+  async completeEventDelivery({ tenant_id, consumer_id, event_id, worker_id }) {
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const updated = await client.query(
+          `update event_consumer_receipts set status='completed',lease_owner=null,lease_expires_at=null,completed_at=now()
+           where tenant_id=$1 and consumer_id=$2 and event_id=$3 and status='claimed'
+             and lease_owner=$4 and lease_expires_at > now() returning event_id`,
+          [tenant_id, consumer_id, event_id, worker_id],
+        );
+        if (updated.rowCount !== 1)
+          throw conflict("event consumer receipt lease was lost");
+        return { completed: true };
+      },
+      { requireActor: false },
+    );
+  }
+
+  async releaseEventDelivery({ tenant_id, consumer_id, event_id, worker_id }) {
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const deleted = await client.query(
+          `delete from event_consumer_receipts
+           where tenant_id=$1 and consumer_id=$2 and event_id=$3 and status='claimed' and lease_owner=$4`,
+          [tenant_id, consumer_id, event_id, worker_id],
+        );
+        return { released: deleted.rowCount === 1 };
+      },
+      { requireActor: false },
+    );
   }
 
   async principalFor(identity) {
@@ -1113,6 +1550,70 @@ export class PostgresCrmStore {
       );
       return rows.rows.map((row) => this.#event(row, tenant_id));
     });
+  }
+
+  #messageJob(row, tenant_id) {
+    if (!row) return undefined;
+    return {
+      id: `job_${String(row.id).replaceAll("-", "")}`,
+      tenant_id: row.tenant_id ?? tenant_id,
+      actor_id: row.actor_id,
+      request_id: row.request_id,
+      idempotency_key: row.idempotency_key,
+      request_fingerprint: row.request_fingerprint,
+      status: row.status,
+      payload: row.payload_ciphertext
+        ? this.cipher.decrypt(
+            row.payload_ciphertext,
+            `${tenant_id}:message-job:${row.idempotency_key}`,
+          )
+        : undefined,
+      result: row.result_ciphertext
+        ? this.cipher.decrypt(
+            row.result_ciphertext,
+            `${tenant_id}:message-job-result:${row.id}`,
+          )
+        : undefined,
+      error_code: row.error_code ?? undefined,
+      attempts: Number(row.attempts ?? 0),
+      worker_id: row.worker_id ?? undefined,
+      lease_expires_at: row.lease_expires_at
+        ? new Date(row.lease_expires_at).toISOString()
+        : undefined,
+      next_attempt_at: row.next_attempt_at
+        ? new Date(row.next_attempt_at).toISOString()
+        : undefined,
+      created_at: new Date(row.created_at).toISOString(),
+      updated_at: new Date(row.updated_at).toISOString(),
+      completed_at: row.completed_at
+        ? new Date(row.completed_at).toISOString()
+        : undefined,
+    };
+  }
+
+  #assertMessageJobLease(row, workerId) {
+    if (
+      !row ||
+      row.status !== "running" ||
+      row.worker_id !== workerId ||
+      !row.lease_expires_at ||
+      row.lease_expires_at <= new Date()
+    ) {
+      throw conflict("message job lease was lost");
+    }
+  }
+
+  async #appendMessageTransition(
+    client,
+    { tenant_id, job_id, status, worker_id, reason },
+  ) {
+    await client.query(
+      `insert into message_job_transitions
+         (tenant_id,job_id,sequence,status,worker_id,reason)
+       select $1,$2,coalesce(max(sequence),0)+1,$3,$4,$5
+         from message_job_transitions where tenant_id=$1 and job_id=$2`,
+      [tenant_id, job_id, status, worker_id ?? null, reason ?? null],
+    );
   }
 
   #reviewResult(row) {

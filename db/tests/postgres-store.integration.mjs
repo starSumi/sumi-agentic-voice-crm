@@ -658,6 +658,94 @@ try {
     1,
   );
   assert.ok(events.every((event) => event.tenant_id === identity.tenant_id));
+
+  const messageJobInput = {
+    tenant_id: identity.tenant_id,
+    actor_id: identity.actor_id,
+    request_id: "req_runtime_message_job_0001",
+    idempotency_key: "runtime-message-job-0001",
+    request_fingerprint: "a".repeat(64),
+    payload: {
+      traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
+      command: { input: { type: "text", text: "find customer" } },
+    },
+  };
+  const queuedJob = await store.enqueueMessageJob(messageJobInput);
+  assert.equal(queuedJob.duplicate, false);
+  assert.equal(queuedJob.job.status, "job_queued");
+  assert.deepEqual(
+    (await store.messageJobTransitions({
+      tenant_id: identity.tenant_id,
+      actor_id: identity.actor_id,
+      job_id: queuedJob.job.id,
+    })).map(({ status }) => status),
+    ["inbound", "job_queued"],
+  );
+  const duplicateJob = await store.enqueueMessageJob(messageJobInput);
+  assert.equal(duplicateJob.duplicate, true);
+  assert.equal(duplicateJob.job.id, queuedJob.job.id);
+  await assert.rejects(
+    store.enqueueMessageJob({
+      ...messageJobInput,
+      request_fingerprint: "b".repeat(64),
+    }),
+    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+  );
+  const claimedJob = (await store.claimMessageJobs({
+    tenant_id: identity.tenant_id,
+    worker_id: "message-job-integration-worker",
+    batch_size: 10,
+  }))[0];
+  assert.equal(claimedJob.id, queuedJob.job.id);
+  assert.equal(claimedJob.status, "running");
+  const completedJob = await store.completeMessageJob({
+    tenant_id: identity.tenant_id,
+    job_id: claimedJob.id,
+    worker_id: "message-job-integration-worker",
+    result: { status: "completed", request_id: messageJobInput.request_id },
+  });
+  assert.equal(completedJob.status, "succeeded");
+  assert.equal(
+    (await store.messageJobStats({ tenant_id: identity.tenant_id })).succeeded,
+    1,
+  );
+
+  const eventReceipt = await store.claimEventDelivery({
+    tenant_id: identity.tenant_id,
+    consumer_id: "message-job-integration-consumer",
+    event_id: "evt_message_job_integration_0001",
+    event_type: "crm.command.committed.v1",
+    worker_id: "event-integration-worker",
+  });
+  assert.equal(eventReceipt.claimed, true);
+  assert.deepEqual(
+    await store.claimEventDelivery({
+      tenant_id: identity.tenant_id,
+      consumer_id: "message-job-integration-consumer",
+      event_id: "evt_message_job_integration_0001",
+      worker_id: "event-integration-worker-2",
+    }),
+    { duplicate: false, claimed: false, status: "claimed" },
+  );
+  assert.deepEqual(
+    await store.completeEventDelivery({
+      tenant_id: identity.tenant_id,
+      consumer_id: "message-job-integration-consumer",
+      event_id: "evt_message_job_integration_0001",
+      worker_id: "event-integration-worker",
+    }),
+    { completed: true },
+  );
+  assert.deepEqual(
+    await store.claimEventDelivery({
+      tenant_id: identity.tenant_id,
+      consumer_id: "message-job-integration-consumer",
+      event_id: "evt_message_job_integration_0001",
+      worker_id: "event-integration-worker-3",
+    }),
+    { duplicate: true, status: "completed" },
+  );
+
   const claimed = await store.claimOutbox({
     tenant_id: identity.tenant_id,
     worker_id: "integration-worker",

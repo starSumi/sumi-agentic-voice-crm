@@ -1,16 +1,29 @@
 import { randomUUID } from "node:crypto";
 import { now, sha256 } from "./contracts.mjs";
 import { validateEvent } from "./protocol-validation.mjs";
+import { createMemoryMessageJobQueue } from "./message-job-queue.mjs";
 
 export class CrmStore {
-  #idempotency = new Map(); #tts = new Map(); #assets = new Map(); #assetObjects = new Map(); #interactions = new Map(); #interactionWal = []; #conversations = new Map(); #events = []; #audits = []; #outbox = []; #reviews = new Map(); #reviewIdempotency = new Map(); #deals = new Map(); #customers = new Map();
+  #idempotency = new Map(); #tts = new Map(); #assets = new Map(); #assetObjects = new Map(); #interactions = new Map(); #interactionWal = []; #conversations = new Map(); #events = []; #audits = []; #outbox = []; #reviews = new Map(); #reviewIdempotency = new Map(); #deals = new Map(); #customers = new Map(); #messageJobs;
   constructor({ clock = () => Date.now(), interactionLeaseMs = 30_000 } = {}) {
     if (!Number.isSafeInteger(interactionLeaseMs) || interactionLeaseMs <= 0) throw new TypeError("interactionLeaseMs must be a positive integer");
     this.clock = clock;
     this.interactionLeaseMs = interactionLeaseMs;
+    this.#messageJobs = createMemoryMessageJobQueue({ clock, leaseMs: interactionLeaseMs });
     this.#deals.set("tenant_demo:d1", { id: "d1", name: "Acme renewal", stage: "Proposal", version: 1 });
   }
   async health() { return { ready: true, provider: "memory" }; }
+  enqueueMessageJob(input) { return this.#messageJobs.enqueueMessageJob(input); }
+  claimMessageJobs(input) { return this.#messageJobs.claimMessageJobs(input); }
+  getMessageJob(input) { return this.#messageJobs.getMessageJob(input); }
+  messageJobTransitions(input) { return this.#messageJobs.messageJobTransitions(input); }
+  completeMessageJob(input) { return this.#messageJobs.completeMessageJob(input); }
+  failMessageJob(input) { return this.#messageJobs.failMessageJob(input); }
+  releaseMessageJob(input) { return this.#messageJobs.releaseMessageJob(input); }
+  messageJobStats(input) { return this.#messageJobs.messageJobStats(input); }
+  claimEventDelivery(input) { return this.#messageJobs.claimEventDelivery(input); }
+  completeEventDelivery(input) { return this.#messageJobs.completeEventDelivery(input); }
+  releaseEventDelivery(input) { return this.#messageJobs.releaseEventDelivery(input); }
   replay(key) { const entry = this.#idempotency.get(key); return entry ? { ...entry, result: structuredClone(entry.result) } : undefined; }
   replayTts(key, fingerprint) { const previous = this.#tts.get(key); if (previous && previous.fingerprint !== fingerprint) throw Object.assign(new Error("idempotency key was reused with a different TTS request"), { code: "IDEMPOTENCY_CONFLICT" }); return previous ? structuredClone(previous.result) : undefined; }
   recordTts(key, fingerprint, result, { tenant_id, actor_id, request_id, object_key } = {}) {
