@@ -10,6 +10,7 @@ import type {
   AudioInput,
   ErrorEnvelope,
   Locale,
+  MessageJobResponse,
   ReviewDecisionRequest,
   ReviewDecisionResponse,
   ReviewResponse,
@@ -17,7 +18,7 @@ import type {
   Understanding,
 } from "../../packages/api-client/src/protocol";
 
-type UiPhase = "idle" | "capturing" | "submitting" | "awaiting_review" | "completed" | "error";
+type UiPhase = "idle" | "capturing" | "submitting" | "accepted" | "awaiting_review" | "completed" | "error";
 type ApiResult<TData> = { data?: TData; error?: unknown };
 
 const root = document.documentElement;
@@ -50,6 +51,7 @@ const phaseLabels: Record<UiPhase, string> = {
   idle: "就绪",
   capturing: "录音中…",
   submitting: "同步请求处理中…",
+  accepted: "已接收，后台任务处理中…",
   awaiting_review: "需要人工确认；CRM 尚未写入",
   completed: "完成",
   error: "请求失败，自动处理已停止",
@@ -122,6 +124,20 @@ function isReviewPayload(value: unknown): value is ReviewResponse {
     isUnderstanding(value.understanding) &&
     typeof value.answer.text === "string" &&
     typeof value.review_task.id === "string"
+  );
+}
+
+function isMessageJobPayload(value: unknown): value is MessageJobResponse {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.request_id === "string" &&
+    typeof value.job_id === "string" &&
+    /^job_[0-9a-f]{32}$/i.test(value.job_id) &&
+    ["job_queued", "running", "succeeded", "retry_wait", "dead_letter", "cancelled"].includes(String(value.status)) &&
+    typeof value.attempts === "number" &&
+    Number.isInteger(value.attempts) &&
+    value.attempts >= 0 &&
+    typeof value.idempotency_replay === "boolean"
   );
 }
 
@@ -275,7 +291,15 @@ function showAskResult(payload: AskResponse) {
   setPhase("completed");
 }
 
-function consumeAskResult(response: ApiResult<AskResponse | ReviewResponse>) {
+function showMessageJob(payload: MessageJobResponse) {
+  result.textContent = jsonText(payload);
+  fallback.hidden = true;
+  clearAudio();
+  closeReview();
+  setPhase("accepted");
+}
+
+function consumeAskResult(response: ApiResult<AskResponse | ReviewResponse | MessageJobResponse>) {
   if (response.error !== undefined) {
     if (isErrorPayload(response.error)) showError(response.error);
     else showMalformed(response.error);
@@ -290,6 +314,10 @@ function consumeAskResult(response: ApiResult<AskResponse | ReviewResponse>) {
     fallback.hidden = true;
     clearAudio();
     showReview(response.data);
+    return;
+  }
+  if (isMessageJobPayload(response.data)) {
+    showMessageJob(response.data);
     return;
   }
   showMalformed(response.data);
