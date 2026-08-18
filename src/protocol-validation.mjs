@@ -12,6 +12,8 @@ const validators = Object.freeze({
   AttachmentRef: ajv.getSchema("sumi-openapi#/components/schemas/AttachmentRef"),
   AskRequest: ajv.getSchema("sumi-openapi#/components/schemas/AskRequest"),
   AskResponse: ajv.getSchema("sumi-openapi#/components/schemas/AskResponse"),
+  MessageJobResponse: ajv.getSchema("sumi-openapi#/components/schemas/MessageJobResponse"),
+  MessageJobStatsResponse: ajv.getSchema("sumi-openapi#/components/schemas/MessageJobStatsResponse"),
   ReviewResponse: ajv.getSchema("sumi-openapi#/components/schemas/ReviewResponse"),
   ReviewDecisionRequest: ajv.getSchema("sumi-openapi#/components/schemas/ReviewDecisionRequest"),
   ReviewDecisionResponse: ajv.getSchema("sumi-openapi#/components/schemas/ReviewDecisionResponse"),

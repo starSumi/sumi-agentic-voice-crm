@@ -101,5 +101,10 @@ test("respond-async persists a job receipt and exposes durable status", async ()
   const status = await statusResponse.json();
   assert.equal(status.job_id, receipt.job_id);
   assert.ok(["job_queued", "running", "succeeded"].includes(status.status));
+  const statsResponse = await fetch(`http://127.0.0.1:${port}/v1/jobs/stats`, {
+    headers: { authorization: "Bearer development-token" },
+  });
+  assert.equal(statsResponse.status, 200);
+  assert.equal(typeof (await statsResponse.json()).jobs.job_queued, "number");
   await app.close();
 });
