@@ -23,10 +23,16 @@ function idempotencyConflict() {
 }
 
 function messageJobUuid(value) {
-  const raw =
+  let raw =
     typeof value === "string" && value.startsWith("job_")
       ? value.slice(4)
       : value;
+  if (typeof raw === "string" && /^[0-9a-f]{32}$/i.test(raw)) {
+    raw = raw.replace(
+      /^(.{8})(.{4})(.{4})(.{4})(.{12})$/i,
+      "$1-$2-$3-$4-$5",
+    );
+  }
   if (!UUID.test(raw)) throw conflict("message job id is invalid");
   return raw;
 }
