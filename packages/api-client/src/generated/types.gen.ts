@@ -12,6 +12,8 @@ export type Locale = "zh-CN" | "en-US" | "hi-IN" | "te-IN";
 
 export type RequestId = string;
 
+export type JobId = string;
+
 export type AttachmentId = string;
 
 export type AttachmentKind = "audio" | "image" | "document";
@@ -63,6 +65,39 @@ export type EventStreamEnvelope = {
 export type EventStreamResponse = {
   events: Array<EventStreamEnvelope>;
   request_id: RequestId;
+};
+
+export type MessageJobResponse = {
+  request_id: RequestId;
+  original_request_id?: RequestId;
+  job_id: JobId;
+  status:
+    | "job_queued"
+    | "running"
+    | "succeeded"
+    | "retry_wait"
+    | "dead_letter"
+    | "cancelled";
+  attempts: number;
+  idempotency_replay: boolean;
+  error_code?: string;
+  result?: {
+    [key: string]: unknown;
+  };
+};
+
+export type MessageJobStatsResponse = {
+  request_id: RequestId;
+  tenant_id: TenantId;
+  jobs: {
+    inbound: number;
+    job_queued: number;
+    running: number;
+    succeeded: number;
+    retry_wait: number;
+    dead_letter: number;
+    cancelled: number;
+  };
 };
 
 export type TextInput = {
@@ -253,6 +288,16 @@ export type TenantId2 = TenantId;
 export type IdempotencyKey2 = IdempotencyKey;
 
 /**
+ * Set to respond-async to persist a message job and return a receipt before model processing.
+ */
+export type PreferAsync = "respond-async";
+
+/**
+ * Opaque durable message job identifier.
+ */
+export type JobId2 = JobId;
+
+/**
  * Opaque tenant-scoped attachment identifier.
  */
 export type AssetId = AttachmentId;
@@ -268,6 +313,10 @@ export type AskData = {
      * Stable mutation key. Reuse with a different request fingerprint returns 409.
      */
     "Idempotency-Key": IdempotencyKey;
+    /**
+     * Set to respond-async to persist a message job and return a receipt before model processing.
+     */
+    Prefer?: "respond-async";
   };
   path?: never;
   query?: never;
@@ -329,9 +378,9 @@ export type AskResponses = {
    */
   200: AskResponse;
   /**
-   * Review required
+   * Review required or message accepted for asynchronous processing
    */
-  202: ReviewResponse;
+  202: ReviewResponse | MessageJobResponse;
 };
 
 export type AskResponse2 = AskResponses[keyof AskResponses];
@@ -601,3 +650,93 @@ export type ListEventsResponses = {
 };
 
 export type ListEventsResponse = ListEventsResponses[keyof ListEventsResponses];
+
+export type ListMessageJobStatsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/jobs/stats";
+};
+
+export type ListMessageJobStatsErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type ListMessageJobStatsError =
+  ListMessageJobStatsErrors[keyof ListMessageJobStatsErrors];
+
+export type ListMessageJobStatsResponses = {
+  /**
+   * Message job counts by lifecycle state
+   */
+  200: MessageJobStatsResponse;
+};
+
+export type ListMessageJobStatsResponse =
+  ListMessageJobStatsResponses[keyof ListMessageJobStatsResponses];
+
+export type GetMessageJobData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path: {
+    /**
+     * Opaque durable message job identifier.
+     */
+    job_id: JobId;
+  };
+  query?: never;
+  url: "/v1/jobs/{job_id}";
+};
+
+export type GetMessageJobErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  400: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type GetMessageJobError = GetMessageJobErrors[keyof GetMessageJobErrors];
+
+export type GetMessageJobResponses = {
+  /**
+   * Message job status and completed result when available
+   */
+  200: MessageJobResponse;
+};
+
+export type GetMessageJobResponse =
+  GetMessageJobResponses[keyof GetMessageJobResponses];

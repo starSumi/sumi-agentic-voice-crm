@@ -33,6 +33,8 @@ const OPERATION_ACTIONS = {
   getAsset: "media.asset.read",
   getAssetContent: "media.asset.read",
   listEvents: "events.read",
+  listMessageJobStats: "interaction.ask",
+  getMessageJob: "interaction.ask",
 };
 
 function grantMatches(grant, action, allowedWildcards) {

@@ -21,6 +21,7 @@ Development defaults to the in-memory store, development bearer identity, memory
 | Providers        | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent                                                                                                            |
 | Relay            | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls                                                                                                                                                     |
 | Operations       | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage, providers, and registered extensions; `OBSERVABILITY_MODE=manual` (default) or explicit `otel`                                                      |
+| Async messages   | `MESSAGE_JOB_TENANT_IDS` enables recovery polling for listed tenants; optional `MESSAGE_JOB_BATCH_SIZE`, `MESSAGE_JOB_LEASE_MS`, `MESSAGE_JOB_MAX_ATTEMPTS`, and `MESSAGE_JOB_POLL_INTERVAL_MS` tune the managed worker |
 
 Run the API with `pnpm start` and the independent transactional-outbox worker with `pnpm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
 
@@ -45,6 +46,12 @@ deployments. `INTERACTION_LEASE_MS` defaults to 30 seconds and is capped at 15
 minutes. `RUNTIME_TEARDOWN_MS` defaults to 3000 ms and is capped at 30 seconds;
 it bounds managed background-task cleanup and HTTP drain before forced
 connection closure. Provider audio limits are capped at 50 MiB.
+
+The asynchronous ask path is opt-in through `Prefer: respond-async`. It writes
+an encrypted durable message receipt before returning; `MESSAGE_JOB_TENANT_IDS`
+must include a tenant for a worker to recover queued jobs after a restart. The
+receipt state machine and tenant-scoped event-consumer receipts are backed by
+the PostgreSQL migration `005_message_jobs_and_inbox.sql`.
 
 ## Tracing
 

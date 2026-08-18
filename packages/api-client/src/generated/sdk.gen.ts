@@ -21,9 +21,15 @@ import type {
   GetAssetData,
   GetAssetErrors,
   GetAssetResponses,
+  GetMessageJobData,
+  GetMessageJobErrors,
+  GetMessageJobResponses,
   ListEventsData,
   ListEventsErrors,
   ListEventsResponses,
+  ListMessageJobStatsData,
+  ListMessageJobStatsErrors,
+  ListMessageJobStatsResponses,
   SynthesizeData,
   SynthesizeErrors,
   SynthesizeResponses,
@@ -158,5 +164,41 @@ export const listEvents = <ThrowOnError extends boolean = false>(
   >({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/v1/events",
+    ...options,
+  });
+
+/**
+ * Read tenant-scoped message job counts
+ */
+export const listMessageJobStats = <ThrowOnError extends boolean = false>(
+  options?: Options<ListMessageJobStatsData, ThrowOnError>,
+): RequestResult<
+  ListMessageJobStatsResponses,
+  ListMessageJobStatsErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    ListMessageJobStatsResponses,
+    ListMessageJobStatsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/jobs/stats",
+    ...options,
+  });
+
+/**
+ * Read one tenant-scoped message job
+ */
+export const getMessageJob = <ThrowOnError extends boolean = false>(
+  options: Options<GetMessageJobData, ThrowOnError>,
+): RequestResult<GetMessageJobResponses, GetMessageJobErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    GetMessageJobResponses,
+    GetMessageJobErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/jobs/{job_id}",
     ...options,
   });

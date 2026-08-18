@@ -41,6 +41,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/TenantId" }
         - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/PreferAsync" }
       security:
         - bearerAuth: []
       requestBody:
@@ -68,11 +69,20 @@ paths:
           }
         "202":
           {
-            description: Review required,
+            description: Review required or message accepted for asynchronous processing,
             content:
               {
                 application/json:
-                  { schema: { $ref: "#/components/schemas/ReviewResponse" } },
+                  {
+                    schema:
+                      {
+                        oneOf:
+                          [
+                            { $ref: "#/components/schemas/ReviewResponse" },
+                            { $ref: "#/components/schemas/MessageJobResponse" },
+                          ],
+                      },
+                  },
               },
           }
         "502": { $ref: "#/components/responses/Error" }
@@ -245,6 +255,55 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/jobs/stats:
+    get:
+      operationId: listMessageJobStats
+      x-sumi-action: interaction.ask
+      summary: Read tenant-scoped message job counts
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/TenantId" }
+      responses:
+        "200":
+          {
+            description: Message job counts by lifecycle state,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      { $ref: "#/components/schemas/MessageJobStatsResponse" },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/jobs/{job_id}:
+    get:
+      operationId: getMessageJob
+      x-sumi-action: interaction.ask
+      summary: Read one tenant-scoped message job
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/TenantId" }
+        - { $ref: "#/components/parameters/JobId" }
+      responses:
+        "200":
+          {
+            description: Message job status and completed result when available,
+            content:
+              {
+                application/json:
+                  {
+                    schema: { $ref: "#/components/schemas/MessageJobResponse" },
+                  },
+              },
+          }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearerAuth:
@@ -265,6 +324,18 @@ components:
       required: true
       description: Stable mutation key. Reuse with a different request fingerprint returns 409.
       schema: { $ref: "#/components/schemas/IdempotencyKey" }
+    PreferAsync:
+      name: Prefer
+      in: header
+      required: false
+      description: Set to respond-async to persist a message job and return a receipt before model processing.
+      schema: { type: string, const: respond-async }
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      description: Opaque durable message job identifier.
+      schema: { $ref: "#/components/schemas/JobId" }
     AssetId:
       name: asset_id
       in: path
@@ -295,6 +366,11 @@ components:
     RequestId:
       type: string
       pattern: "^req_[0-9a-f]{24}$"
+    JobId:
+      type: string
+      minLength: 36
+      maxLength: 36
+      pattern: "^job_[0-9a-f]{32}$"
     AttachmentId:
       type: string
       minLength: 12
@@ -386,6 +462,50 @@ components:
           type: array
           items: { $ref: "#/components/schemas/EventStreamEnvelope" }
         request_id: { $ref: "#/components/schemas/RequestId" }
+    MessageJobResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, job_id, status, attempts, idempotency_replay]
+      properties:
+        request_id: { $ref: "#/components/schemas/RequestId" }
+        original_request_id: { $ref: "#/components/schemas/RequestId" }
+        job_id: { $ref: "#/components/schemas/JobId" }
+        status:
+          type: string
+          enum:
+            [job_queued, running, succeeded, retry_wait, dead_letter, cancelled]
+        attempts: { type: integer, minimum: 0 }
+        idempotency_replay: { type: boolean }
+        error_code: { type: string }
+        result: { type: object, additionalProperties: true }
+    MessageJobStatsResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, jobs]
+      properties:
+        request_id: { $ref: "#/components/schemas/RequestId" }
+        tenant_id: { $ref: "#/components/schemas/TenantId" }
+        jobs:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              inbound,
+              job_queued,
+              running,
+              succeeded,
+              retry_wait,
+              dead_letter,
+              cancelled,
+            ]
+          properties:
+            inbound: { type: integer, minimum: 0 }
+            job_queued: { type: integer, minimum: 0 }
+            running: { type: integer, minimum: 0 }
+            succeeded: { type: integer, minimum: 0 }
+            retry_wait: { type: integer, minimum: 0 }
+            dead_letter: { type: integer, minimum: 0 }
+            cancelled: { type: integer, minimum: 0 }
     TextInput:
       type: object
       additionalProperties: false

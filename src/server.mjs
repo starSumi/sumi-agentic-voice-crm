@@ -15,6 +15,7 @@ import {
   ERROR_CODES,
   errorEnvelope,
   requestId,
+  sha256,
   validateAudioInput,
   validateIdempotencyKey,
   validateTextAsk,
@@ -28,6 +29,7 @@ import {
   REVIEW_ID_PATTERN,
 } from "./protocol-policy.mjs";
 import { DEFAULT_TEARDOWN_TIMEOUT_MS } from "./control/index.mjs";
+import { createMessageJobWorker } from "./message-job-worker.mjs";
 
 function payloadTooLarge(limit) {
   return Object.assign(new Error("request body exceeds " + limit + " bytes"), {
@@ -65,6 +67,79 @@ function teardownTimeout(value) {
     );
   }
   return parsed;
+}
+
+function configuredMessageJobTenants(env) {
+  return String(env?.MESSAGE_JOB_TENANT_IDS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function serializableJobInput(input) {
+  if (input?.type !== "audio") return input;
+  return {
+    type: "audio",
+    data_base64: Buffer.from(input.data).toString("base64"),
+    content_type: input.content_type,
+    sha256: input.sha256,
+  };
+}
+
+function jobIdentity(identity) {
+  const fields = [
+    "subject_id",
+    "actor_id",
+    "kind",
+    "principal_kind",
+    "tenant_id",
+    "status",
+    "workload_id",
+    "network_zone",
+  ];
+  const result = Object.fromEntries(
+    fields
+      .filter((field) => identity?.[field] !== undefined)
+      .map((field) => [field, identity[field]]),
+  );
+  for (const field of [
+    "roles",
+    "actor_scopes",
+    "token_scopes",
+    "authentication_methods",
+  ]) {
+    if (Array.isArray(identity?.[field])) result[field] = [...identity[field]];
+  }
+  return result;
+}
+
+function jobResponse(job, request_id, duplicate = false) {
+  return {
+    request_id,
+    job_id: job.id,
+    status: job.status,
+    attempts: job.attempts,
+    idempotency_replay: duplicate,
+    ...(job.result === undefined ? {} : { result: job.result }),
+  };
+}
+
+function askRequestFingerprint({ input, locale, outputMode, conversationId }) {
+  return sha256(
+    JSON.stringify({
+      input:
+        input.type === "audio"
+          ? {
+              type: "audio",
+              sha256: input.sha256,
+              content_type: input.content_type,
+            }
+          : { type: "text", text: input.text },
+      locale,
+      output_mode: outputMode,
+      conversation_id: conversationId ?? null,
+    }),
+  );
 }
 
 export function createApp({
@@ -188,6 +263,56 @@ export function createApp({
       throw error;
     }
   }
+
+  const messageJobWorker =
+    typeof store.claimMessageJobs === "function"
+      ? createMessageJobWorker({
+          queue: store,
+          tenantIds: configuredMessageJobTenants(runtime.env),
+          batchSize: Number(runtime.env?.MESSAGE_JOB_BATCH_SIZE || 10),
+          leaseMs: Number(runtime.env?.MESSAGE_JOB_LEASE_MS || 30_000),
+          maxAttempts: Number(runtime.env?.MESSAGE_JOB_MAX_ATTEMPTS || 3),
+          pollIntervalMs: Number(
+            runtime.env?.MESSAGE_JOB_POLL_INTERVAL_MS || 1_000,
+          ),
+          processJob: async (job, { signal }) => {
+            const payload = job.payload;
+            const identity =
+              typeof runtime.resolvePrincipal === "function"
+                ? await runtime.resolvePrincipal(payload.identity, { signal })
+                : payload.identity;
+            const input =
+              payload.command.input?.type === "audio"
+                ? {
+                    ...payload.command.input,
+                    data: Buffer.from(
+                      payload.command.input.data_base64,
+                      "base64",
+                    ),
+                  }
+                : payload.command.input;
+            const command = normalizeAskCommand({
+              ...payload.command,
+              input,
+            });
+            const context = createRequestContext({
+              request_id: job.request_id,
+              traceparent: payload.traceparent,
+              identity,
+              signal,
+            });
+            const outcome = await runApplication(
+              "application.ask",
+              context,
+              askService,
+              command,
+            );
+            return outcome.response;
+          },
+        })
+      : undefined;
+  for (const tenantId of configuredMessageJobTenants(runtime.env))
+    messageJobWorker?.registerTenant(tenantId);
 
   function parseMultipart(buf, type) {
     const boundary =
@@ -336,6 +461,60 @@ export function createApp({
       outputMode = input.output_mode;
       locale = input.locale;
     }
+    const respondAsync = /\brespond-async\b/i.test(
+      String(req.headers.prefer ?? ""),
+    );
+    if (respondAsync) {
+      if (typeof store.enqueueMessageJob !== "function" || !messageJobWorker) {
+        throw Object.assign(
+          new Error("asynchronous message jobs are unavailable"),
+          {
+            code: "UPSTREAM_UNAVAILABLE",
+          },
+        );
+      }
+      await authorizeAction(authorizationPorts, context, "interaction.ask", {
+        type: "interaction",
+        id: conversationId ?? rid,
+      });
+      if (outputMode === "audio" || outputMode === "both") {
+        await authorizeAction(authorizationPorts, context, "media.tts.create", {
+          type: "media_asset",
+          id: `${rid}:tts`,
+        });
+      }
+      const queued = await store.enqueueMessageJob({
+        tenant_id: context.identity.tenant_id,
+        actor_id: context.identity.actor_id,
+        request_id: rid,
+        idempotency_key: key,
+        request_fingerprint: askRequestFingerprint({
+          input,
+          locale,
+          outputMode,
+          conversationId,
+        }),
+        payload: {
+          traceparent: context.traceparent,
+          identity: jobIdentity(context.identity),
+          command: {
+            idempotency_key: key,
+            input: serializableJobInput(input),
+            locale,
+            output_mode: outputMode,
+            conversation_id: conversationId,
+          },
+        },
+      });
+      messageJobWorker.registerTenant(context.identity.tenant_id);
+      messageJobWorker.start();
+      const response = jobResponse(queued.job, rid, queued.duplicate);
+      return json(
+        res,
+        queued.job.status === "succeeded" ? 200 : 202,
+        validateProtocol("MessageJobResponse", response),
+      );
+    }
     const outcome = await runApplication(
       "application.ask",
       context,
@@ -463,6 +642,64 @@ export function createApp({
         );
         return res.end(observability.renderMetrics());
       }
+      if (req.method === "GET" && req.url === "/v1/jobs/stats") {
+        const context = await authenticateContext(req, res, rid, signal);
+        await authorizeAction(authorizationPorts, context, "interaction.ask", {
+          type: "interaction",
+          id: `${context.identity.tenant_id}:jobs`,
+        });
+        if (typeof store.messageJobStats !== "function")
+          throw Object.assign(new Error("message jobs are unavailable"), {
+            code: "UPSTREAM_UNAVAILABLE",
+          });
+        return json(
+          res,
+          200,
+          validateProtocol("MessageJobStatsResponse", {
+            request_id: rid,
+            tenant_id: context.identity.tenant_id,
+            jobs: await store.messageJobStats({
+              tenant_id: context.identity.tenant_id,
+            }),
+          }),
+        );
+      }
+      if (req.method === "GET" && req.url?.startsWith("/v1/jobs/")) {
+        const context = await authenticateContext(req, res, rid, signal);
+        await authorizeAction(authorizationPorts, context, "interaction.ask", {
+          type: "interaction",
+          id: req.url.slice("/v1/jobs/".length),
+        });
+        const jobId = decodeURIComponent(req.url.slice("/v1/jobs/".length));
+        if (!/^job_[0-9a-f]{32}$/.test(jobId))
+          throw Object.assign(new Error("invalid message job id"), {
+            code: "INVALID_REQUEST",
+          });
+        if (typeof store.getMessageJob !== "function")
+          throw Object.assign(new Error("message jobs are unavailable"), {
+            code: "UPSTREAM_UNAVAILABLE",
+          });
+        const job = await store.getMessageJob({
+          tenant_id: context.identity.tenant_id,
+          actor_id: context.identity.actor_id,
+          job_id: jobId,
+        });
+        if (!job)
+          throw Object.assign(new Error("message job not found"), {
+            code: "FORBIDDEN",
+          });
+        return json(
+          res,
+          200,
+          validateProtocol("MessageJobResponse", {
+            ...jobResponse(job, rid),
+            original_request_id: job.request_id,
+            ...(job.error_code === undefined
+              ? {}
+              : { error_code: job.error_code }),
+          }),
+        );
+      }
       if (req.method === "GET" && req.url === "/v1/events") {
         const context = await authenticateContext(req, res, rid, signal);
         const { identity } = context;
@@ -582,6 +819,12 @@ export function createApp({
             breakerEligible: false,
           }),
         );
+        await messageJobWorker?.close(
+          Object.assign(new Error("message job worker is stopping"), {
+            name: "AbortError",
+            breakerEligible: false,
+          }),
+        );
         return await runtime.close({ timeoutMs: resolvedTeardownTimeoutMs });
       }
       let timer;
@@ -608,6 +851,16 @@ export function createApp({
         clearTimeout(timer);
       }
       try {
+        await messageJobWorker?.close(
+          Object.assign(new Error("message job worker is stopping"), {
+            name: "AbortError",
+            breakerEligible: false,
+          }),
+        );
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
         await runtime.close({ timeoutMs: resolvedTeardownTimeoutMs });
       } catch (error) {
         errors.push(error);
@@ -626,6 +879,9 @@ export function createApp({
     listen(...args) {
       return server.listen(...args);
     },
+    startMessageJobs() {
+      return messageJobWorker?.start();
+    },
     close: shutdown,
   });
 }
@@ -635,6 +891,8 @@ export const createServer = createApp;
 export async function createStartedApp(options = {}) {
   const app = createApp(options);
   await app.runtime.start?.();
+  if (configuredMessageJobTenants(app.runtime.env).length > 0)
+    app.startMessageJobs?.();
   return app;
 }
 
