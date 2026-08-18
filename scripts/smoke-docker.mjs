@@ -62,7 +62,7 @@ try {
     image,
     "--input-type=module",
     "-e",
-    `import { accessSync, constants, existsSync } from 'node:fs'; ${rootDevDependencyChecks} if (!existsSync('dist/db/migrations/003_conversation_revision_cas.sql')) throw new Error('ordered database migrations missing from runtime'); accessSync('dist/bin/sumi-runtime-supervisor', constants.X_OK); await import('ajv'); await import('ajv-formats'); await import('pg'); await import('jose'); await import('@aws-sdk/client-s3'); await import('@aws-sdk/s3-request-presigner'); await import('./dist/src/outbox-relay.mjs'); console.log('production dependencies, migrations and Rust supervisor present; root devDependencies absent');`,
+    `import { accessSync, constants, existsSync } from 'node:fs'; ${rootDevDependencyChecks} if (!existsSync('dist/db/migrations/003_conversation_revision_cas.sql')) throw new Error('ordered database migrations missing from runtime'); accessSync('dist/bin/sumi-runtime-supervisor', constants.X_OK); await import('ajv'); await import('ajv-formats'); await import('pg'); await import('jose'); await import('@aws-sdk/client-s3'); await import('@aws-sdk/s3-request-presigner'); await import('./dist/src/outbox-relay.ts'); console.log('production dependencies, migrations and Rust supervisor present; root devDependencies absent');`,
   ]);
   const supervisorProtocol = docker([
     "run",

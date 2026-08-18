@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
-import { createRuntime } from "../src/composition-root.mjs";
+import { createRuntime } from "../src/composition-root.ts";
 import {
   createExtensionRegistry,
   createRustProcessExtensionLauncher,
   RUST_SUPERVISOR_PROTOCOL_VERSION,
-} from "../src/extensions/index.mjs";
+} from "../src/extensions/index.ts";
 
 const binaryPath = resolve("target/release/sumi-runtime-supervisor");
 

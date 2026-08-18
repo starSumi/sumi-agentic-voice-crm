@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConversationStateService } from "../src/application/index.mjs";
-import { CrmStore } from "../src/store.mjs";
+import { ConversationStateService } from "../src/application/index.ts";
+import { CrmStore } from "../src/store.ts";
 
 const context = Object.freeze({
   identity: Object.freeze({ tenant_id: "tenant-a", actor_id: "actor-a" }),

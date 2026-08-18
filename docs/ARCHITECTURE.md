@@ -47,7 +47,7 @@ flowchart TB
 
 ## Design patterns
 
-- Composition root and explicit scopes: `src/composition-root.mjs` wires process
+- Composition root and explicit scopes: `src/composition-root.ts` wires process
   singletons and exposes a small ports object. Request context is immutable and
   operation/transaction lifetimes remain explicit; no heavy DI container or
   ambient tenant state is used.

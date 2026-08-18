@@ -36,7 +36,7 @@ Projection/UI state is disposable and rebuilt from query/events.
 
 ## Shutdown and recovery
 
-The composition root in `src/composition-root.mjs` owns process-singleton resources:
+The composition root in `src/composition-root.ts` owns process-singleton resources:
 the environment snapshot, authenticator/JWKS cache, provider adapters and circuit
 breakers, object storage client, PostgreSQL pool, and observability registry.
 Each request gets an immutable context (`request_id`, traceparent, tenant/actor

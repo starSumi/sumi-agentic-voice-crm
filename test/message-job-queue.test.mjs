@@ -3,8 +3,8 @@ import test from "node:test";
 import {
   createMemoryMessageJobQueue,
   MESSAGE_JOB_STATES,
-} from "../src/message-job-queue.mjs";
-import { createMessageJobWorker } from "../src/message-job-worker.mjs";
+} from "../src/message-job-queue.ts";
+import { createMessageJobWorker } from "../src/message-job-worker.ts";
 
 const base = {
   tenant_id: "tenant_demo",

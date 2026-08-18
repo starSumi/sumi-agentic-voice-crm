@@ -29,7 +29,7 @@ Events follow a CloudEvents 1.0-compatible shape. `contracts/events.yaml` is nor
 
 `id` is the deduplication key. `subject + aggregate_version` provides ordering; consumers reject a gap and re-read the aggregate rather than guessing state.
 
-The runtime emits `crm.command.committed.v1`, `crm.review.requested.v1`, and `tts.asset.created.v1` into the same PostgreSQL transaction as the corresponding durable state. `src/outbox-worker.mjs` delivers leased rows as structured CloudEvents with an event-ID idempotency header and optional bearer plus required production HMAC authentication.
+The runtime emits `crm.command.committed.v1`, `crm.review.requested.v1`, and `tts.asset.created.v1` into the same PostgreSQL transaction as the corresponding durable state. `src/outbox-worker.ts` delivers leased rows as structured CloudEvents with an event-ID idempotency header and optional bearer plus required production HMAC authentication.
 
 ## Audit trail
 

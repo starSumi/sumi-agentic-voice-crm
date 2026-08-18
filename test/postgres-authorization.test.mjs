@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PostgresCrmStore } from "../src/postgres-store.mjs";
+import { PostgresCrmStore } from "../src/postgres-store.ts";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000001";
 const ACTOR_UUID = "10000000-0000-4000-8000-000000000001";

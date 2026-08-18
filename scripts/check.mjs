@@ -3,52 +3,52 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const runtimeSources = [
-  "src/application/attachments.mjs",
-  "src/application/commands.mjs",
-  "src/application/conversation-state.mjs",
-  "src/application/index.mjs",
-  "src/application/mutation-policy.mjs",
+  "src/application/attachments.ts",
+  "src/application/commands.ts",
+  "src/application/conversation-state.ts",
+  "src/application/index.ts",
+  "src/application/mutation-policy.ts",
   "src/application/progress-event-bus.ts",
-  "src/application/services.mjs",
-  "src/auth.mjs",
+  "src/application/services.ts",
+  "src/auth.ts",
   "src/authorization/errors.ts",
   "src/authorization/index.ts",
   "src/authorization/policy.ts",
   "src/authorization/types.ts",
-  "src/composition-root.mjs",
-  "src/control/cas-circuit-breaker.mjs",
-  "src/control/engine.mjs",
-  "src/control/guardian-denial-governor.mjs",
-  "src/control/guardian-review.mjs",
-  "src/control/index.mjs",
-  "src/contracts.mjs",
-  "src/data-cipher.mjs",
-  "src/event-consumer.mjs",
-  "src/extensions/index.mjs",
-  "src/extensions/manifest.mjs",
-  "src/extensions/registry.mjs",
-  "src/extensions/rust-process-supervisor.mjs",
+  "src/composition-root.ts",
+  "src/control/cas-circuit-breaker.ts",
+  "src/control/engine.ts",
+  "src/control/guardian-denial-governor.ts",
+  "src/control/guardian-review.ts",
+  "src/control/index.ts",
+  "src/contracts.ts",
+  "src/data-cipher.ts",
+  "src/event-consumer.ts",
+  "src/extensions/index.ts",
+  "src/extensions/manifest.ts",
+  "src/extensions/registry.ts",
+  "src/extensions/rust-process-supervisor.ts",
   "src/lifecycle/managed-task-registry.ts",
   "src/lifecycle/staged-timeout.ts",
-  "src/mutation-policy.mjs",
-  "src/message-job-queue.mjs",
-  "src/message-job-worker.mjs",
-  "src/object-storage.mjs",
-  "src/observability.mjs",
-  "src/outbox-relay.mjs",
-  "src/outbox-worker.mjs",
-  "src/provider-common.mjs",
-  "src/provider-dashscope.mjs",
-  "src/provider-mock.mjs",
-  "src/provider-openai.mjs",
-  "src/providers.mjs",
-  "src/production-config.mjs",
-  "src/protocol-policy.mjs",
-  "src/protocol-validation.mjs",
-  "src/postgres-store.mjs",
-  "src/server.mjs",
-  "src/sse-adapter.mjs",
-  "src/store.mjs",
+  "src/mutation-policy.ts",
+  "src/message-job-queue.ts",
+  "src/message-job-worker.ts",
+  "src/object-storage.ts",
+  "src/observability.ts",
+  "src/outbox-relay.ts",
+  "src/outbox-worker.ts",
+  "src/provider-common.ts",
+  "src/provider-dashscope.ts",
+  "src/provider-mock.ts",
+  "src/provider-openai.ts",
+  "src/providers.ts",
+  "src/production-config.ts",
+  "src/protocol-policy.ts",
+  "src/protocol-validation.ts",
+  "src/postgres-store.ts",
+  "src/server.ts",
+  "src/sse-adapter.ts",
+  "src/store.ts",
 ];
 const required = [
   "README.md",
@@ -210,7 +210,7 @@ for (const marker of [
 ])
   if (!messageJobs.includes(marker))
     throw new Error(`message jobs marker missing: ${marker}`);
-const source = await readFile("src/server.mjs", "utf8");
+const source = await readFile("src/server.ts", "utf8");
 if (/(sk-[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9_-]{20,})/.test(source))
   throw new Error("possible credential in source");
 const trackedFiles = spawnSync(
@@ -248,7 +248,7 @@ for (const runtimePath of runtimeSources.filter(
   });
   if (status.status !== 0) throw new Error(`${runtimePath}: ${status.stderr}`);
 }
-const store = await readFile("src/store.mjs", "utf8");
+const store = await readFile("src/store.ts", "utf8");
 for (const marker of [
   "specversion",
   "source:",

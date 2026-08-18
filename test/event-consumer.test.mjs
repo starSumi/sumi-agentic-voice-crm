@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { consumeEvent } from "../src/event-consumer.mjs";
-import { createMemoryMessageJobQueue } from "../src/message-job-queue.mjs";
+import { consumeEvent } from "../src/event-consumer.ts";
+import { createMemoryMessageJobQueue } from "../src/message-job-queue.ts";
 
 test("event consumer completes one receipt and treats replay as duplicate", async () => {
   const store = createMemoryMessageJobQueue();

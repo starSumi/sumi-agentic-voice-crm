@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
 import test from "node:test";
-import { createApp, readRequestBody } from "../src/server.mjs";
-import { REQUEST_BODY_LIMITS } from "../src/protocol-policy.mjs";
+import { createApp, readRequestBody } from "../src/server.ts";
+import { REQUEST_BODY_LIMITS } from "../src/protocol-policy.ts";
 
 function runtimeFixture(closed) {
   const store = {

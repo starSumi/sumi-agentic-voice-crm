@@ -20,7 +20,7 @@ async function freePort() {
 
 async function startLocal() {
   const port = await freePort();
-  const child = spawn(process.execPath, ["src/server.mjs"], {
+  const child = spawn(process.execPath, ["src/server.ts"], {
     env: isolatedDrillEnv({
       PORT: String(port),
       APP_ENV: "test",

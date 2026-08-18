@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createControlEngine } from "../src/control/index.mjs";
-import { createOutboxWorker } from "../src/outbox-worker.mjs";
+import { createControlEngine } from "../src/control/index.ts";
+import { createOutboxWorker } from "../src/outbox-worker.ts";
 
 test("outbox polling is a managed task and cooperative shutdown closes the store", async () => {
   const lifecycle = [];

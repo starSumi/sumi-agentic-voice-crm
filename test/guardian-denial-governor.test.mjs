@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createGuardianDenialGovernor } from "../src/control/index.mjs";
+import { createGuardianDenialGovernor } from "../src/control/index.ts";
 
 test("standard Guardian policy interrupts after three consecutive denials", () => {
   const governor = createGuardianDenialGovernor();

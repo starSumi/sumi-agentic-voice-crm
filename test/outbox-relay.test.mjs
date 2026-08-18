@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OutboxRelay, outboxConfig, verifyOutboxSignature } from "../src/outbox-relay.mjs";
+import { OutboxRelay, outboxConfig, verifyOutboxSignature } from "../src/outbox-relay.ts";
 
 function fakeStore(event) {
   const calls = [];

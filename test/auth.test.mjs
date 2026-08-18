@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createAuthenticator } from "../src/auth.mjs";
+import { createAuthenticator } from "../src/auth.ts";
 
 const issuer = "https://issuer.example.test";
 const audience = "sumi-voice-crm";

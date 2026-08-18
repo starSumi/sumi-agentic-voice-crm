@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CrmStore } from "../src/store.mjs";
+import { CrmStore } from "../src/store.ts";
 
 const base = {
   tenant_id: "tenant_demo",

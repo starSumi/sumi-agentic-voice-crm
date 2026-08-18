@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CasCircuitBreaker, createControlEngine } from "../src/control/index.mjs";
+import { CasCircuitBreaker, createControlEngine } from "../src/control/index.ts";
 
 const eligible = () => Object.assign(new Error("upstream failed"), { breakerEligible: true });
 

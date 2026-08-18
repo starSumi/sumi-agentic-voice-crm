@@ -7,10 +7,10 @@ import {
   normalizeTtsCommand,
   ReviewService,
   TtsService,
-} from "../src/application/index.mjs";
-import { createRequestContext } from "../src/composition-root.mjs";
-import { understanding } from "../src/contracts.mjs";
-import { validateProtocol } from "../src/protocol-validation.mjs";
+} from "../src/application/index.ts";
+import { createRequestContext } from "../src/composition-root.ts";
+import { understanding } from "../src/contracts.ts";
+import { validateProtocol } from "../src/protocol-validation.ts";
 
 const REQUEST_ID = "req_0123456789abcdef01234567";
 const allowAuthorization = async () => ({

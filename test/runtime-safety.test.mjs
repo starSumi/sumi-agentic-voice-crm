@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CrmStore } from "../src/store.mjs";
-import { assertTenant } from "../src/contracts.mjs";
-import { providerReadiness } from "../src/providers.mjs";
+import { CrmStore } from "../src/store.ts";
+import { assertTenant } from "../src/contracts.ts";
+import { providerReadiness } from "../src/providers.ts";
 
 test("CRM mutations are tenant-scoped and idempotent", () => {
   const store = new CrmStore();

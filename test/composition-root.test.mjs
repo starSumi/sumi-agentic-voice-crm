@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   createRequestContext,
   createRuntime,
-} from "../src/composition-root.mjs";
+} from "../src/composition-root.ts";
 
 test("composition root creates process resources through injectable ports", async () => {
   const closed = [];

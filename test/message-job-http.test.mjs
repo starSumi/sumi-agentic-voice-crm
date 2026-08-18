@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CrmStore } from "../src/store.mjs";
-import { understanding } from "../src/contracts.mjs";
-import { createApp } from "../src/server.mjs";
+import { CrmStore } from "../src/store.ts";
+import { understanding } from "../src/contracts.ts";
+import { createApp } from "../src/server.ts";
 
 function runtimeFixture() {
   const store = new CrmStore();

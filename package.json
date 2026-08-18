@@ -4,7 +4,7 @@
   "private": true,
   "description": "Contract-first agentic CRM reference platform with ASR, intent extraction and TTS.",
   "type": "module",
-  "main": "./dist/src/server.mjs",
+  "main": "./dist/src/server.ts",
   "files": [
     "dist/"
   ],
@@ -17,9 +17,9 @@
     "node": "24.19.0"
   },
   "scripts": {
-    "start": "node dist/src/server.mjs",
-    "start:outbox": "node dist/src/outbox-worker.mjs",
-    "dev": "node src/server.mjs",
+    "start": "node dist/src/server.ts",
+    "start:outbox": "node dist/src/outbox-worker.ts",
+    "dev": "node src/server.ts",
     "lint": "oxlint --deny-warnings .",
     "duplication": "jscpd",
     "rust:fmt": "node scripts/run-cargo.mjs fmt --all -- --check",

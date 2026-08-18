@@ -7,7 +7,7 @@ let child;
 const base = `http://127.0.0.1:${port}`;
 
 test.before(async () => {
-  child = spawn(process.execPath, ["src/server.mjs"], { cwd: new URL("..", import.meta.url), env: { ...process.env, PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
+  child = spawn(process.execPath, ["src/server.ts"], { cwd: new URL("..", import.meta.url), env: { ...process.env, PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
   await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error("server startup timeout")), 5000); child.stdout.on("data", (d) => { if (String(d).includes(`:${port}`)) { clearTimeout(timer); resolve(); } }); child.on("error", reject); });
 });
 test.after(() => child?.kill());

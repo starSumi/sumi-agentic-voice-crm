@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import policy from "../../contracts/authorization-policy.json" with { type: "json" };
 import { evaluateAuthorization } from "../../src/authorization/policy.ts";
-import { PostgresCrmStore } from "../../src/postgres-store.mjs";
+import { PostgresCrmStore } from "../../src/postgres-store.ts";
 
 const authorize = (request) => evaluateAuthorization(policy, request);
 const store = new PostgresCrmStore({

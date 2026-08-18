@@ -7,9 +7,9 @@ import {
   normalizeTtsCommand,
   ReviewService,
   TtsService,
-} from "../src/application/index.mjs";
-import { createRequestContext } from "../src/composition-root.mjs";
-import { understanding } from "../src/contracts.mjs";
+} from "../src/application/index.ts";
+import { createRequestContext } from "../src/composition-root.ts";
+import { understanding } from "../src/contracts.ts";
 
 const REQUEST_ID = "req_progress0123456789abcdef";
 const AUDIO_BYTES = Buffer.from("private audio bytes");

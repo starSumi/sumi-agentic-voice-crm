@@ -7,10 +7,10 @@ import {
   normalizeTtsCommand,
   ReviewService,
   TtsService,
-} from "../src/application/index.mjs";
-import { createRequestContext } from "../src/composition-root.mjs";
-import { understanding } from "../src/contracts.mjs";
-import { createApp } from "../src/server.mjs";
+} from "../src/application/index.ts";
+import { createRequestContext } from "../src/composition-root.ts";
+import { understanding } from "../src/contracts.ts";
+import { createApp } from "../src/server.ts";
 
 const REQUEST_ID = "req_authorization0123456789";
 

@@ -29,4 +29,4 @@ COPY --from=build --chown=node:node /workspace/dist ./dist
 COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
 USER node
 EXPOSE 8080
-CMD ["node", "dist/src/server.mjs"]
+CMD ["node", "dist/src/server.ts"]

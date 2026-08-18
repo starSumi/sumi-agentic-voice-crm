@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAttachmentRef } from "../src/application/index.mjs";
-import { MemoryObjectStorage, persistAudioAsset, persistInputAudio } from "../src/object-storage.mjs";
+import { createAttachmentRef } from "../src/application/index.ts";
+import { MemoryObjectStorage, persistAudioAsset, persistInputAudio } from "../src/object-storage.ts";
 
 const SHA256 = "a".repeat(64);
 

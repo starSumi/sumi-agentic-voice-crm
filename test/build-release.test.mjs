@@ -29,7 +29,7 @@ async function createBuildFixture() {
   await writeFile(join(root, "db", "migrations", "001_fixture.sql"), "select 1;\n");
   await writeFile(join(root, "protocol", "schema", "json", "openapi.bundle.json"), "{}\n");
   await writeFile(join(root, "protocol", "protocol.manifest.json"), "{}\n");
-  await writeFile(join(root, "src", "server.mjs"), "export const ready = true;\n");
+  await writeFile(join(root, "src", "server.ts"), "export const ready = true;\n");
   const supervisor = join(root, "target", "release", "sumi-runtime-supervisor");
   await writeFile(supervisor, "fixture binary\n");
   await chmod(supervisor, 0o755);
@@ -40,7 +40,7 @@ test("runtime build manifest binds every relative path to its content digest", a
   const root = await createBuildFixture();
   const manifest = await buildRuntime({
     root,
-    runtimeSources: ["src/server.mjs"],
+    runtimeSources: ["src/server.ts"],
     runtimeBinaries: [{
       source: "target/release/sumi-runtime-supervisor",
       target: "bin/sumi-runtime-supervisor",
@@ -63,7 +63,7 @@ test("runtime build manifest binds every relative path to its content digest", a
     /manifest digest mismatch/,
   );
   await chmod(join(root, "dist", "bin", "sumi-runtime-supervisor"), 0o755);
-  await writeFile(join(root, "dist", "src", "server.mjs"), "tampered\n");
+  await writeFile(join(root, "dist", "src", "server.ts"), "tampered\n");
   await assert.rejects(
     verifyBuildManifest(join(root, "dist")),
     /manifest digest mismatch/,
@@ -72,7 +72,7 @@ test("runtime build manifest binds every relative path to its content digest", a
 
 test("failed staging leaves the previous dist untouched", async () => {
   const root = await createBuildFixture();
-  await buildRuntime({ root, runtimeSources: ["src/server.mjs"], runtimeBinaries: [] });
+  await buildRuntime({ root, runtimeSources: ["src/server.ts"], runtimeBinaries: [] });
   const previousManifest = await readFile(
     join(root, "dist", "BUILD-MANIFEST.json"),
     "utf8",

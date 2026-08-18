@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSseResponse, encodeSseComment, encodeSseEvent } from "../src/sse-adapter.mjs";
+import { createSseResponse, encodeSseComment, encodeSseEvent } from "../src/sse-adapter.ts";
 
 const decode = (bytes) => new TextDecoder().decode(bytes);
 

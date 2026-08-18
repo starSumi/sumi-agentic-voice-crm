@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createGuardianReviewCoordinator } from "../src/control/index.mjs";
+import { createGuardianReviewCoordinator } from "../src/control/index.ts";
 
 test("Guardian review blocks rejected operations and interrupts repeated denials", async () => {
   const coordinator = createGuardianReviewCoordinator({

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateProductionConfig } from "../src/production-config.mjs";
+import { validateProductionConfig } from "../src/production-config.ts";
 
 const production = {
   APP_ENV: "production", STORE_PROVIDER: "postgres", DATABASE_URL: "postgresql://db/app",

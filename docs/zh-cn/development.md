@@ -54,5 +54,5 @@ pnpm verify:mcp
 
 协议消费者必须运行 `pnpm run contract:consumer-check`：前端只能从
 `packages/api-client/src/api.ts` 导入操作、从 `packages/api-client/src/protocol.ts` 导入类型，不能手写 `/v1/` 请求或
-重复定义传输 DTO。`src/composition-root.mjs` 负责进程级资源；请求、provider
+重复定义传输 DTO。`src/composition-root.ts` 负责进程级资源；请求、provider
 操作和 PostgreSQL 事务的生命周期保持显式，provider 网络调用不持有数据库事务。

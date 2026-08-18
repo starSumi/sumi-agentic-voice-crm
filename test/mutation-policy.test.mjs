@@ -4,7 +4,7 @@ import {
   isMutatingIntent,
   normalizeUnderstanding,
   requiresReview,
-} from "../src/mutation-policy.mjs";
+} from "../src/mutation-policy.ts";
 
 const understanding = (intent, needs_confirmation) => ({
   intent,

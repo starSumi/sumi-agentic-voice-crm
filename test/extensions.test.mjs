@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createExtensionRegistry, validateExtensionManifest } from "../src/extensions/index.mjs";
+import { createExtensionRegistry, validateExtensionManifest } from "../src/extensions/index.ts";
 
 function manifest(id, overrides = {}) {
   return {

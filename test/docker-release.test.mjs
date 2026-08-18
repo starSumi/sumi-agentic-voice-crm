@@ -26,7 +26,7 @@ test("production image installs only the lockfile production closure and runs di
   assert.match(dockerfile, /target\/release\/sumi-runtime-supervisor/);
   assert.doesNotMatch(dockerfile, /COPY src\/\*\.mjs \.\/src/);
   assert.match(dockerfile, /USER node/);
-  assert.match(dockerfile, /CMD \["node", "dist\/src\/server\.mjs"\]/);
+  assert.match(dockerfile, /CMD \["node", "dist\/src\/server\.ts"\]/);
 });
 
 test("container smoke verifies the image command, production dependencies and readiness", async () => {
@@ -40,7 +40,7 @@ test("container smoke verifies the image command, production dependencies and re
     "await import('pg')",
     "await import('jose')",
     "await import('@aws-sdk/client-s3')",
-    "await import('./dist/src/outbox-relay.mjs')",
+    "await import('./dist/src/outbox-relay.ts')",
     "003_conversation_revision_cas.sql",
     "dist/bin/sumi-runtime-supervisor",
     "sumi.runtime.supervisor.v1",

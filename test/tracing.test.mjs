@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { createRuntime } from "../src/composition-root.mjs";
+import { createRuntime } from "../src/composition-root.ts";
 import {
   createConfiguredTracer,
   createOtelTracer,
   createTracer,
   parseTraceparent,
-} from "../src/observability.mjs";
+} from "../src/observability.ts";
 
 const VALID_PARENT = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
 
