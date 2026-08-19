@@ -75,6 +75,7 @@ test("Docker and CI install the frozen pnpm closure without lifecycle scripts", 
     assert.match(source, /cache: pnpm/);
     assert.match(source, /cache-dependency-path: pnpm-lock\.yaml/);
     assert.match(source, /pnpm install --frozen-lockfile --ignore-scripts/);
+    assert.match(source, /pnpm run sbom:check/);
   }
 });
 
@@ -87,6 +88,7 @@ test("package-manager execution surfaces contain no npm command fallback", async
     "Dockerfile",
     "scripts/check-protocol-drift.mjs",
     "scripts/generate-sbom.mjs",
+    "scripts/verify-sbom.mjs",
     "scripts/test-postgres.mjs",
     "test/docker-release.test.mjs",
     ...workflowNames.map((name) => `.github/workflows/${name}`),
@@ -100,6 +102,10 @@ test("package-manager execution surfaces contain no npm command fallback", async
   }
   assert.deepEqual(drift, []);
   assert.equal(packageJson.scripts.sbom, "node scripts/generate-sbom.mjs");
+  assert.equal(
+    packageJson.scripts["sbom:check"],
+    "node scripts/verify-sbom.mjs",
+  );
   assert.match(
     packageJson.scripts["audit:deps"],
     /^pnpm audit --audit-level=high /,

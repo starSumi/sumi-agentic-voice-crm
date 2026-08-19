@@ -40,6 +40,7 @@
     "build": "pnpm run protocol:check && pnpm run rust:build && node scripts/build.mjs",
     "check:dist": "node -e \"import('./scripts/build.mjs').then(({verifyBuildManifest})=>verifyBuildManifest('dist'))\"",
     "sbom": "node scripts/generate-sbom.mjs",
+    "sbom:check": "node scripts/verify-sbom.mjs",
     "smoke:dist": "pnpm run build && node scripts/smoke-dist.mjs",
     "smoke:docker": "node scripts/smoke-docker.mjs",
     "docs:dev": "astro dev",
@@ -51,7 +52,7 @@
     "audit:deps": "pnpm audit --audit-level=high --registry=https://registry.npmjs.org",
     "drill:load": "node scripts/load-drill.mjs",
     "drill:fault": "node scripts/fault-drill.mjs",
-    "verify:release": "pnpm run audit:deps && pnpm run verify && pnpm run drill:load && pnpm run drill:fault",
+    "verify:release": "pnpm run audit:deps && pnpm run verify && pnpm run drill:load && pnpm run drill:fault && pnpm run sbom && pnpm run sbom:check",
     "prepack": "pnpm run build"
   },
   "license": "Apache-2.0",

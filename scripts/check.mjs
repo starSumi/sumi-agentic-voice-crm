@@ -92,6 +92,8 @@ const required = [
   "scripts/run-cargo.mjs",
   "scripts/check-transport-policy.mjs",
   "scripts/check-authorization-policy.mjs",
+  "scripts/generate-sbom.mjs",
+  "scripts/verify-sbom.mjs",
   ...runtimeSources,
   "docs/index.md",
   "docs/QUICKSTART.md",

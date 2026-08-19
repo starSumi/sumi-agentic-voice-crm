@@ -67,6 +67,7 @@ jobs:
         run: pnpm run smoke:docker
       - run: pnpm run audit:deps
       - run: pnpm run sbom
+      - run: pnpm run sbom:check
       - name: Create deterministic release payload and checksum
         run: |
           set -euo pipefail

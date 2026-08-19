@@ -41,7 +41,7 @@ jobs:
       - name: Generate the runtime SPDX SBOM
         run: pnpm run sbom
       - name: Validate the SPDX SBOM
-        run: node -e "const s=require('./artifacts/release/sbom.spdx.json');const p=s.packages.flatMap(x=>x.externalRefs||[]).map(x=>x.referenceLocator||'');if(s.spdxVersion!=='SPDX-2.3'||!p.some(x=>x.startsWith('pkg:npm/'))||!p.some(x=>x.startsWith('pkg:cargo/')))process.exit(1)"
+        run: pnpm run sbom:check
       - name: Upload reviewed build evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

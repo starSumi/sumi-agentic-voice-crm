@@ -10,6 +10,8 @@
 /src/content.config.ts @starSumi
 /integrations/ @starSumi
 /scripts/build.mjs @starSumi
+/scripts/generate-sbom.mjs @starSumi
+/scripts/verify-sbom.mjs @starSumi
 /package.json @starSumi
 /pnpm-lock.yaml @starSumi
 /.jscpd.json @starSumi
