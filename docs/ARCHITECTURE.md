@@ -7,6 +7,36 @@ audience: both
 contentVersion: 0.1.0
 ---
 
+## Product control philosophy
+
+Sumi is a declarative agent control plane, not a chain of prompts. Desired intent
+and observed reality are separate. Events wake controllers; durable state decides
+what happens next. Each resource has one status owner, every effect is idempotent
+or CAS-guarded, and readiness requires evidence for the currently observed
+generation.
+
+The common generation/Condition envelope applies to new public declarative
+resources. Existing internal control surfaces are explicitly classified as
+reconciled workers, state machines, governed lifecycles, or CAS commands; the
+policy does not mislabel them as already migrated. Process extensions and managed
+tasks restart only through explicit admission, never from health failure alone.
+
+The normative model is `contracts/control-plane-policy.json`:
+
+1. Declare intent; do not prescribe a fragile execution transcript.
+2. Re-observe before every effect; checkpoints and events are hints, not truth.
+3. Use small controllers with explicit resource ownership.
+4. Expect at-least-once delivery and make effects safe to repeat.
+5. Protect shared mutable state with revisions, CAS, leases, and tenant scope.
+6. Admit work through authorization, policy, budget, and human checkpoints.
+7. Finalize with bounded drain, lease release, durable terminal evidence, and
+   supervised termination only where process ownership exists.
+8. Treat model output as an untrusted proposal; only domain transactions own
+   business truth.
+
+[ADR-0007](ADR-0007-declarative-agent-control-plane.md) records the decision and
+its relationship to controller, API, lease, and finalizer conventions.
+
 ## System map
 
 ```mermaid

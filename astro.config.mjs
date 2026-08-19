@@ -29,6 +29,11 @@ const englishDocuments = [
     "adr-0004-runtime-agent-boundary.md",
     "/adr-0004-runtime-agent-boundary/",
   ],
+  [
+    "ADR-0007-declarative-agent-control-plane.md",
+    "adr-0007-declarative-agent-control-plane.md",
+    "/adr-0007-declarative-agent-control-plane/",
+  ],
   ["TROUBLESHOOTING.md", "troubleshooting.md", "/troubleshooting/"],
   ["LOCALIZATION.md", "localization.md", "/localization/"],
 ];
@@ -47,6 +52,10 @@ const chineseDocuments = [
   ["localization.md", "/zh-cn/localization/"],
   ["adr-0001-agentic-crm.md", "/zh-cn/adr-0001-agentic-crm/"],
   ["adr-0004-runtime-agent-boundary.md", "/zh-cn/adr-0004-runtime-agent-boundary/"],
+  [
+    "adr-0007-declarative-agent-control-plane.md",
+    "/zh-cn/adr-0007-declarative-agent-control-plane/",
+  ],
 ];
 
 const documents = [
@@ -113,6 +122,7 @@ export default defineConfig({
             { slug: "events-audit", label: "Events and audit", translations: { "zh-CN": "事件与审计" } },
             { slug: "security", label: "Security", translations: { "zh-CN": "安全" } },
             { slug: "adr-0001-agentic-crm", label: "ADR-0001", translations: { "zh-CN": "ADR-0001" } },
+            { slug: "adr-0007-declarative-agent-control-plane", label: "ADR-0007", translations: { "zh-CN": "ADR-0007" } },
           ],
         },
         {

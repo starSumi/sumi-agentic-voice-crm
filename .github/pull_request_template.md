@@ -14,6 +14,7 @@
 - [ ] Contract consumers use only the generated API client; `pnpm run contract:consumer-check` is clean
 - [ ] Contract changes regenerated the SDK and passed `pnpm run protocol:check` plus `pnpm run protocol:typecheck`
 - [ ] Authorization changes passed `pnpm run authorization:check` and retain application plus transaction enforcement
+- [ ] Controller, lifecycle, queue, lease, CAS, or readiness changes passed `pnpm run control-plane:check`
 - [ ] `pnpm run verify:mcp` when docs, API, routing, or agent onboarding changed
 - [ ] `pnpm run sbom` and `pnpm run audit:deps` when dependencies or release inputs changed
 - [ ] `dist/BUILD-MANIFEST.json` verifies after any build-chain change

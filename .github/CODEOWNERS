@@ -4,6 +4,7 @@
 /packages/api-client/src/generated/ @starSumi
 /src/scripts/ @starSumi
 /scripts/check-contract-consumers.mjs @starSumi
+/scripts/check-control-plane-policy.mjs @starSumi
 /db/ @starSumi
 /docs/ @starSumi
 /astro.config.mjs @starSumi

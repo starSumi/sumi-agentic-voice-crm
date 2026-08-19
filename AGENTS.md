@@ -9,6 +9,7 @@
 - `.agent/` and `.local/` are WSL2-local control-plane and development evidence paths. They are ignored and must not be used as product, release, or CI evidence.
 - Keep provider credentials out of Git. Use `.env` locally and a secret manager in deployment.
 - Every CRM mutation must pass tenant authorization, schema validation, idempotency, transaction boundary, and audit/outbox write.
+- `contracts/control-plane-policy.json` is the product control-plane philosophy as code. Events only wake reconcilers; durable state decides, status has one controller owner, and effects remain idempotent or CAS-guarded. Run `pnpm run control-plane:check` after controller, lifecycle, queue, lease, CAS, or readiness changes.
 
 ## Commands
 

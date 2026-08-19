@@ -120,7 +120,7 @@ try {
   const parseToolResult = (id) =>
     JSON.parse(responses.get(id)?.result?.content?.[0]?.text ?? "null");
   const listed = parseToolResult(2);
-  assert.equal(listed.length, 31);
+  assert.equal(listed.length, 33);
   assert.equal(
     listed.find(({ path }) => path === "architecture.md")?.url,
     `${baseUrl}architecture`,

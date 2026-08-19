@@ -1,0 +1,214 @@
+{
+  "$schema": "./control-plane-policy.schema.json",
+  "schema_version": "sumi.control-plane-policy.v1",
+  "model": {
+    "pattern": "declarative-controller-reconciliation",
+    "desired_state": "spec",
+    "observed_state": "status",
+    "wakeup": "events-are-hints",
+    "decision": "level-triggered",
+    "source_of_truth": "durable-state",
+    "delivery": "at-least-once",
+    "effects": "idempotent-or-cas-guarded"
+  },
+  "resource_contract": {
+    "scope": "new-public-declarative-resources",
+    "generation": "required-when-spec-is-mutable",
+    "observed_generation": "required-before-ready",
+    "conditions": ["Ready", "Progressing", "Degraded", "Blocked"],
+    "evidence_refs": "required-for-verified",
+    "status_writer": "owning-controller-only"
+  },
+  "controllers": [
+    {
+      "id": "message-job",
+      "resource": "message-jobs",
+      "owner": "application-runtime",
+      "mode": "reconciled",
+      "restart_policy": "lease-reclaim",
+      "implementations": [
+        "src/message-job-queue.ts",
+        "src/message-job-worker.ts",
+        "src/postgres-store.ts"
+      ],
+      "source_of_truth": "postgresql-message-jobs",
+      "wakeups": ["enqueue", "poll", "lease-expiry"],
+      "concurrency": ["tenant-scope", "idempotency-key", "lease-cas"],
+      "idempotency": "tenant-key-and-request-fingerprint",
+      "finalization": "release-active-lease",
+      "status_evidence": "append-only-job-transitions",
+      "version_fence": "lease-and-transition-sequence",
+      "recovery_scope": "expired-lease-reclaim",
+      "verification_tests": [
+        "test/message-job-queue.test.mjs",
+        "test/message-job-http.test.mjs"
+      ]
+    },
+    {
+      "id": "interaction",
+      "resource": "interactions",
+      "owner": "application-runtime",
+      "mode": "state-machine",
+      "restart_policy": "lease-reclaim",
+      "implementations": [
+        "src/application/services.ts",
+        "src/postgres-store.ts"
+      ],
+      "source_of_truth": "postgresql-interactions-and-wal",
+      "wakeups": ["request-admission", "lease-expiry"],
+      "concurrency": ["tenant-scope", "idempotency-key", "lease-cas"],
+      "idempotency": "tenant-key-and-request-fingerprint",
+      "finalization": "complete-fail-or-abandon",
+      "status_evidence": "interaction-wal-audit-and-outbox",
+      "version_fence": "lease-and-wal-sequence",
+      "recovery_scope": "expired-lease-reclaim",
+      "verification_tests": [
+        "test/interaction-persistence.test.mjs",
+        "test/application-services.test.mjs"
+      ]
+    },
+    {
+      "id": "extension",
+      "resource": "extensions",
+      "owner": "control-engine",
+      "mode": "governed-lifecycle",
+      "restart_policy": "explicit-only",
+      "implementations": [
+        "src/control/engine.ts",
+        "src/extensions/registry.ts",
+        "src/extensions/rust-process-supervisor.ts"
+      ],
+      "source_of_truth": "validated-extension-registry",
+      "wakeups": ["explicit-start", "explicit-close"],
+      "concurrency": ["stable-name", "generation-epoch"],
+      "idempotency": "single-flight-start-and-close",
+      "finalization": "bounded-drain-and-supervised-termination",
+      "status_evidence": "registry-snapshot-and-process-exit",
+      "version_fence": "registry-generation-epoch",
+      "recovery_scope": "explicit-restart-only",
+      "verification_tests": [
+        "test/extensions.test.mjs",
+        "test/rust-process-supervisor.test.mjs"
+      ]
+    },
+    {
+      "id": "outbox",
+      "resource": "outbox-events",
+      "owner": "outbox-relay",
+      "mode": "reconciled",
+      "restart_policy": "lease-reclaim",
+      "implementations": ["src/outbox-relay.ts", "src/postgres-store.ts"],
+      "source_of_truth": "postgresql-outbox-events",
+      "wakeups": ["poll", "lease-expiry"],
+      "concurrency": ["tenant-scope", "event-id", "lease-cas"],
+      "idempotency": "event-id-and-delivery-key",
+      "finalization": "release-active-lease",
+      "status_evidence": "delivery-attempt-and-terminal-state",
+      "version_fence": "lease-and-attempt",
+      "recovery_scope": "expired-lease-reclaim",
+      "verification_tests": [
+        "test/outbox-relay.test.mjs",
+        "test/outbox-worker.test.mjs"
+      ]
+    },
+    {
+      "id": "conversation-state",
+      "resource": "conversation-states",
+      "owner": "application-runtime",
+      "mode": "cas-command",
+      "restart_policy": "not-applicable",
+      "implementations": [
+        "src/application/conversation-state.ts",
+        "src/postgres-store.ts"
+      ],
+      "source_of_truth": "postgresql-conversation-states",
+      "wakeups": ["conversation-command"],
+      "concurrency": ["tenant-scope", "revision-cas"],
+      "idempotency": "expected-revision",
+      "finalization": "transaction-rollback-on-conflict",
+      "status_evidence": "committed-revision",
+      "version_fence": "revision-cas",
+      "recovery_scope": "caller-retry-after-conflict",
+      "verification_tests": ["test/conversation-state.test.mjs"]
+    },
+    {
+      "id": "managed-task",
+      "resource": "managed-tasks",
+      "owner": "control-engine",
+      "mode": "governed-lifecycle",
+      "restart_policy": "explicit-only",
+      "implementations": [
+        "src/control/engine.ts",
+        "src/lifecycle/managed-task-registry.ts"
+      ],
+      "source_of_truth": "managed-task-registry",
+      "wakeups": ["task-admission", "runtime-close"],
+      "concurrency": ["stable-name"],
+      "idempotency": "single-flight-start-and-close",
+      "finalization": "three-second-bounded-teardown",
+      "status_evidence": "task-result-and-snapshot",
+      "version_fence": "stable-name-and-task-instance",
+      "recovery_scope": "owner-recreates-after-process-restart",
+      "verification_tests": ["test/managed-task-registry.test.mjs"]
+    },
+    {
+      "id": "guardian-review",
+      "resource": "guardian-turns",
+      "owner": "guardian-governor",
+      "mode": "state-machine",
+      "restart_policy": "manual-review",
+      "implementations": [
+        "src/control/guardian-denial-governor.ts",
+        "src/control/guardian-review.ts"
+      ],
+      "source_of_truth": "turn-governor-and-review-task",
+      "wakeups": ["review-result", "review-timeout"],
+      "concurrency": ["turn-id"],
+      "idempotency": "review-id",
+      "finalization": "interrupt-turn-or-require-human-review",
+      "status_evidence": "review-decision-and-denial-window",
+      "version_fence": "turn-id-and-review-id",
+      "recovery_scope": "human-review-or-explicit-clear",
+      "verification_tests": [
+        "test/guardian-denial-governor.test.mjs",
+        "test/guardian-review.test.mjs"
+      ]
+    }
+  ],
+  "retry_policy": {
+    "classification": "retryable-terminal-or-cancellation",
+    "backoff": "bounded-exponential",
+    "jitter": "required-before-horizontal-scale",
+    "cancellation": "neutral",
+    "dead_letter": "durable"
+  },
+  "agent_semantics": {
+    "model_output": "untrusted-proposal",
+    "authority": "server-policy-and-transaction-pep",
+    "irreversible_effects": "human-review-or-explicit-policy",
+    "completion": "current-condition-and-evidence",
+    "budgets": "deadline-cost-and-attempts",
+    "rollback": "compensation-or-versioned-cas",
+    "reasoning": "never-required-as-audit-evidence"
+  },
+  "invariants": [
+    "events-wake-reconciliation-but-never-define-truth",
+    "controllers-reobserve-before-effect",
+    "one-controller-owns-each-status-resource",
+    "status-never-mutates-spec",
+    "ready-requires-current-observed-generation",
+    "effects-are-idempotent-or-cas-guarded",
+    "leases-expire-and-stale-owners-cannot-commit",
+    "finalization-is-bounded-and-observable",
+    "authorization-precedes-side-effects",
+    "model-output-is-untrusted",
+    "durable-evidence-precedes-verified",
+    "cancellation-is-neutral-to-availability-circuits"
+  ],
+  "standards": {
+    "controllers": "https://kubernetes.io/docs/concepts/architecture/controller/",
+    "api_conventions": "https://github.com/kubernetes/community/blob/main/contributors/devel/sig-architecture/api-conventions.md",
+    "finalizers": "https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/",
+    "leases": "https://kubernetes.io/docs/concepts/architecture/leases/"
+  }
+}
