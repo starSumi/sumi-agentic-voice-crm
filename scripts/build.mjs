@@ -12,6 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
 
 const DEFAULT_RUNTIME_SOURCES = [
   "src/application/commands.ts",
@@ -71,6 +72,16 @@ const DEFAULT_RUNTIME_BINARIES = [
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function assertNoEmbeddedBuildPaths(bytes, paths) {
+  for (const path of paths) {
+    if (path && bytes.includes(Buffer.from(path))) {
+      throw new Error(
+        `runtime binary contains non-reproducible build path: ${path}`,
+      );
+    }
+  }
 }
 
 async function walkFiles(root, directory = root) {
@@ -270,7 +281,13 @@ export async function buildRuntime({
       }
       const target = join(stageRoot, binary.target);
       await mkdir(dirname(target), { recursive: true });
-      await cp(join(resolvedRoot, binary.source), target);
+      const source = join(resolvedRoot, binary.source);
+      const bytes = await readFile(source);
+      assertNoEmbeddedBuildPaths(bytes, [
+        resolvedRoot,
+        resolve(process.env.CARGO_HOME || resolve(homedir(), ".cargo")),
+      ]);
+      await cp(source, target);
       await chmod(target, 0o755);
     }
     await writeFile(
