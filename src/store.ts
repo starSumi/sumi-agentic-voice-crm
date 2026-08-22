@@ -6,6 +6,11 @@ import { randomUUID } from "node:crypto";
 import { now, sha256 } from "./contracts.ts";
 import { validateEvent } from "./protocol-validation.ts";
 import { createMemoryMessageJobQueue } from "./message-job-queue.ts";
+import {
+  agentCrmIntentDefinition,
+  assertAgentCrmActionProposal,
+  assertExecutableAgentCrmEntities,
+} from "./agent-crm-contract.ts";
 
 
 export class CrmStore {
@@ -172,7 +177,13 @@ export class CrmStore {
     row.updated_at = now();
     return { replaced: true, conversation_id, revision: row.revision };
   }
-  execute({ tenant_id, actor_id, idempotency_key, intent, entities, request_id, request_fingerprint }) {
+  execute({ tenant_id, actor_id, idempotency_key, intent, entities, request_id, request_fingerprint, action }) {
+    const definition = agentCrmIntentDefinition(intent);
+    if (definition.effect === "write") assertExecutableAgentCrmEntities(intent, entities);
+    if (action !== undefined) {
+      assertAgentCrmActionProposal(action);
+      if (action.intent !== intent) throw Object.assign(new Error("CRM action intent does not match command intent"), { code: "INVALID_REQUEST" });
+    }
     const fingerprint = request_fingerprint ?? sha256(JSON.stringify({ intent, entities }));
     const replayKey = `${tenant_id}:${idempotency_key}`;
     const previous = this.replay(replayKey); if (previous) {
@@ -185,7 +196,7 @@ export class CrmStore {
       const before = { ...deal };
       deal.stage = entities.stage?.value ?? deal.stage; deal.version += 1;
       const result = { action: "updated", resource: { type: "deal", id: deal.id }, aggregate_version: deal.version };
-      try { this.#commit(tenant_id, actor_id, idempotency_key, intent, request_id, result, fingerprint); } catch (error) { Object.assign(deal, before); throw error; }
+      try { this.#commit(tenant_id, actor_id, idempotency_key, intent, request_id, result, fingerprint, action); } catch (error) { Object.assign(deal, before); throw error; }
       return structuredClone(result);
     }
     if (intent === "crm.customer.create") {
@@ -193,12 +204,18 @@ export class CrmStore {
       const customer = { id, name: entities.customer?.name ?? "Unknown", version: 1 };
       this.#customers.set(`${tenant_id}:${id}`, customer);
       const result = { action: "created", resource: { type: "customer", id }, aggregate_version: 1 };
-      try { this.#commit(tenant_id, actor_id, idempotency_key, intent, request_id, result, fingerprint); } catch (error) { this.#customers.delete(`${tenant_id}:${id}`); throw error; }
+      try { this.#commit(tenant_id, actor_id, idempotency_key, intent, request_id, result, fingerprint, action); } catch (error) { this.#customers.delete(`${tenant_id}:${id}`); throw error; }
       return structuredClone(result);
     }
-    return { action: "read_only", resource: null, aggregate_version: 0 };
+    if (intent === "crm.search") return { action: "read_only", resource: null, aggregate_version: 0 };
+    throw Object.assign(new Error("CRM intent has no execution handler"), { code: "INVALID_REQUEST" });
   }
-  createReview({ tenant_id, actor_id, request_id, idempotency_key, request_fingerprint, understanding }) {
+  createReview({ tenant_id, actor_id, request_id, idempotency_key, request_fingerprint, understanding, action }) {
+    agentCrmIntentDefinition(understanding.intent);
+    if (action !== undefined) {
+      assertAgentCrmActionProposal(action);
+      if (action.intent !== understanding.intent) throw Object.assign(new Error("CRM action intent does not match review intent"), { code: "INVALID_REQUEST" });
+    }
     const key = idempotency_key ? `${tenant_id}:${idempotency_key}` : undefined;
     if (key) {
       const previous = this.#reviewIdempotency.get(key);
@@ -208,8 +225,8 @@ export class CrmStore {
       }
     }
     const id = `rev_${randomUUID().slice(0, 8)}`; const task = { id, tenant_id, request_id, reason: "low_confidence", status: "open", candidates: understanding.entities, expires_at: new Date(Date.now() + 7 * 86400000).toISOString() };
-    const event = this.#event("crm.review.requested.v1", tenant_id, `review/${id}`, { ...task, request_id });
-    const audit = { audit_id: randomUUID(), tenant_id, actor_id, request_id, action: "crm.review.requested", resource: { type: "review", id }, decision: "needs_review", created_at: now() };
+    const event = this.#event("crm.review.requested.v1", tenant_id, `review/${id}`, { ...task, request_id, action });
+    const audit = { audit_id: randomUUID(), tenant_id, actor_id, request_id, action: "crm.review.requested", resource: { type: "review", id }, decision: "needs_review", created_at: now(), business_action: action };
     this.#reviews.set(id, task); this.#events.push(event); this.#outbox.push(event); this.#audits.push(audit);
     if (key) this.#reviewIdempotency.set(key, { fingerprint: request_fingerprint, result: structuredClone(task) });
     return structuredClone(task);
@@ -229,9 +246,9 @@ export class CrmStore {
       created_at: now(),
     });
   }
-  #commit(tenant_id, actor_id, key, intent, request_id, result, fingerprint) {
-    const event = this.#event("crm.command.committed.v1", tenant_id, `${result.resource?.type ?? "command"}/${result.resource?.id ?? key}`, { actor_id, intent, result, aggregate_version: result.aggregate_version, request_id });
-    const audit = { audit_id: randomUUID(), tenant_id, actor_id, request_id, action: intent, resource: result.resource, decision: "committed", created_at: now() };
+  #commit(tenant_id, actor_id, key, intent, request_id, result, fingerprint, action) {
+    const event = this.#event("crm.command.committed.v1", tenant_id, `${result.resource?.type ?? "command"}/${result.resource?.id ?? key}`, { actor_id, intent, action, result, aggregate_version: result.aggregate_version, request_id });
+    const audit = { audit_id: randomUUID(), tenant_id, actor_id, request_id, action: intent, resource: result.resource, decision: "committed", created_at: now(), business_action: action };
     // Construct and validate all records before publishing any of them. This
     // models the database transaction + transactional outbox boundary: a
     // failed audit/event/idempotency write cannot leave a partial mutation.

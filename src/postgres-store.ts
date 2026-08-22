@@ -10,6 +10,11 @@ import {
 import { now, sha256 } from "./contracts.ts";
 import { validateEvent } from "./protocol-validation.ts";
 import { DataCipher } from "./data-cipher.ts";
+import {
+  agentCrmIntentDefinition,
+  assertAgentCrmActionProposal,
+  assertExecutableAgentCrmEntities,
+} from "./agent-crm-contract.ts";
 
 const { Pool } = pg;
 const UUID =
@@ -760,7 +765,16 @@ export class PostgresCrmStore {
       entities,
       request_id,
       request_fingerprint,
+      action,
     } = input;
+    const intentDefinition = agentCrmIntentDefinition(intent);
+    if (intentDefinition.effect === "write")
+      assertExecutableAgentCrmEntities(intent, entities);
+    if (action !== undefined) {
+      assertAgentCrmActionProposal(action);
+      if (action.intent !== intent)
+        throw Object.assign(new Error("CRM action intent does not match command intent"), { code: "INVALID_REQUEST" });
+    }
     const fingerprint =
       request_fingerprint ?? sha256(JSON.stringify({ intent, entities }));
     return await this.#transaction(
@@ -784,7 +798,7 @@ export class PostgresCrmStore {
             idempotency_key,
             fingerprint,
             intent,
-            JSON.stringify({ entities }),
+            JSON.stringify({ entities, action }),
           ],
         );
         if (inserted.rowCount === 0) {
@@ -834,13 +848,13 @@ export class PostgresCrmStore {
             resource: { type: "customer", id: created.rows[0].id },
             aggregate_version: Number(created.rows[0].version),
           };
-        } else {
+        } else if (intent === "crm.search") {
           result = {
             action: "read_only",
             resource: null,
             aggregate_version: 0,
           };
-        }
+        } else throw Object.assign(new Error("CRM intent has no execution handler"), { code: "INVALID_REQUEST" });
 
         await client.query(
           "update crm_commands set status='committed', result=$3::jsonb, committed_at=now() where tenant_id=$1 and id=$2",
@@ -852,6 +866,7 @@ export class PostgresCrmStore {
           request_id,
           intent,
           result,
+          action,
         });
         return result;
       },
@@ -865,7 +880,14 @@ export class PostgresCrmStore {
       idempotency_key,
       request_fingerprint,
       understanding,
+      action,
     } = input;
+    agentCrmIntentDefinition(understanding.intent);
+    if (action !== undefined) {
+      assertAgentCrmActionProposal(action);
+      if (action.intent !== understanding.intent)
+        throw Object.assign(new Error("CRM action intent does not match review intent"), { code: "INVALID_REQUEST" });
+    }
     return await this.#transaction(
       input,
       async (client, actorUuid, principal) => {
@@ -888,7 +910,7 @@ export class PostgresCrmStore {
             idempotency_key,
             request_fingerprint,
             understanding.intent,
-            JSON.stringify({ understanding }),
+            JSON.stringify({ understanding, action }),
           ],
         );
         if (inserted.rowCount === 0) {
@@ -929,6 +951,7 @@ export class PostgresCrmStore {
           request_id,
           intent: "crm.review.requested",
           result: eventResult,
+          action,
         });
         return result;
       },
@@ -1059,6 +1082,9 @@ export class PostgresCrmStore {
         }
         const understanding = row.payload?.understanding ?? {};
         const entities = correction?.entities ?? understanding.entities ?? {};
+        const action = row.payload?.action;
+        agentCrmIntentDefinition(row.intent);
+        assertExecutableAgentCrmEntities(row.intent, entities);
         await this.#authorize(
           principal,
           row.intent,
@@ -1075,7 +1101,7 @@ export class PostgresCrmStore {
             "insert into customers (tenant_id,name,preferred_language) values ($1,$2,$3) returning id,version",
             [
               tenant_id,
-              entities.customer?.name ?? "Approved customer",
+              entities.customer.name,
               entities.customer?.preferred_language ?? "en-US",
             ],
           );
@@ -1083,6 +1109,28 @@ export class PostgresCrmStore {
             action: "created",
             resource: { type: "customer", id: created.rows[0].id },
             aggregate_version: Number(created.rows[0].version),
+          };
+        } else if (row.intent === "crm.deal.update_stage") {
+          const dealId = entities.deal.value;
+          if (!UUID.test(dealId))
+            throw conflict("deal id must be a UUID in PostgreSQL mode");
+          const updated = await client.query(
+            `update deals set stage=$3, version=version+1, updated_at=now()
+             where tenant_id=$1 and id=$2 and ($4::bigint is null or version=$4)
+             returning id,version`,
+            [
+              tenant_id,
+              dealId,
+              entities.stage.value,
+              entities.deal.expected_version ?? null,
+            ],
+          );
+          if (updated.rowCount !== 1)
+            throw conflict("deal was not found or its version changed");
+          result = {
+            action: "updated",
+            resource: { type: "deal", id: updated.rows[0].id },
+            aggregate_version: Number(updated.rows[0].version),
           };
         }
         const approved = {
@@ -1107,6 +1155,7 @@ export class PostgresCrmStore {
           request_id,
           intent: "crm.review.approved",
           result,
+          action,
         });
         const response = {
           review_id: publicReviewId,
@@ -1642,7 +1691,7 @@ export class PostgresCrmStore {
 
   async #writeAuditAndOutbox(
     client,
-    { tenant_id, actorUuid, request_id, intent, result },
+    { tenant_id, actorUuid, request_id, intent, result, action },
   ) {
     await client.query(
       `insert into audit_records (tenant_id,actor_id,request_id,action,resource_type,resource_id,decision,after_hash)
@@ -1673,6 +1722,7 @@ export class PostgresCrmStore {
         request_id,
         JSON.stringify({
           intent,
+          action,
           result,
           aggregate_version: result.aggregate_version,
           request_id,

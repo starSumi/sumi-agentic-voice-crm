@@ -8,6 +8,7 @@ import {
 import type { ApplicationRequestContext } from "./commands.ts";
 import { normalizeUnderstanding } from "./mutation-policy.ts";
 import { authorizationError } from "../authorization/errors.ts";
+import { createAgentCrmActionProposal } from "../agent-crm-contract.ts";
 
 const PROGRESS_SINK_KEYS = ["progressSink", "eventSink"];
 const NOOP_PROGRESS_SINK = () => {};
@@ -491,15 +492,24 @@ export class AskService {
       const intentModel =
         understanding.source?.model ?? understanding.model ?? "unknown";
       assertActive(context);
+      const resource = resourceForIntent(context, understanding);
+      const businessAction = createAgentCrmActionProposal({
+        context,
+        understanding,
+        target: resource,
+        idempotencyKey: command.idempotencyKey,
+        requestFingerprint,
+      });
       await authorizeAction(
         ports,
         context,
-        understanding.intent,
-        resourceForIntent(context, understanding),
+        businessAction.policy.authorization_action,
+        resource,
       );
       await ports.checkpointInteraction({
         ...storeArgs,
         understanding,
+        business_action: businessAction,
         provider_invocations: [
           {
             operation: "intent",
@@ -558,6 +568,7 @@ export class AskService {
               ...storeArgs,
               request_fingerprint: requestFingerprint,
               understanding,
+              action: businessAction,
             }),
         );
         await emitProgress(
@@ -604,6 +615,7 @@ export class AskService {
             request_fingerprint: requestFingerprint,
             intent: understanding.intent,
             entities: understanding.entities,
+            action: businessAction,
           }),
       );
       await emitProgress(

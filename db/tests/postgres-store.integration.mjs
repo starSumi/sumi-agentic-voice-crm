@@ -650,6 +650,44 @@ try {
   assert.equal(approved.status, "approved");
   assert.equal(approved.decision.result.action, "created");
 
+  const dealId = "20000000-0000-4000-8000-000000000001";
+  await tenantQuery(
+    `insert into deals (id,tenant_id,name,stage,probability)
+     values ($1,$2,'Intent Contract Deal','Proposal',50)
+     on conflict (id) do update set stage='Proposal',version=1`,
+    [dealId, identity.tenant_id],
+  );
+  const dealReview = await store.createReview({
+    ...identity,
+    request_id: "req_runtime_deal_review_0001",
+    idempotency_key: "runtime-deal-review-0001",
+    request_fingerprint: "c".repeat(64),
+    understanding: {
+      intent: "crm.deal.update_stage",
+      entities: {
+        deal: { value: dealId, expected_version: 1 },
+        stage: { value: "Negotiation" },
+      },
+    },
+  });
+  const approvedDeal = await store.decideReview({
+    ...reviewerIdentity,
+    review_id: dealReview.id,
+    decision: "approve",
+    idempotency_key: "runtime-deal-review-decision-0001",
+    request_id: "req_runtime_deal_review_0002",
+  });
+  assert.equal(approvedDeal.status, "approved");
+  assert.equal(approvedDeal.decision.result.action, "updated");
+  const persistedDeal = await tenantQuery(
+    "select stage,version from deals where tenant_id=$1 and id=$2",
+    [identity.tenant_id, dealId],
+  );
+  assert.deepEqual(persistedDeal.rows[0], {
+    stage: "Negotiation",
+    version: "2",
+  });
+
   const events = await store.events(identity.tenant_id, identity.actor_id);
   assert.ok(events.some((event) => event.type === "crm.command.committed.v1"));
   assert.ok(events.some((event) => event.type === "crm.review.requested.v1"));
