@@ -152,19 +152,22 @@ export type MultipartAskMetadata = {
   conversation_id?: string;
 };
 
+export type AgentCrmIntent =
+  "crm.search" | "crm.customer.create" | "crm.deal.update_stage";
+
 export type Understanding = {
-  intent: string;
+  intent: AgentCrmIntent;
   confidence: number;
   entities: {
     [key: string]: unknown;
   };
   missing: Array<string>;
   needs_confirmation: boolean;
-  schema_version: string;
-  source?: {
-    transcript_hash?: string;
-    language?: string;
-    model?: string;
+  schema_version: "sumi.agent-crm-understanding.v1";
+  source: {
+    transcript_hash: string;
+    language: string;
+    model: string;
   };
 };
 

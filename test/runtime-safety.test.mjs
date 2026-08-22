@@ -49,7 +49,7 @@ test("TTS records are tenant-bound and reject fingerprint conflicts", () => {
 
 test("low-confidence review uses the same idempotency boundary", () => {
   const store = new CrmStore();
-  const args = { tenant_id: "tenant_demo", actor_id: "actor", request_id: "req_000000000000000000000007", idempotency_key: "review-key-1", request_fingerprint: "review-fingerprint", understanding: { entities: { customer: { name: "Unknown" } } } };
+  const args = { tenant_id: "tenant_demo", actor_id: "actor", request_id: "req_000000000000000000000007", idempotency_key: "review-key-1", request_fingerprint: "review-fingerprint", understanding: { intent: "crm.customer.create", entities: { customer: { name: "Unknown" } } } };
   const first = store.createReview(args);
   const replay = store.createReview({ ...args, request_id: "req_000000000000000000000008" });
   assert.deepEqual(replay, first);

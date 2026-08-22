@@ -578,6 +578,9 @@ components:
         output_mode: { type: string, enum: [text, audio, both], default: both }
         locale: { $ref: "#/components/schemas/Locale" }
         conversation_id: { type: string, maxLength: 128 }
+    AgentCrmIntent:
+      type: string
+      enum: [crm.search, crm.customer.create, crm.deal.update_stage]
     Understanding:
       type: object
       additionalProperties: false
@@ -589,17 +592,19 @@ components:
           missing,
           needs_confirmation,
           schema_version,
+          source,
         ]
       properties:
-        intent: { type: string }
+        intent: { $ref: "#/components/schemas/AgentCrmIntent" }
         confidence: { type: number, minimum: 0, maximum: 1 }
         entities: { type: object, additionalProperties: true }
         missing: { type: array, items: { type: string } }
         needs_confirmation: { type: boolean }
-        schema_version: { type: string }
+        schema_version: { const: sumi.agent-crm-understanding.v1 }
         source:
           type: object
           additionalProperties: false
+          required: [transcript_hash, language, model]
           properties:
             transcript_hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
             language: { type: string, minLength: 1, maxLength: 16 }

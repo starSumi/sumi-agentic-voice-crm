@@ -1,5 +1,6 @@
 import { audioMagicType } from "./contracts.ts";
 import {
+  INTENTS,
   MAX_PROVIDER_AUDIO_BYTES,
   bearerHeaders,
   canonicalAudioContentType,
@@ -171,7 +172,7 @@ export function createDashScopeProvider({ env, fetchImpl }: { env: ProviderEnvir
           response_format: { type: "json_object" },
           enable_thinking: false,
           messages: [
-            { role: "system", content: "Return only a JSON object with exactly these fields: intent (crm.search, crm.deal.update_stage, or crm.customer.create), confidence (0 to 1), entities (object), missing (string array), needs_confirmation (boolean). Extract CRM intent and entities, never invent identifiers, and require confirmation when identity, target, or mutation is ambiguous." },
+            { role: "system", content: `Return only a JSON object with exactly these fields: intent (${[...INTENTS].join(", ")}), confidence (0 to 1), entities (object), missing (exact entity paths), needs_confirmation (boolean). Never invent identifiers. Set needs_confirmation=true for every write intent and whenever identity, target, or selection is ambiguous.` },
             { role: "user", content: transcript },
           ],
         }),

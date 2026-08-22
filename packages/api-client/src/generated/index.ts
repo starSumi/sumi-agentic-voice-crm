@@ -12,6 +12,7 @@ export {
   synthesize,
 } from "./sdk.gen";
 export type {
+  AgentCrmIntent,
   AskData,
   AskError,
   AskErrors,

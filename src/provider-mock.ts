@@ -25,7 +25,6 @@ export function createMockProvider(): ProviderAdapter {
       } else if (normalized.includes("ramesh") || normalized.includes("customer") || normalized.includes("客户")) {
         intent = "crm.customer.create";
         entities.customer = { name: normalized.includes("ramesh") ? "Ramesh" : "Demo Customer", confidence: 0.94 };
-        entities.visit = { services: ["maintenance wash"], amount_minor: 80000, currency: "INR", confidence: 0.88 };
       }
       if (normalized.includes("ambiguous") || normalized.includes("两个") || normalized.includes("unclear")) confidence = 0.62;
       return understanding({
@@ -33,7 +32,7 @@ export function createMockProvider(): ProviderAdapter {
         confidence,
         entities,
         missing: confidence < 0.75 ? ["selection"] : [],
-        needs_confirmation: confidence < 0.75,
+        needs_confirmation: intent !== "crm.search" || confidence < 0.75,
         transcript,
         language: locale.split("-")[0],
         model: "mock-intent-1",

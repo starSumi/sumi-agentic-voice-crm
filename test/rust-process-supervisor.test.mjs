@@ -10,6 +10,7 @@ import {
   createExtensionRegistry,
   createRustProcessExtensionLauncher,
   RUST_SUPERVISOR_PROTOCOL_VERSION,
+  validateSupervisorResponse,
 } from "../src/extensions/index.ts";
 
 const binaryPath = resolve("target/release/sumi-runtime-supervisor");
@@ -99,6 +100,41 @@ test("supervisor protocol fixtures conform to the committed closed schema", asyn
     }),
     true,
     JSON.stringify(validate.errors),
+  );
+});
+
+test("Node response validator matches the generated supervisor schema projection", () => {
+  assert.deepEqual(
+    validateSupervisorResponse({
+      protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
+      request_id: "fixture.signal.1",
+      ok: true,
+      state: "stopped",
+      signal: 15,
+    }).signal,
+    15,
+  );
+  assert.throws(
+    () =>
+      validateSupervisorResponse({
+        protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
+        request_id: "fixture.signal.2",
+        ok: true,
+        state: "stopped",
+        signal: "SIGTERM",
+      }),
+    /signal is invalid/,
+  );
+  assert.throws(
+    () =>
+      validateSupervisorResponse({
+        protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
+        request_id: "fixture.error.1",
+        ok: false,
+        state: "failed",
+        error: { code: "FAILED" },
+      }),
+    /error response is invalid/,
   );
 });
 

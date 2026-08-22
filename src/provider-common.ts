@@ -1,4 +1,9 @@
 import { sha256, understanding } from "./contracts.ts";
+import { assertAgentCrmProviderOutput } from "./agent-crm-contract.ts";
+import {
+  AGENT_CRM_INTENTS,
+  AGENT_CRM_PROVIDER_REQUEST_SCHEMA,
+} from "./generated/agent-crm-contract.ts";
 
 type ProviderError = Error & { code: string; breakerEligible?: boolean };
 type ProviderResponse = {
@@ -23,19 +28,8 @@ export const LOCALES = new Set(["zh-CN", "en-US", "hi-IN", "te-IN"]);
 export const MAX_PROVIDER_TIMEOUT_MS = 120_000;
 export const MAX_PROVIDER_AUDIO_BYTES = 50 * 1024 * 1024;
 export const MAX_PROVIDER_JSON_BYTES = 1 * 1024 * 1024;
-export const INTENTS = new Set(["crm.search", "crm.deal.update_stage", "crm.customer.create"]);
-export const INTENT_SCHEMA = Object.freeze({
-  type: "object",
-  additionalProperties: false,
-  required: ["intent", "confidence", "entities", "missing", "needs_confirmation"],
-  properties: {
-    intent: { enum: [...INTENTS] },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-    entities: { type: "object" },
-    missing: { type: "array", items: { type: "string" } },
-    needs_confirmation: { type: "boolean" },
-  },
-});
+export const INTENTS = new Set<string>(AGENT_CRM_INTENTS);
+export const INTENT_SCHEMA = AGENT_CRM_PROVIDER_REQUEST_SCHEMA;
 
 export function upstream(message: string, cause?: unknown, { breakerEligible = true }: { breakerEligible?: boolean } = {}): ProviderError {
   return Object.assign(new Error(message, { cause }), { code: "UPSTREAM_UNAVAILABLE", breakerEligible });
@@ -81,19 +75,23 @@ export function parseUnderstanding(raw: unknown, { transcript, locale, model }: 
   try { parsed = typeof raw === "string" ? JSON.parse(raw) : raw; }
   catch (error) { throw upstream("intent provider returned invalid JSON", error); }
 
-  const validObject = parsed && typeof parsed === "object" && !Array.isArray(parsed);
-  const validEntities = parsed?.entities && typeof parsed.entities === "object" && !Array.isArray(parsed.entities);
-  const validMissing = Array.isArray(parsed?.missing) && parsed.missing.every((item: unknown) => typeof item === "string");
-  const validConfidence = Number.isFinite(parsed?.confidence) && parsed.confidence >= 0 && parsed.confidence <= 1;
-  if (!validObject || !INTENTS.has(parsed.intent) || !validConfidence || !validEntities || !validMissing || typeof parsed.needs_confirmation !== "boolean") {
-    throw upstream("intent provider returned output that does not match the CRM schema");
+  try {
+    assertAgentCrmProviderOutput(parsed);
+  } catch (error) {
+    throw upstream("intent provider returned output that does not match the Agent CRM contract", error);
   }
-
-  const allowed = new Set(INTENT_SCHEMA.required);
-  if (Object.keys(parsed).some((key) => !allowed.has(key))) {
-    throw upstream("intent provider returned unexpected CRM schema fields");
-  }
-  return understanding({ ...parsed, transcript, language: locale.split("-")[0], model });
+  return understanding({
+    ...(parsed as {
+      intent: string;
+      confidence: number;
+      entities: Record<string, unknown>;
+      missing: readonly string[];
+      needs_confirmation: boolean;
+    }),
+    transcript,
+    language: locale.split("-")[0],
+    model,
+  });
 }
 
 export function makeAudioAsset(bytes: Uint8Array | Buffer, { text, language, voice, format, mimeType, provider, model }: AudioAssetOptions): Record<string, unknown> {

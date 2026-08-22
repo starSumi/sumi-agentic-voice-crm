@@ -13,6 +13,8 @@
     "verbatimModuleSyntax": true
   },
   "files": [
+    "src/agent-crm-contract.ts",
+    "src/generated/agent-crm-contract.ts",
     "src/protocol-policy.ts",
     "src/contracts.ts",
     "src/application/attachments.ts",
@@ -28,6 +30,7 @@
     "src/control/index.ts",
     "src/event-consumer.ts",
     "src/extensions/index.ts",
+    "src/extensions/generated/runtime-supervisor-protocol.ts",
     "src/extensions/manifest.ts",
     "src/extensions/registry.ts",
     "src/extensions/rust-process-supervisor.ts",

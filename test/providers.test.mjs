@@ -139,7 +139,7 @@ test("DashScope intent uses JSON Object mode and validates the CRM schema locall
     env: dashscopeEnv(),
     fetchImpl: async () => jsonResponse({ choices: [{ message: { content: JSON.stringify(validUnderstanding({ extra: true })) } }] }),
   });
-  await assert.rejects(() => malformed.understand("find Acme", { locale: "en-US" }), (error) => error.code === "UPSTREAM_UNAVAILABLE" && /unexpected/.test(error.message));
+  await assert.rejects(() => malformed.understand("find Acme", { locale: "en-US" }), (error) => error.code === "UPSTREAM_UNAVAILABLE" && /Agent CRM contract/.test(error.message));
 });
 
 test("provider 4xx rejections are non-retryable and do not open the circuit", async () => {

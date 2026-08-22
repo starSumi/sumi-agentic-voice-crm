@@ -15,6 +15,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_RUNTIME_SOURCES = [
+  "src/agent-crm-contract.ts",
   "src/application/commands.ts",
   "src/application/attachments.ts",
   "src/application/conversation-state.ts",
@@ -37,6 +38,8 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/data-cipher.ts",
   "src/event-consumer.ts",
   "src/extensions/index.ts",
+  "src/extensions/generated/runtime-supervisor-protocol.ts",
+  "src/generated/agent-crm-contract.ts",
   "src/extensions/manifest.ts",
   "src/extensions/registry.ts",
   "src/extensions/rust-process-supervisor.ts",

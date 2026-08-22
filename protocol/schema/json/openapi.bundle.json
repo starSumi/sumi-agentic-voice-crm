@@ -1093,6 +1093,14 @@
           }
         }
       },
+      "AgentCrmIntent": {
+        "type": "string",
+        "enum": [
+          "crm.search",
+          "crm.customer.create",
+          "crm.deal.update_stage"
+        ]
+      },
       "Understanding": {
         "type": "object",
         "additionalProperties": false,
@@ -1102,11 +1110,12 @@
           "entities",
           "missing",
           "needs_confirmation",
-          "schema_version"
+          "schema_version",
+          "source"
         ],
         "properties": {
           "intent": {
-            "type": "string"
+            "$ref": "#/components/schemas/AgentCrmIntent"
           },
           "confidence": {
             "type": "number",
@@ -1127,11 +1136,16 @@
             "type": "boolean"
           },
           "schema_version": {
-            "type": "string"
+            "const": "sumi.agent-crm-understanding.v1"
           },
           "source": {
             "type": "object",
             "additionalProperties": false,
+            "required": [
+              "transcript_hash",
+              "language",
+              "model"
+            ],
             "properties": {
               "transcript_hash": {
                 "type": "string",

@@ -1,4 +1,7 @@
-const READ_ONLY_INTENTS = new Set(["crm.search"]);
+import {
+  agentCrmIntentDefinition,
+  isAgentCrmIntent,
+} from "../agent-crm-contract.ts";
 
 export type ProviderUnderstanding = Readonly<Record<string, unknown>> & {
   readonly intent: string;
@@ -6,7 +9,7 @@ export type ProviderUnderstanding = Readonly<Record<string, unknown>> & {
 };
 
 export function isMutatingIntent(intent: string): boolean {
-  return !READ_ONLY_INTENTS.has(intent);
+  return !isAgentCrmIntent(intent) || agentCrmIntentDefinition(intent).effect === "write";
 }
 
 export function requiresReview({ intent, needs_confirmation: providerNeedsConfirmation }: Pick<ProviderUnderstanding, "intent" | "needs_confirmation">): boolean {

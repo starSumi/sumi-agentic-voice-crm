@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { AUDIO_TYPES, DEFAULT_LOCALE, ERROR_CODES, LOCALES, OUTPUT_MODES } from "./protocol-policy.ts";
+import { AGENT_CRM_INTENT_SCHEMA_VERSION } from "./generated/agent-crm-contract.ts";
 
 export { AUDIO_TYPES, ERROR_CODES, LOCALES, OUTPUT_MODES } from "./protocol-policy.ts";
 
 export const API_VERSION = "v1";
-export const INTENT_SCHEMA_VERSION = "understanding.v1";
+export const INTENT_SCHEMA_VERSION = AGENT_CRM_INTENT_SCHEMA_VERSION;
 
 export type RuntimeErrorCode = string;
 export type CodedError<Code extends string = RuntimeErrorCode> = Error & { readonly code: Code };

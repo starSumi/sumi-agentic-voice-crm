@@ -4,51 +4,51 @@ import { constants } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionManifest } from "./manifest.ts";
+import {
+  RUST_SUPERVISOR_LIMITS,
+  RUST_SUPERVISOR_PROTOCOL_VERSION,
+  SUPERVISOR_RESPONSE_KEYS,
+  SUPERVISOR_STATES,
+  type SupervisorRequest,
+  type SupervisorResponse,
+  type SupervisorState,
+} from "./generated/runtime-supervisor-protocol.ts";
 
-export const RUST_SUPERVISOR_PROTOCOL_VERSION = "sumi.runtime.supervisor.v1";
-const MAX_FRAME_BYTES = 64 * 1024;
-const RESPONSE_KEYS = new Set([
-  "protocol",
-  "request_id",
-  "ok",
-  "state",
-  "ready",
-  "child_pid",
-  "forced",
-  "exit_code",
-  "signal",
-  "error",
-]);
-const STATES = new Set(["created", "running", "stopped", "failed"]);
-
-type SupervisorState = "created" | "running" | "stopped" | "failed";
-type SupervisorError = { code: string };
-type SupervisorResponse = {
-  protocol: typeof RUST_SUPERVISOR_PROTOCOL_VERSION;
-  request_id: string;
-  ok: boolean;
-  state: SupervisorState;
-  ready?: boolean;
-  child_pid?: number;
-  forced?: boolean;
-  exit_code?: number;
-  signal?: string;
-  error?: SupervisorError;
+export { RUST_SUPERVISOR_PROTOCOL_VERSION };
+const MAX_FRAME_BYTES = RUST_SUPERVISOR_LIMITS.maxFrameBytes;
+const RESPONSE_KEYS = new Set<string>(SUPERVISOR_RESPONSE_KEYS);
+const STATES = new Set<string>(SUPERVISOR_STATES);
+type LaunchSpec = {
+  program: string;
+  args: readonly string[];
+  env: Readonly<Record<string, string>>;
 };
-type LaunchSpec = { program: string; args: readonly string[]; env: Readonly<Record<string, string>> };
-type ResolveEntrypoint = (manifest: Readonly<ExtensionManifest>) => LaunchSpec | PromiseLike<LaunchSpec>;
-type PendingRequest = { resolve: (response: SupervisorResponse) => void; reject: (error: unknown) => void };
+type ResolveEntrypoint = (
+  manifest: Readonly<ExtensionManifest>,
+) => LaunchSpec | PromiseLike<LaunchSpec>;
+type PendingRequest = {
+  resolve: (response: SupervisorResponse) => void;
+  reject: (error: unknown) => void;
+};
 type SpawnImpl = typeof spawn;
 
-function abortError(reason: unknown, fallback: string): Error & { name: string; breakerEligible: boolean } {
-  if (reason instanceof Error) return reason as Error & { name: string; breakerEligible: boolean };
+function abortError(
+  reason: unknown,
+  fallback: string,
+): Error & { name: string; breakerEligible: boolean } {
+  if (reason instanceof Error)
+    return reason as Error & { name: string; breakerEligible: boolean };
   return Object.assign(new Error(fallback), {
     name: "AbortError",
     breakerEligible: false,
   });
 }
 
-function validateString(value: unknown, name: string, maxBytes = 4096): string {
+function validateString(
+  value: unknown,
+  name: string,
+  maxBytes: number = RUST_SUPERVISOR_LIMITS.argumentMax,
+): string {
   if (typeof value !== "string" || Buffer.byteLength(value) > maxBytes) {
     throw new TypeError(`${name} must be a bounded string`);
   }
@@ -65,7 +65,10 @@ function defaultSupervisorBinary() {
       );
 }
 
-function normalizeLaunchSpec(spec: unknown, allowedEnvironmentKeys: ReadonlySet<string>): LaunchSpec {
+function normalizeLaunchSpec(
+  spec: unknown,
+  allowedEnvironmentKeys: ReadonlySet<string>,
+): LaunchSpec {
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
     throw new TypeError("extension launch resolver must return an object");
   }
@@ -75,11 +78,15 @@ function normalizeLaunchSpec(spec: unknown, allowedEnvironmentKeys: ReadonlySet<
     throw new TypeError("extension launch resolver returned an unknown field");
   }
   const record = spec as Record<string, unknown>;
-  const program = validateString(record.program, "extension program");
+  const program = validateString(
+    record.program,
+    "extension program",
+    RUST_SUPERVISOR_LIMITS.programMax,
+  );
   if (!isAbsolute(program))
     throw new TypeError("extension program must be an absolute path");
   const args = record.args ?? [];
-  if (!Array.isArray(args) || args.length > 64)
+  if (!Array.isArray(args) || args.length > RUST_SUPERVISOR_LIMITS.argsMax)
     throw new TypeError("extension args exceed the supervisor bounds");
   for (const [index, arg] of args.entries())
     validateString(arg, `extension args[${index}]`);
@@ -88,7 +95,7 @@ function normalizeLaunchSpec(spec: unknown, allowedEnvironmentKeys: ReadonlySet<
     !env ||
     typeof env !== "object" ||
     Array.isArray(env) ||
-    Object.keys(env).length > 32
+    Object.keys(env).length > RUST_SUPERVISOR_LIMITS.environmentKeysMax
   ) {
     throw new TypeError("extension env exceeds the supervisor bounds");
   }
@@ -97,7 +104,11 @@ function normalizeLaunchSpec(spec: unknown, allowedEnvironmentKeys: ReadonlySet<
       throw new Error(`extension environment key ${key} is not allowlisted`);
     if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(key))
       throw new TypeError("extension environment key is invalid");
-    validateString(value, `extension env.${key}`, 8192);
+    validateString(
+      value,
+      `extension env.${key}`,
+      RUST_SUPERVISOR_LIMITS.environmentValueMax,
+    );
   }
   return Object.freeze({
     program,
@@ -106,7 +117,7 @@ function normalizeLaunchSpec(spec: unknown, allowedEnvironmentKeys: ReadonlySet<
   }) as LaunchSpec;
 }
 
-function validateResponse(value: unknown): SupervisorResponse {
+export function validateSupervisorResponse(value: unknown): SupervisorResponse {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("supervisor returned a non-object frame");
   const record = value as Record<string, unknown>;
@@ -114,17 +125,53 @@ function validateResponse(value: unknown): SupervisorResponse {
     throw new Error("supervisor returned an unknown field");
   if (record.protocol !== RUST_SUPERVISOR_PROTOCOL_VERSION)
     throw new Error("supervisor protocol version mismatch");
-  if (typeof record.request_id !== "string" || !record.request_id)
+  if (
+    typeof record.request_id !== "string" ||
+    !record.request_id ||
+    record.request_id.length > RUST_SUPERVISOR_LIMITS.requestIdMax
+  )
     throw new Error("supervisor response omitted request_id");
   if (typeof record.ok !== "boolean" || !STATES.has(record.state as string))
     throw new Error("supervisor response shape is invalid");
   if (
     record.child_pid !== undefined &&
-    (!Number.isSafeInteger(record.child_pid) || (record.child_pid as number) <= 0)
+    (!Number.isSafeInteger(record.child_pid) ||
+      (record.child_pid as number) <= 0)
   ) {
     throw new Error("supervisor child_pid is invalid");
   }
-  if (!record.ok && (!record.error || typeof (record.error as Record<string, unknown>).code !== "string")) {
+  for (const key of ["ready", "forced"] as const) {
+    if (record[key] !== undefined && typeof record[key] !== "boolean") {
+      throw new Error(`supervisor ${key} is invalid`);
+    }
+  }
+  for (const key of ["exit_code", "signal"] as const) {
+    if (record[key] !== undefined && !Number.isSafeInteger(record[key])) {
+      throw new Error(`supervisor ${key} is invalid`);
+    }
+  }
+  if (typeof record.signal === "number" && record.signal < 1) {
+    throw new Error("supervisor signal is invalid");
+  }
+  const error = record.error;
+  if (error !== undefined) {
+    if (!error || typeof error !== "object" || Array.isArray(error)) {
+      throw new Error("supervisor error response is invalid");
+    }
+    const fields = error as Record<string, unknown>;
+    if (
+      Object.keys(fields).some((key) => !["code", "message"].includes(key)) ||
+      typeof fields.code !== "string" ||
+      !fields.code ||
+      fields.code.length > RUST_SUPERVISOR_LIMITS.errorCodeMax ||
+      typeof fields.message !== "string" ||
+      !fields.message ||
+      fields.message.length > RUST_SUPERVISOR_LIMITS.errorMessageMax
+    ) {
+      throw new Error("supervisor error response is invalid");
+    }
+  }
+  if (!record.ok && error === undefined) {
     throw new Error("supervisor error response is invalid");
   }
   return record as unknown as SupervisorResponse;
@@ -191,14 +238,14 @@ export class RustSupervisedExtension {
     if (
       !Number.isSafeInteger(shutdownGraceMs) ||
       shutdownGraceMs < 1 ||
-      shutdownGraceMs > 30_000
+      shutdownGraceMs > RUST_SUPERVISOR_LIMITS.timeoutMax
     ) {
       throw new TypeError("shutdownGraceMs must be between 1 and 30000");
     }
     if (
       !Number.isSafeInteger(startupTimeoutMs) ||
       startupTimeoutMs < 1 ||
-      startupTimeoutMs > 30_000
+      startupTimeoutMs > RUST_SUPERVISOR_LIMITS.timeoutMax
     ) {
       throw new TypeError("startupTimeoutMs must be between 1 and 30000");
     }
@@ -309,7 +356,10 @@ export class RustSupervisedExtension {
       try {
         process.kill(-this.#childPid, "SIGKILL");
       } catch (error: unknown) {
-        const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+        const code =
+          error && typeof error === "object"
+            ? (error as { code?: unknown }).code
+            : undefined;
         if (code !== "ESRCH") throw error;
       }
     }
@@ -372,7 +422,7 @@ export class RustSupervisedExtension {
       }
       let response;
       try {
-        response = validateResponse(JSON.parse(line));
+        response = validateSupervisorResponse(JSON.parse(line));
       } catch (error: unknown) {
         for (const pending of this.#pending.values()) pending.reject(error);
         this.#pending.clear();
@@ -389,7 +439,10 @@ export class RustSupervisedExtension {
     }
   }
 
-  #request(op: string, fields: Record<string, unknown> = {}): Promise<SupervisorResponse> {
+  #request(
+    op: SupervisorRequest["op"],
+    fields: Record<string, unknown> = {},
+  ): Promise<SupervisorResponse> {
     if (!this.#supervisor || this.#supervisor.exitCode !== null) {
       return Promise.reject(
         new Error("Rust runtime supervisor is not running"),
@@ -450,7 +503,10 @@ export function createRustProcessExtensionLauncher({
   startupTimeoutMs?: number;
   shutdownGraceMs?: number;
   spawnImpl?: SpawnImpl;
-} = {}): (input: { manifest: ExtensionManifest; ports: Record<string, unknown> }) => RustSupervisedExtension {
+} = {}): (input: {
+  manifest: ExtensionManifest;
+  ports: Record<string, unknown>;
+}) => RustSupervisedExtension {
   if (!isAbsolute(binaryPath))
     throw new TypeError("Rust supervisor binaryPath must be absolute");
   if (typeof resolveEntrypoint !== "function")
@@ -462,7 +518,13 @@ export function createRustProcessExtensionLauncher({
     throw new TypeError("allowedEnvironmentKeys must be a string array");
   }
   const allowed = new Set(allowedEnvironmentKeys);
-  return ({ manifest, ports }: { manifest: ExtensionManifest; ports: Record<string, unknown> }) =>
+  return ({
+    manifest,
+    ports,
+  }: {
+    manifest: ExtensionManifest;
+    ports: Record<string, unknown>;
+  }) =>
     new RustSupervisedExtension({
       manifest,
       ports,

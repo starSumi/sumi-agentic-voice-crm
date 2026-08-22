@@ -4,7 +4,6 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("sumi-runtime-supervisor currently requires Linux process semantics");
 
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
@@ -14,91 +13,13 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub const PROTOCOL_VERSION: &str = "sumi.runtime.supervisor.v1";
-pub const MAX_FRAME_BYTES: usize = 64 * 1024;
-pub const EXTENSION_READY_FRAME: &[u8] = b"sumi.runtime.extension.ready.v1";
-const MAX_ARGUMENTS: usize = 64;
-const MAX_ARGUMENT_BYTES: usize = 4096;
-const MAX_ENVIRONMENT_KEYS: usize = 32;
-const MAX_ENVIRONMENT_VALUE_BYTES: usize = 8192;
-const MAX_GRACE_MS: u64 = 30_000;
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Request {
-    Start {
-        protocol: String,
-        request_id: String,
-        extension_id: String,
-        program: String,
-        args: Vec<String>,
-        env: BTreeMap<String, String>,
-        startup_timeout_ms: u64,
-        shutdown_grace_ms: u64,
-    },
-    Health {
-        protocol: String,
-        request_id: String,
-    },
-    Stop {
-        protocol: String,
-        request_id: String,
-    },
-}
-
-impl Request {
-    fn request_id(&self) -> &str {
-        match self {
-            Self::Start { request_id, .. }
-            | Self::Health { request_id, .. }
-            | Self::Stop { request_id, .. } => request_id,
-        }
-    }
-
-    fn protocol(&self) -> &str {
-        match self {
-            Self::Start { protocol, .. }
-            | Self::Health { protocol, .. }
-            | Self::Stop { protocol, .. } => protocol,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SupervisorState {
-    #[default]
-    Created,
-    Running,
-    Stopped,
-    Failed,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ProtocolError {
-    code: String,
-    message: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Response {
-    protocol: &'static str,
-    request_id: String,
-    ok: bool,
-    state: SupervisorState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ready: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    child_pid: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    forced: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    exit_code: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signal: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<ProtocolError>,
-}
+#[path = "generated/protocol.rs"]
+mod protocol;
+pub use protocol::{
+    EXTENSION_READY_FRAME, MAX_ARGUMENT_BYTES, MAX_ARGUMENTS, MAX_ENVIRONMENT_KEYS,
+    MAX_ENVIRONMENT_VALUE_BYTES, MAX_FRAME_BYTES, MAX_GRACE_MS, MAX_PROGRAM_BYTES,
+    MAX_REQUEST_ID_BYTES, PROTOCOL_VERSION, ProtocolError, Request, Response, SupervisorState,
+};
 
 impl Response {
     fn success(request_id: impl Into<String>, state: SupervisorState) -> Self {
@@ -135,7 +56,10 @@ impl Response {
             signal: None,
             error: Some(ProtocolError {
                 code: code.to_owned(),
-                message: message.chars().take(512).collect(),
+                message: message
+                    .chars()
+                    .take(protocol::MAX_ERROR_MESSAGE_BYTES)
+                    .collect(),
             }),
         }
     }
@@ -445,7 +369,7 @@ fn validate_start(
     shutdown_grace_ms: u64,
 ) -> Result<(), String> {
     validate_identifier(extension_id, true, "extension_id")?;
-    if program.len() > 4096 || !Path::new(program).is_absolute() {
+    if program.len() > MAX_PROGRAM_BYTES || !Path::new(program).is_absolute() {
         return Err("program must be a bounded absolute path".to_owned());
     }
     if args.len() > MAX_ARGUMENTS || args.iter().any(|arg| arg.len() > MAX_ARGUMENT_BYTES) {
@@ -471,7 +395,12 @@ fn validate_start(
 fn validate_identifier(value: &str, extension: bool, name: &str) -> Result<(), String> {
     let bytes = value.as_bytes();
     let valid = !value.is_empty()
-        && value.len() <= 128
+        && value.len()
+            <= if extension {
+                protocol::MAX_EXTENSION_ID_BYTES
+            } else {
+                MAX_REQUEST_ID_BYTES
+            }
         && if extension {
             bytes[0].is_ascii_lowercase()
                 && !matches!(bytes.last(), Some(b'.' | b'-'))

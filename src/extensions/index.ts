@@ -9,4 +9,5 @@ export {
   createRustProcessExtensionLauncher,
   RUST_SUPERVISOR_PROTOCOL_VERSION,
   RustSupervisedExtension,
+  validateSupervisorResponse,
 } from "./rust-process-supervisor.ts";
