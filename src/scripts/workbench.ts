@@ -3,7 +3,7 @@ import {
   configureClient,
   decideReview,
   getAssetContent,
-} from "../../packages/api-client/src/api";
+} from "@sumi/voice-crm-api-client/api";
 import type {
   AskRequest,
   AskResponse,
@@ -16,9 +16,16 @@ import type {
   ReviewResponse,
   TtsAsset,
   Understanding,
-} from "../../packages/api-client/src/protocol";
+} from "@sumi/voice-crm-api-client/protocol";
 
-type UiPhase = "idle" | "capturing" | "submitting" | "accepted" | "awaiting_review" | "completed" | "error";
+type UiPhase =
+  | "idle"
+  | "capturing"
+  | "submitting"
+  | "accepted"
+  | "awaiting_review"
+  | "completed"
+  | "error";
 type ApiResult<TData> = { data?: TData; error?: unknown };
 
 const root = document.documentElement;
@@ -41,11 +48,16 @@ const audioLink = document.querySelector<HTMLAnchorElement>("#audio-link")!;
 const reviewPanel = document.querySelector<HTMLElement>("#review-panel")!;
 const reviewSummary = document.querySelector<HTMLElement>("#review-summary")!;
 const reviewMeta = document.querySelector<HTMLElement>("#review-meta")!;
-const reviewUnderstanding = document.querySelector<HTMLElement>("#review-understanding")!;
-const reviewCorrection = document.querySelector<HTMLTextAreaElement>("#review-correction")!;
+const reviewUnderstanding = document.querySelector<HTMLElement>(
+  "#review-understanding",
+)!;
+const reviewCorrection =
+  document.querySelector<HTMLTextAreaElement>("#review-correction")!;
 const reviewError = document.querySelector<HTMLElement>("#review-error")!;
-const approveReview = document.querySelector<HTMLButtonElement>("#approve-review")!;
-const rejectReview = document.querySelector<HTMLButtonElement>("#reject-review")!;
+const approveReview =
+  document.querySelector<HTMLButtonElement>("#approve-review")!;
+const rejectReview =
+  document.querySelector<HTMLButtonElement>("#reject-review")!;
 
 const phaseLabels: Record<UiPhase, string> = {
   idle: "就绪",
@@ -78,7 +90,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+  return (
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+  );
 }
 
 function isUnderstanding(value: unknown): value is Understanding {
@@ -104,7 +118,8 @@ function isTtsAsset(value: unknown): value is TtsAsset {
 }
 
 function isAskPayload(value: unknown): value is AskResponse {
-  if (!isRecord(value) || !isRecord(value.input) || !isRecord(value.answer)) return false;
+  if (!isRecord(value) || !isRecord(value.input) || !isRecord(value.answer))
+    return false;
   return (
     value.status === "completed" &&
     typeof value.request_id === "string" &&
@@ -115,7 +130,12 @@ function isAskPayload(value: unknown): value is AskResponse {
 }
 
 function isReviewPayload(value: unknown): value is ReviewResponse {
-  if (!isRecord(value) || !isRecord(value.input) || !isRecord(value.answer) || !isRecord(value.review_task)) {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.input) ||
+    !isRecord(value.answer) ||
+    !isRecord(value.review_task)
+  ) {
     return false;
   }
   return (
@@ -133,7 +153,14 @@ function isMessageJobPayload(value: unknown): value is MessageJobResponse {
     typeof value.request_id === "string" &&
     typeof value.job_id === "string" &&
     /^job_[0-9a-f]{32}$/i.test(value.job_id) &&
-    ["job_queued", "running", "succeeded", "retry_wait", "dead_letter", "cancelled"].includes(String(value.status)) &&
+    [
+      "job_queued",
+      "running",
+      "succeeded",
+      "retry_wait",
+      "dead_letter",
+      "cancelled",
+    ].includes(String(value.status)) &&
     typeof value.attempts === "number" &&
     Number.isInteger(value.attempts) &&
     value.attempts >= 0 &&
@@ -141,7 +168,9 @@ function isMessageJobPayload(value: unknown): value is MessageJobResponse {
   );
 }
 
-function isReviewDecisionPayload(value: unknown): value is ReviewDecisionResponse {
+function isReviewDecisionPayload(
+  value: unknown,
+): value is ReviewDecisionResponse {
   return (
     isRecord(value) &&
     typeof value.review_id === "string" &&
@@ -151,7 +180,12 @@ function isReviewDecisionPayload(value: unknown): value is ReviewDecisionRespons
 }
 
 function isErrorPayload(value: unknown): value is ErrorEnvelope {
-  if (!isRecord(value) || !isRecord(value.error) || !isRecord(value.error.details)) return false;
+  if (
+    !isRecord(value) ||
+    !isRecord(value.error) ||
+    !isRecord(value.error.details)
+  )
+    return false;
   return (
     value.status === "failed" &&
     typeof value.request_id === "string" &&
@@ -239,7 +273,8 @@ function closeReview({ restoreFocus = true } = {}) {
   reviewError.textContent = "";
   reviewCorrection.value = "";
   syncControls();
-  if (restoreFocus && reviewReturnFocus?.isConnected) reviewReturnFocus.focus({ preventScroll: true });
+  if (restoreFocus && reviewReturnFocus?.isConnected)
+    reviewReturnFocus.focus({ preventScroll: true });
   reviewReturnFocus = undefined;
 }
 
@@ -299,7 +334,9 @@ function showMessageJob(payload: MessageJobResponse) {
   setPhase("accepted");
 }
 
-function consumeAskResult(response: ApiResult<AskResponse | ReviewResponse | MessageJobResponse>) {
+function consumeAskResult(
+  response: ApiResult<AskResponse | ReviewResponse | MessageJobResponse>,
+) {
   if (response.error !== undefined) {
     if (isErrorPayload(response.error)) showError(response.error);
     else showMalformed(response.error);
@@ -325,7 +362,8 @@ function consumeAskResult(response: ApiResult<AskResponse | ReviewResponse | Mes
 
 function consumeReviewResult(response: ApiResult<ReviewDecisionResponse>) {
   if (response.error !== undefined) {
-    if (isErrorPayload(response.error)) showError(response.error, { keepReview: true });
+    if (isErrorPayload(response.error))
+      showError(response.error, { keepReview: true });
     else showMalformed(response.error, { keepReview: true });
     return;
   }
@@ -346,7 +384,10 @@ function credentialsAreValid() {
 
 async function submitAsk(body: AskRequest) {
   if (requestInFlight || capturePending || isRecording()) return;
-  reviewReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : submit;
+  reviewReturnFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : submit;
   requestInFlight = true;
   fallback.hidden = true;
   setPhase("submitting");
@@ -383,15 +424,26 @@ text.addEventListener("input", () => text.setCustomValidity(""));
 function base64(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("audio could not be read")), { once: true });
-    reader.addEventListener("load", () => resolve(String(reader.result).split(",", 2)[1] ?? ""), { once: true });
+    reader.addEventListener(
+      "error",
+      () => reject(reader.error ?? new Error("audio could not be read")),
+      { once: true },
+    );
+    reader.addEventListener(
+      "load",
+      () => resolve(String(reader.result).split(",", 2)[1] ?? ""),
+      { once: true },
+    );
     reader.readAsDataURL(blob);
   });
 }
 
 function recorderMimeType() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm"];
-  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? "";
+  return (
+    candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ??
+    ""
+  );
 }
 
 function stopTracks(target: MediaStream | undefined) {
@@ -406,7 +458,11 @@ function resetRecorder(target: MediaRecorder | undefined) {
   syncControls();
 }
 
-async function sendRecording(target: MediaRecorder, targetStream: MediaStream, chunks: Blob[]) {
+async function sendRecording(
+  target: MediaRecorder,
+  targetStream: MediaStream,
+  chunks: Blob[],
+) {
   stopTracks(targetStream);
   if (recorder === target) recorder = undefined;
   record.textContent = "开始录音";
@@ -422,7 +478,8 @@ async function sendRecording(target: MediaRecorder, targetStream: MediaStream, c
   try {
     const data_base64 = await base64(blob);
     if (!data_base64) throw new Error("没有采集到可发送的音频");
-    const content_type = (target.mimeType.split(";", 1)[0] || "audio/webm") as AudioInput["content_type"];
+    const content_type = (target.mimeType.split(";", 1)[0] ||
+      "audio/webm") as AudioInput["content_type"];
     capturePending = false;
     await submitAsk({
       input: { type: "audio", data_base64, content_type },
@@ -469,18 +526,26 @@ record.addEventListener("click", async () => {
     nextRecorder.addEventListener("dataavailable", (event: BlobEvent) => {
       if (event.data.size > 0) nextChunks.push(event.data);
     });
-    nextRecorder.addEventListener("stop", () => {
-      if (settled) return;
-      settled = true;
-      void sendRecording(nextRecorder!, acquiredStream!, nextChunks);
-    }, { once: true });
-    nextRecorder.addEventListener("error", (event) => {
-      if (settled) return;
-      settled = true;
-      stopTracks(acquiredStream);
-      resetRecorder(nextRecorder);
-      showClientError(event.error ?? new Error("录音失败"));
-    }, { once: true });
+    nextRecorder.addEventListener(
+      "stop",
+      () => {
+        if (settled) return;
+        settled = true;
+        void sendRecording(nextRecorder!, acquiredStream!, nextChunks);
+      },
+      { once: true },
+    );
+    nextRecorder.addEventListener(
+      "error",
+      (event) => {
+        if (settled) return;
+        settled = true;
+        stopTracks(acquiredStream);
+        resetRecorder(nextRecorder);
+        showClientError(event.error ?? new Error("录音失败"));
+      },
+      { once: true },
+    );
     stream = acquiredStream;
     recorder = nextRecorder;
     nextRecorder.start();
@@ -511,7 +576,8 @@ async function decide(decision: "approve" | "reject") {
       correction = parseCorrection();
       reviewError.textContent = "";
     } catch (error) {
-      reviewError.textContent = error instanceof Error ? error.message : "校正 JSON 无法解析";
+      reviewError.textContent =
+        error instanceof Error ? error.message : "校正 JSON 无法解析";
       setPhase("awaiting_review");
       reviewCorrection.focus();
       return;
@@ -521,13 +587,16 @@ async function decide(decision: "approve" | "reject") {
   requestInFlight = true;
   setPhase("submitting");
   syncControls();
-  const body: ReviewDecisionRequest = correction === undefined ? { decision } : { decision, correction };
+  const body: ReviewDecisionRequest =
+    correction === undefined ? { decision } : { decision, correction };
   try {
-    consumeReviewResult(await decideReview({
-      headers: requestHeaders(),
-      path: { review_id: activeReviewId },
-      body,
-    }));
+    consumeReviewResult(
+      await decideReview({
+        headers: requestHeaders(),
+        path: { review_id: activeReviewId },
+        body,
+      }),
+    );
   } catch (error) {
     showClientError(error, { keepReview: true });
   } finally {

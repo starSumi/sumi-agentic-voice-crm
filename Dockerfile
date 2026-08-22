@@ -8,6 +8,9 @@ FROM node:24.19.0-bookworm-slim AS build
 WORKDIR /workspace
 COPY package.json LICENSE ./
 COPY pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml ./
+COPY packages/api-client/package.json ./packages/api-client/package.json
+COPY orchestration/package.json ./orchestration/package.json
 # Corepack resolves the exact packageManager version from package.json.
 RUN corepack enable pnpm && corepack install
 # The runtime build is dependency-free; install exactly the production closure

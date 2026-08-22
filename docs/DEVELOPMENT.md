@@ -12,8 +12,9 @@ Use Node.js `24.19.0` or newer, the repository `packageManager` pin
 application runtime is native ESM migrating to TypeScript's erasable syntax;
 Node executes the typed modules directly while `typecheck:runtime` enforces the
 same boundary statically. The Linux process-lifecycle supervisor is a small
-Rust workspace member. Astro and Starlight are development-only documentation
-dependencies.
+Rust workspace member. pnpm owns the JavaScript workspace and Nx owns its
+cross-language project/task graph; Cargo remains the Rust build and dependency
+authority. Astro and Starlight are development-only documentation dependencies.
 
 ## Optional Nix shell
 
@@ -39,23 +40,28 @@ both `nix flake check` and the normal pnpm verification gates.
 
 ## Repository map
 
-| Path | Owner |
-| --- | --- |
-| `src/` | HTTP runtime, validation and provider adapters; memory is the deterministic default and PostgreSQL is an explicit durable deployment mode. |
-| `contracts/` | Normative OpenAPI and event contracts. |
-| `db/` | Production-target schema and row-level security migration. |
-| `docs/` | Single reviewed source for human Web and agent MCP documentation. |
-| `.agent/`, `.local/` | Machine-local control-plane state and development evidence; ignored and never used by CI or release. |
-| `test/` | Runtime and contract regression tests. |
-| `scripts/` | Deterministic checks, builds, and cross-product verification. |
-| `flake.nix`, `flake.lock` | Optional pinned Linux/WSL2 development shell; not a release or package-manager replacement. |
-| `artifacts/docs-site/` | Generated documentation site and `_mcp` projection; ignored. |
-| `dist/` | Generated runtime release candidate; ignored. |
+| Path                                            | Owner                                                                                                                                      |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/`                                          | HTTP runtime, validation and provider adapters; memory is the deterministic default and PostgreSQL is an explicit durable deployment mode. |
+| `packages/api-client/`                          | Workspace package containing generated transport projections and stable API/type facades.                                                  |
+| `crates/runtime-supervisor/`                    | Cargo and Nx project for the Linux process-lifecycle boundary.                                                                             |
+| `contracts/`                                    | Normative OpenAPI and event contracts.                                                                                                     |
+| `db/`                                           | Production-target schema and row-level security migration.                                                                                 |
+| `docs/`                                         | Single reviewed source for human Web and agent MCP documentation.                                                                          |
+| `orchestration/`                                | Versioned desired state, schemas and TypeScript scheduling engine for development work; excluded from product artifacts.                   |
+| `.codex/`, `.agents/skills/sumi-orchestration/` | Generated repository-tool adapters; no live plan, transcript, credential or approval state.                                                |
+| `.agent/`, `.local/`                            | Retired legacy path and machine-local evidence; ignored and never used by CI or release.                                                   |
+| `test/`                                         | Runtime and contract regression tests.                                                                                                     |
+| `scripts/`                                      | Deterministic checks, builds, and cross-product verification.                                                                              |
+| `flake.nix`, `flake.lock`                       | Optional pinned Linux/WSL2 development shell; not a release or package-manager replacement.                                                |
+| `artifacts/docs-site/`                          | Generated documentation site and `_mcp` projection; ignored.                                                                               |
+| `dist/`                                         | Generated runtime release candidate; ignored.                                                                                              |
 
 ## Local gates
 
 ```powershell
 pnpm install --frozen-lockfile
+pnpm run workspace:projects
 pnpm verify:release
 pnpm verify:mcp
 pnpm smoke:docker
@@ -81,12 +87,14 @@ never target a shared database.
 
 ## Protocol change sequence
 
-`contracts/openapi.yaml` and `contracts/events.yaml` are normative sources.
+Each transport boundary has one language-neutral source. Public HTTP uses
+`contracts/openapi.yaml`, durable events use `contracts/events.yaml`, and the
+local Node/Rust supervisor uses `contracts/runtime-supervisor.schema.json`.
 After a contract change, run `pnpm protocol:generate`, inspect source and
 generated diffs together, then run `pnpm protocol:check`,
 `pnpm protocol:typecheck`, and `pnpm contract:consumer-check`. Frontend code
-imports operations from `packages/api-client/src/api.ts`, types from
-`packages/api-client/src/protocol.ts`, and never declares a parallel
+imports operations from `@sumi/voice-crm-api-client/api`, types from
+`@sumi/voice-crm-api-client/protocol`, and never declares a parallel
 request/response DTO or raw `/v1/` transport. A breaking change requires
 a major protocol/event version, consumer inventory, migration window and
 rollback to the previous source/projection pair.

@@ -1,6 +1,9 @@
 * @starSumi
 /contracts/ @starSumi
 /protocol/ @starSumi
+/orchestration/ @starSumi
+/.codex/ @starSumi
+/.agents/skills/sumi-orchestration/ @starSumi
 /packages/api-client/src/generated/ @starSumi
 /src/scripts/ @starSumi
 /scripts/check-contract-consumers.mjs @starSumi
@@ -14,6 +17,8 @@
 /scripts/generate-sbom.mjs @starSumi
 /scripts/verify-sbom.mjs @starSumi
 /package.json @starSumi
+/pnpm-workspace.yaml @starSumi
+/nx.json @starSumi
 /pnpm-lock.yaml @starSumi
 /.jscpd.json @starSumi
 /Cargo.toml @starSumi

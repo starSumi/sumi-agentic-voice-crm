@@ -17,6 +17,9 @@ target/
 .agent-*.json
 .agent-*.tmp
 .codex/
+.agents/
+.nx/
+orchestration/
 .claude/
 .vscode/
 .idea/

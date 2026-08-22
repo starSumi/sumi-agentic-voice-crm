@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import Ajv2020 from "ajv/dist/2020.js";
 
 const runtimeSources = [
+  "src/agent-crm-contract.ts",
   "src/application/attachments.ts",
   "src/application/commands.ts",
   "src/application/conversation-state.ts",
@@ -25,6 +27,8 @@ const runtimeSources = [
   "src/data-cipher.ts",
   "src/event-consumer.ts",
   "src/extensions/index.ts",
+  "src/extensions/generated/runtime-supervisor-protocol.ts",
+  "src/generated/agent-crm-contract.ts",
   "src/extensions/manifest.ts",
   "src/extensions/registry.ts",
   "src/extensions/rust-process-supervisor.ts",
@@ -62,9 +66,13 @@ const required = [
   "crates/runtime-supervisor/Cargo.toml",
   "crates/runtime-supervisor/src/lib.rs",
   "crates/runtime-supervisor/src/main.rs",
+  "crates/runtime-supervisor/src/generated/protocol.rs",
+  "crates/runtime-supervisor/project.json",
   "contracts/openapi.yaml",
   "contracts/events.yaml",
   "contracts/runtime-supervisor.schema.json",
+  "contracts/agent-crm-intents.json",
+  "contracts/agent-crm-intents.schema.json",
   "contracts/authorization-policy.json",
   "contracts/authorization-policy.schema.json",
   "contracts/transport-policy.json",
@@ -81,9 +89,21 @@ const required = [
   "protocol/protocol-manifest.schema.json",
   "protocol/schema/json/openapi.bundle.json",
   "protocol/schema/json/events.bundle.json",
+  "protocol/schema/json/agent-crm-provider-output.schema.json",
+  "protocol/schema/json/agent-crm-action.schema.json",
+  "protocol/schema/json/agent-crm-training-example.schema.json",
   "packages/api-client/src/api.ts",
   "packages/api-client/src/protocol.ts",
   "packages/api-client/src/generated/index.ts",
+  "pnpm-workspace.yaml",
+  "nx.json",
+  "orchestration/orchestration.yaml",
+  "orchestration/orchestration.schema.json",
+  "orchestration/cli.ts",
+  ".codex/config.toml",
+  ".codex/agents/sumi_supervisor.toml",
+  ".agents/skills/sumi-orchestration/SKILL.md",
+  ".agents/skills/sumi-orchestration/agents/openai.yaml",
   ".mcp.json",
   "astro.config.mjs",
   "src/content.config.ts",
@@ -95,6 +115,10 @@ const required = [
   "scripts/check-transport-policy.mjs",
   "scripts/check-authorization-policy.mjs",
   "scripts/check-control-plane-policy.mjs",
+  "scripts/generate-runtime-supervisor-protocol.mjs",
+  "scripts/generate-agent-crm-contract.mjs",
+  "scripts/check-agent-crm-intents.mjs",
+  "scripts/validate-agent-crm-dataset.mjs",
   "scripts/generate-sbom.mjs",
   "scripts/verify-sbom.mjs",
   ...runtimeSources,
@@ -130,6 +154,20 @@ const missing = required.filter((p) => !existsSync(p));
 if (missing.length)
   throw new Error(`missing required files: ${missing.join(", ")}`);
 JSON.parse(await readFile("postman/voice-crm.postman_collection.json", "utf8"));
+const protocolManifest = JSON.parse(
+  await readFile("protocol/protocol.manifest.json", "utf8"),
+);
+const protocolManifestSchema = JSON.parse(
+  await readFile("protocol/protocol-manifest.schema.json", "utf8"),
+);
+const validateProtocolManifest = new Ajv2020({ strict: true }).compile(
+  protocolManifestSchema,
+);
+if (!validateProtocolManifest(protocolManifest)) {
+  throw new Error(
+    `protocol manifest is invalid: ${JSON.stringify(validateProtocolManifest.errors)}`,
+  );
+}
 const openapi = await readFile("contracts/openapi.yaml", "utf8");
 for (const marker of [
   "openapi: 3.1.0",
@@ -148,9 +186,6 @@ for (const marker of [
 ])
   if (!events.includes(marker))
     throw new Error(`event marker missing: ${marker}`);
-const protocolManifest = JSON.parse(
-  await readFile("protocol/protocol.manifest.json", "utf8"),
-);
 for (const field of [
   "protocol_version",
   "sources",
@@ -227,8 +262,12 @@ const trackedFiles = spawnSync(
 );
 if (trackedFiles.status !== 0) throw new Error(trackedFiles.stderr);
 const secretPatterns = [
-  new RegExp(["sk-", "[A-Za-z0-9_-]{20,}"].join("")),
-  new RegExp(["gh", "[pousr]_[A-Za-z0-9]{20,}"].join("")),
+  new RegExp(
+    ["(?<![A-Za-z0-9_-])sk-", "[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"].join(""),
+  ),
+  new RegExp(
+    ["(?<![A-Za-z0-9])gh", "[pousr]_[A-Za-z0-9]{20,}(?![A-Za-z0-9])"].join(""),
+  ),
   new RegExp(["BEGIN ", "(?:RSA |EC |OPENSSH )?PRIVATE KEY"].join("")),
 ];
 const secretFindings = [];

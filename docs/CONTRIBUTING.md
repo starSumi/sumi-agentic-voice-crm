@@ -34,7 +34,7 @@ pnpm run verify
 pnpm run verify:mcp
 ```
 
-If a gate cannot run, say exactly which one and why. Do not replace missing evidence with a status report or a confidence claim.
+`verify` is the deterministic local Nx graph and does not start PostgreSQL. Protected CI and release acceptance run `verify:ci`, which adds the disposable PostgreSQL integration project. If a gate cannot run, say exactly which one and why. Do not replace missing evidence with a status report or a confidence claim.
 
 ## Content changes
 

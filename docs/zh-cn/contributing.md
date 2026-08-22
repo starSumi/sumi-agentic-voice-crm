@@ -20,4 +20,6 @@ pnpm run verify
 pnpm run verify:mcp
 ```
 
+`verify` 是不启动 PostgreSQL 的本地确定性 Nx 任务图。受保护 CI 与 release acceptance 运行 `verify:ci`，并加入一次性 PostgreSQL 集成项目。
+
 `docs/` 同时服务 Web 和 MCP。翻译页面与英文页面共享稳定 `docId`；语言、受众和版本必须通过构建校验。

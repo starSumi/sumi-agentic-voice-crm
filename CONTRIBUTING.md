@@ -3,7 +3,7 @@
 1. Read `AGENTS.md`, the relevant ADR and checkpoint before changing a boundary.
 2. Keep PRs small and cohesive; add/modify tests with code.
 3. Contract, database, security and release changes require the CODEOWNERS review.
-4. Run `pnpm run verify` locally. Run `pnpm run verify:mcp` when documentation, API, routing, or agent onboarding changes.
+4. Run `pnpm run verify` locally. Protected CI runs `pnpm run verify:ci`, including disposable PostgreSQL integration. Run `pnpm run verify:mcp` when documentation, API, routing, or agent onboarding changes.
 5. Never commit credentials, PII, raw customer audio, generated `dist/`, or copied upstream material.
 6. Use an ADR for new providers, schema-breaking changes, lifecycle changes, or new agent capabilities.
 7. Use the repository issue forms and pull request template; report vulnerabilities through a private security advisory, never a public issue.

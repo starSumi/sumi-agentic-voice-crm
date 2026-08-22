@@ -13,6 +13,11 @@
 .dist.staging-*/
 .dist.backup-*/
 .codex/
+.agents/
+.nx/
+orchestration/
+nx.json
+pnpm-workspace.yaml
 .claude/
 .vscode/
 .idea/

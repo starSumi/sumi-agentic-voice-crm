@@ -76,6 +76,7 @@ test("Docker and CI install the frozen pnpm closure without lifecycle scripts", 
     assert.match(source, /cache-dependency-path: pnpm-lock\.yaml/);
     assert.match(source, /pnpm install --frozen-lockfile --ignore-scripts/);
     assert.match(source, /pnpm run sbom:check/);
+    assert.match(source, /pnpm run verify:ci/);
   }
 });
 
@@ -113,10 +114,25 @@ test("package-manager execution surfaces contain no npm command fallback", async
 });
 
 test("verification wires the generated-client consumer boundary", async () => {
-  assert.match(packageJson.scripts.verify, /pnpm run typecheck:runtime/);
-  assert.match(packageJson.scripts.verify, /pnpm run contract:consumer-check/);
-  assert.match(packageJson.scripts.verify, /pnpm run transport:check/);
-  assert.match(packageJson.scripts.verify, /pnpm run authorization:check/);
+  assert.match(packageJson.scripts.verify, /nx run-many -t ci/);
+  assert.match(packageJson.scripts.verify, /--exclude=sumi-postgres/);
+  assert.match(packageJson.scripts["verify:ci"], /nx run-many -t ci --all/);
+  assert.match(
+    packageJson.scripts["verify:platform"],
+    /pnpm run typecheck:runtime/,
+  );
+  assert.match(
+    packageJson.scripts["verify:platform"],
+    /pnpm run contract:consumer-check/,
+  );
+  assert.match(
+    packageJson.scripts["verify:platform"],
+    /pnpm run transport:check/,
+  );
+  assert.match(
+    packageJson.scripts["verify:platform"],
+    /pnpm run authorization:check/,
+  );
   const manifest = JSON.parse(
     await readFile("protocol/protocol.manifest.json", "utf8"),
   );
@@ -141,12 +157,61 @@ test("verification wires the generated-client consumer boundary", async () => {
 test("verification enforces the mixed-language duplication gate", async () => {
   assert.equal(packageJson.devDependencies.jscpd, "5.0.12");
   assert.equal(packageJson.scripts.duplication, "jscpd");
-  assert.match(packageJson.scripts.verify, /pnpm run duplication/);
+  assert.match(packageJson.scripts["verify:platform"], /pnpm run duplication/);
 
   const config = JSON.parse(await readFile(".jscpd.json", "utf8"));
   assert.equal(config.exitCode, 1);
   assert.deepEqual(config.format, ["javascript", "typescript", "tsx", "rust"]);
   assert.ok(config.ignore.includes("**/packages/api-client/src/generated/**"));
+});
+
+test("Nx models the pnpm, Rust, protocol, data, docs and orchestration boundaries", async () => {
+  const workspace = parse(await readFile("pnpm-workspace.yaml", "utf8"));
+  assert.deepEqual(workspace.packages, ["packages/*", "orchestration"]);
+  assert.equal(workspace.disallowWorkspaceCycles, true);
+  assert.equal(workspace.failIfNoMatch, true);
+  assert.equal(packageJson.devDependencies.nx, "23.1.1");
+  assert.equal(packageJson.devDependencies["smol-toml"], "1.8.0");
+  assert.deepEqual(Object.keys(pnpmLock.importers).sort(), [
+    ".",
+    "orchestration",
+    "packages/api-client",
+  ]);
+  for (const workspacePackage of ["orchestration", "packages/api-client"]) {
+    const manifest = JSON.parse(
+      await readFile(`${workspacePackage}/package.json`, "utf8"),
+    );
+    const locked = pnpmLock.importers[workspacePackage];
+    for (const dependencyType of ["dependencies", "devDependencies"]) {
+      assert.deepEqual(
+        Object.keys(locked[dependencyType] ?? {}).sort(),
+        Object.keys(manifest[dependencyType] ?? {}).sort(),
+        `${workspacePackage} ${dependencyType} lock keys drifted`,
+      );
+    }
+  }
+  const projects = [
+    "contracts/project.json",
+    "crates/runtime-supervisor/project.json",
+    "db/project.json",
+    "docs/project.json",
+  ];
+  for (const path of projects) {
+    const source = await readFile(path, "utf8");
+    assert.doesNotThrow(() => JSON.parse(source));
+  }
+  const nx = JSON.parse(await readFile("nx.json", "utf8"));
+  assert.equal(nx.neverConnectToCloud, true);
+  assert.equal(
+    JSON.parse(await readFile("db/project.json", "utf8")).targets.test.cache,
+    false,
+  );
+  assert.match(packageJson.scripts.verify, /exclude=sumi-postgres/);
+  assert.equal(packageJson.scripts["verify:ci"].includes("exclude"), false);
+  assert.match(
+    await readFile(".github/workflows/ci.yml", "utf8"),
+    /pnpm run verify:ci/,
+  );
 });
 
 async function listInstructionFiles(directory = ".") {

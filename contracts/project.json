@@ -1,0 +1,24 @@
+{
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "name": "sumi-protocol",
+  "projectType": "library",
+  "sourceRoot": "contracts",
+  "tags": ["scope:protocol", "type:schema", "boundary:public-api"],
+  "targets": {
+    "generate": {
+      "command": "pnpm run protocol:generate",
+      "cache": false
+    },
+    "check": {
+      "command": "pnpm run intent:check && pnpm run protocol:check"
+    },
+    "test": {
+      "command": "pnpm run protocol:check"
+    },
+    "ci": {
+      "dependsOn": ["check"],
+      "command": "node -e \"console.log('Protocol projections are current')\"",
+      "cache": true
+    }
+  }
+}

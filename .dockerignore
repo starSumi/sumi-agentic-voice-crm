@@ -25,6 +25,11 @@ logs
 .agent-*.json
 .agent-*.tmp
 .codex/
+.agents/
+.nx/
+orchestration/*
+!orchestration/package.json
+nx.json
 .claude/
 .vscode/
 .idea/

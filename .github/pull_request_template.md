@@ -11,6 +11,8 @@
 <!-- Commands, exit codes, test names, and relevant runtime evidence. -->
 
 - [ ] `pnpm run verify`
+- [ ] `pnpm run orchestration:check` when roles, workflow, scheduling, or repository adapters changed
+- [ ] `pnpm run workspace:projects` still exposes every owned product, protocol, data, docs, Rust, and tooling boundary
 - [ ] Contract consumers use only the generated API client; `pnpm run contract:consumer-check` is clean
 - [ ] Contract changes regenerated the SDK and passed `pnpm run protocol:check` plus `pnpm run protocol:typecheck`
 - [ ] Authorization changes passed `pnpm run authorization:check` and retain application plus transaction enforcement
@@ -28,7 +30,7 @@
 
 - [ ] Human and agent documentation matches the implementation
 - [ ] English and Chinese core variants remain paired when applicable
-- [ ] Local control-plane state was not added to the product diff; release evidence is attached through CI and GitHub review
+- [ ] Live plan/task state, transcripts, credentials, and approval decisions were not added to the product diff; release evidence is attached through CI and GitHub review
 
 ## Rollback
 

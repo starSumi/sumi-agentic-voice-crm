@@ -8,5 +8,31 @@
     "./api": "./src/api.ts",
     "./protocol": "./src/protocol.ts"
   },
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "pnpm --dir ../.. run protocol:check",
+    "test": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "ci": "pnpm run check && pnpm run typecheck"
+  },
+  "nx": {
+    "implicitDependencies": [
+      "sumi-protocol"
+    ],
+    "tags": [
+      "scope:protocol",
+      "type:library",
+      "boundary:public-api"
+    ],
+    "targets": {
+      "ci": {
+        "cache": true,
+        "outputs": []
+      }
+    }
+  },
+  "devDependencies": {
+    "typescript": "npm:@typescript/typescript6@6.0.2"
+  }
 }
