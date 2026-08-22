@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { MessageJob, MessageJobQueue } from "./message-job-queue.ts";
+import type { MessageJob, MessageJobWorkerQueue } from "./message-job-queue.ts";
 
 type WorkerResult = Record<string, unknown>;
-type ProcessJob = (job: MessageJob, context: { signal: AbortSignal; workerId: string }) => unknown | PromiseLike<unknown>;
+type ProcessJob = (
+  job: MessageJob,
+  context: { signal: AbortSignal; workerId: string },
+) => unknown | PromiseLike<unknown>;
 type WorkerOptions = {
-  queue?: MessageJobQueue;
+  queue?: MessageJobWorkerQueue;
   processJob?: ProcessJob;
   tenantIds?: readonly string[];
   workerId?: string;
@@ -14,9 +17,18 @@ type WorkerOptions = {
   pollIntervalMs?: number;
   onResult?: (result: WorkerResult) => void;
 };
-type WorkerTask = { result: Promise<void>; controller: AbortController; workerId: string };
+type WorkerTask = {
+  result: Promise<void>;
+  controller: AbortController;
+  workerId: string;
+};
 
-function positiveInteger(value: unknown, fallback: number, name: string, max = Number.MAX_SAFE_INTEGER): number {
+function positiveInteger(
+  value: unknown,
+  fallback: number,
+  name: string,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
   const resolved = value === undefined ? fallback : Number(value);
   if (!Number.isSafeInteger(resolved) || resolved <= 0 || resolved > max) {
     throw new TypeError(
@@ -26,7 +38,9 @@ function positiveInteger(value: unknown, fallback: number, name: string, max = N
   return resolved;
 }
 
-function abortError(reason = "message job worker stopped"): Error & { name: string; breakerEligible: boolean } {
+function abortError(
+  reason = "message job worker stopped",
+): Error & { name: string; breakerEligible: boolean } {
   return Object.assign(new Error(reason), {
     name: "AbortError",
     breakerEligible: false,
@@ -149,7 +163,10 @@ export function createMessageJobWorker({
             tenant_id: job.tenant_id,
           });
         } catch (error: unknown) {
-          const candidate = error && typeof error === "object" ? error as { name?: unknown; code?: unknown; message?: unknown } : {};
+          const candidate =
+            error && typeof error === "object"
+              ? (error as { name?: unknown; code?: unknown; message?: unknown })
+              : {};
           if (signal.aborted || candidate.name === "AbortError") {
             await durableQueue.releaseMessageJob({
               tenant_id: job.tenant_id,
@@ -163,8 +180,14 @@ export function createMessageJobWorker({
             tenant_id: job.tenant_id,
             job_id: job.id,
             worker_id: workerId,
-            error_code: typeof candidate.code === "string" ? candidate.code : "UPSTREAM_UNAVAILABLE",
-            error_message: typeof candidate.message === "string" ? candidate.message : String(error),
+            error_code:
+              typeof candidate.code === "string"
+                ? candidate.code
+                : "UPSTREAM_UNAVAILABLE",
+            error_message:
+              typeof candidate.message === "string"
+                ? candidate.message
+                : String(error),
             max_attempts: resolvedMaxAttempts,
           });
           onResult({
@@ -199,7 +222,10 @@ export function createMessageJobWorker({
         try {
           await task.result;
         } catch (error: unknown) {
-          const name = error && typeof error === "object" ? (error as { name?: unknown }).name : undefined;
+          const name =
+            error && typeof error === "object"
+              ? (error as { name?: unknown }).name
+              : undefined;
           if (name !== "AbortError") throw error;
         }
       }

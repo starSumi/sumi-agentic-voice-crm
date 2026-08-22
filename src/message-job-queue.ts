@@ -8,7 +8,15 @@ export const MESSAGE_JOB_STATES = Object.freeze([
   "retry_wait",
   "dead_letter",
   "cancelled",
-]) as readonly ["inbound", "job_queued", "running", "succeeded", "retry_wait", "dead_letter", "cancelled"];
+]) as readonly [
+  "inbound",
+  "job_queued",
+  "running",
+  "succeeded",
+  "retry_wait",
+  "dead_letter",
+  "cancelled",
+];
 export type MessageJobStatus = (typeof MESSAGE_JOB_STATES)[number];
 export type MessageJobTransition = {
   sequence: number;
@@ -38,7 +46,9 @@ type StoredJob = {
   completed_at?: string;
   transitions: MessageJobTransition[];
 };
-export type MessageJob = Readonly<Omit<StoredJob, "transitions" | "error_message">>;
+export type MessageJob = Readonly<
+  Omit<StoredJob, "transitions" | "error_message">
+>;
 type EventReceipt = {
   tenant_id: string;
   consumer_id: string;
@@ -52,30 +62,98 @@ type EventReceipt = {
   completed_at?: string;
 };
 export type MessageJobQueue = Readonly<{
-  enqueueMessageJob(input: EnqueueInput): { duplicate: boolean; job: MessageJob };
+  enqueueMessageJob(input: EnqueueInput): {
+    duplicate: boolean;
+    job: MessageJob;
+  };
   claimMessageJobs(input: ClaimInput): MessageJob[];
   getMessageJob(input: GetJobInput): MessageJob | undefined;
   messageJobTransitions(input: GetJobInput): MessageJobTransition[];
   completeMessageJob(input: CompleteInput): MessageJob;
   failMessageJob(input: FailInput): MessageJob;
   releaseMessageJob(input: ReleaseInput): MessageJob;
-  messageJobStats(input?: { tenant_id?: string }): Record<MessageJobStatus, number>;
+  messageJobStats(input?: {
+    tenant_id?: string;
+  }): Record<MessageJobStatus, number>;
   claimEventDelivery(input: ClaimEventInput): Record<string, unknown>;
   completeEventDelivery(input: CompleteEventInput): Record<string, unknown>;
   releaseEventDelivery(input: CompleteEventInput): Record<string, unknown>;
 }>;
-type EnqueueInput = { tenant_id?: unknown; actor_id?: unknown; request_id?: unknown; idempotency_key?: unknown; request_fingerprint?: unknown; payload?: unknown };
-type ClaimInput = { tenant_id?: string; worker_id?: unknown; limit?: unknown; lease_ms?: unknown };
-type GetJobInput = { tenant_id?: string; job_id?: string; idempotency_key?: string };
-type CompleteInput = { tenant_id?: string; job_id?: string; worker_id?: string; result?: unknown };
-type FailInput = { tenant_id?: string; job_id?: string; worker_id?: string; error_code?: string; error_message?: unknown; max_attempts?: unknown; retry_delay_ms?: unknown };
-type ReleaseInput = { tenant_id?: string; job_id?: string; worker_id?: string; reason?: string };
-type ClaimEventInput = { tenant_id?: unknown; consumer_id?: unknown; event_id?: unknown; event_type?: unknown; worker_id?: unknown; lease_ms?: unknown };
-type CompleteEventInput = { tenant_id?: unknown; consumer_id?: unknown; event_id?: unknown; worker_id?: unknown };
+type EnqueueInput = {
+  tenant_id?: unknown;
+  actor_id?: unknown;
+  request_id?: unknown;
+  idempotency_key?: unknown;
+  request_fingerprint?: unknown;
+  payload?: unknown;
+};
+type ClaimInput = {
+  tenant_id?: string;
+  worker_id?: unknown;
+  limit?: unknown;
+  lease_ms?: unknown;
+};
+type GetJobInput = {
+  tenant_id?: string;
+  job_id?: string;
+  idempotency_key?: string;
+};
+type CompleteInput = {
+  tenant_id?: string;
+  job_id?: string;
+  worker_id?: string;
+  result?: unknown;
+};
+type FailInput = {
+  tenant_id?: string;
+  job_id?: string;
+  worker_id?: string;
+  error_code?: string;
+  error_message?: unknown;
+  max_attempts?: unknown;
+  retry_delay_ms?: unknown;
+};
+type ReleaseInput = {
+  tenant_id?: string;
+  job_id?: string;
+  worker_id?: string;
+  reason?: string;
+};
+type ClaimEventInput = {
+  tenant_id?: unknown;
+  consumer_id?: unknown;
+  event_id?: unknown;
+  event_type?: unknown;
+  worker_id?: unknown;
+  lease_ms?: unknown;
+};
+type CompleteEventInput = {
+  tenant_id?: unknown;
+  consumer_id?: unknown;
+  event_id?: unknown;
+  worker_id?: unknown;
+};
+type Awaitable<T> = T | PromiseLike<T>;
 
-const TERMINAL_JOB_STATES: ReadonlySet<MessageJobStatus> = new Set(["succeeded", "dead_letter", "cancelled"]);
+export type MessageJobWorkerQueue = Readonly<{
+  claimMessageJobs(input: ClaimInput): Awaitable<MessageJob[]>;
+  completeMessageJob(input: CompleteInput): Awaitable<MessageJob>;
+  failMessageJob(input: FailInput): Awaitable<MessageJob>;
+  releaseMessageJob(input: ReleaseInput): Awaitable<MessageJob>;
+}>;
 
-function positiveInteger(value: unknown, fallback: number, name: string, max = Number.MAX_SAFE_INTEGER): number {
+const TERMINAL_JOB_STATES: ReadonlySet<MessageJobStatus> = new Set([
+  "succeeded",
+  "dead_letter",
+  "cancelled",
+]);
+
+function positiveInteger(
+  value: unknown,
+  fallback: number,
+  name: string,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
   const resolved = value === undefined ? fallback : Number(value);
   if (!Number.isSafeInteger(resolved) || resolved <= 0 || resolved > max) {
     throw new TypeError(
@@ -113,7 +191,11 @@ function jobKey(tenantId: unknown, idempotencyKey: unknown): string {
   return `${requiredString(tenantId, "tenant_id")}\u0000${requiredString(idempotencyKey, "idempotency_key")}`;
 }
 
-function receiptKey(tenantId: unknown, consumerId: unknown, eventId: unknown): string {
+function receiptKey(
+  tenantId: unknown,
+  consumerId: unknown,
+  eventId: unknown,
+): string {
   return [
     requiredString(tenantId, "tenant_id"),
     requiredString(consumerId, "consumer_id"),
@@ -121,7 +203,15 @@ function receiptKey(tenantId: unknown, consumerId: unknown, eventId: unknown): s
   ].join("\u0000");
 }
 
-function transition(job: StoredJob, status: MessageJobStatus, { workerId, reason, now }: { workerId?: string; reason?: string; now: number }): void {
+function transition(
+  job: StoredJob,
+  status: MessageJobStatus,
+  {
+    workerId,
+    reason,
+    now,
+  }: { workerId?: string; reason?: string; now: number },
+): void {
   job.status = status;
   job.updated_at = new Date(now).toISOString();
   job.transitions.push({
@@ -186,8 +276,13 @@ export function createMemoryMessageJobQueue({
     const tenantId = requiredString(tenant_id, "tenant_id");
     const idempotencyKey = requiredString(idempotency_key, "idempotency_key");
     const requestId = requiredString(request_id, "request_id");
-    const requestFingerprint = requiredString(request_fingerprint, "request_fingerprint", 128);
-    const actorId = actor_id === undefined ? undefined : requiredString(actor_id, "actor_id");
+    const requestFingerprint = requiredString(
+      request_fingerprint,
+      "request_fingerprint",
+      128,
+    );
+    const actorId =
+      actor_id === undefined ? undefined : requiredString(actor_id, "actor_id");
     const key = jobKey(tenantId, idempotencyKey);
     const previous = jobs.get(key);
     if (previous) {
@@ -264,7 +359,8 @@ export function createMemoryMessageJobQueue({
     return claimed;
   }
 
-  function getJob({ tenant_id, job_id, idempotency_key }: GetJobInput = {}): MessageJob | undefined {
+  function getJob({ tenant_id, job_id, idempotency_key }: GetJobInput = {}):
+    MessageJob | undefined {
     const found = [...jobs.values()].find(
       (job) =>
         job.tenant_id === tenant_id &&
@@ -274,14 +370,22 @@ export function createMemoryMessageJobQueue({
     return found ? publicJob(found) : undefined;
   }
 
-  function transitions({ tenant_id, job_id }: GetJobInput = {}): MessageJobTransition[] {
+  function transitions({
+    tenant_id,
+    job_id,
+  }: GetJobInput = {}): MessageJobTransition[] {
     const found = [...jobs.values()].find(
       (job) => job.tenant_id === tenant_id && job.id === job_id,
     );
-    return found ? clone(found.transitions) ?? [] : [];
+    return found ? (clone(found.transitions) ?? []) : [];
   }
 
-  function assertLease(job: StoredJob | undefined, tenant_id: string | undefined, job_id: string | undefined, worker_id: string | undefined): asserts job is StoredJob {
+  function assertLease(
+    job: StoredJob | undefined,
+    tenant_id: string | undefined,
+    job_id: string | undefined,
+    worker_id: string | undefined,
+  ): asserts job is StoredJob {
     if (
       !job ||
       job.tenant_id !== tenant_id ||
@@ -295,7 +399,12 @@ export function createMemoryMessageJobQueue({
     }
   }
 
-  function complete({ tenant_id, job_id, worker_id, result }: CompleteInput = {}): MessageJob {
+  function complete({
+    tenant_id,
+    job_id,
+    worker_id,
+    result,
+  }: CompleteInput = {}): MessageJob {
     const job = [...jobs.values()].find((entry) => entry.id === job_id);
     assertLease(job, tenant_id, job_id, worker_id);
     job.result = clone(result);
@@ -357,8 +466,13 @@ export function createMemoryMessageJobQueue({
     return publicJob(job);
   }
 
-  function stats({ tenant_id }: { tenant_id?: string } = {}): Record<MessageJobStatus, number> {
-    const counts = Object.fromEntries(MESSAGE_JOB_STATES.map((state) => [state, 0])) as Record<MessageJobStatus, number>;
+  function stats({ tenant_id }: { tenant_id?: string } = {}): Record<
+    MessageJobStatus,
+    number
+  > {
+    const counts = Object.fromEntries(
+      MESSAGE_JOB_STATES.map((state) => [state, 0]),
+    ) as Record<MessageJobStatus, number>;
     for (const job of jobs.values()) {
       if (tenant_id === undefined || job.tenant_id === tenant_id)
         counts[job.status] += 1;
@@ -403,7 +517,8 @@ export function createMemoryMessageJobQueue({
       event_type: typeof event_type === "string" ? event_type : undefined,
       attempts: 0,
     };
-    receipt.event_type = typeof event_type === "string" ? event_type : receipt.event_type;
+    receipt.event_type =
+      typeof event_type === "string" ? event_type : receipt.event_type;
     receipt.status = "claimed";
     receipt.attempts += 1;
     receipt.lease_owner = workerId;
@@ -413,7 +528,12 @@ export function createMemoryMessageJobQueue({
     return { duplicate: false, claimed: true, status: "claimed" };
   }
 
-  function completeEvent({ tenant_id, consumer_id, event_id, worker_id }: CompleteEventInput = {}): Record<string, unknown> {
+  function completeEvent({
+    tenant_id,
+    consumer_id,
+    event_id,
+    worker_id,
+  }: CompleteEventInput = {}): Record<string, unknown> {
     const receipt = receipts.get(receiptKey(tenant_id, consumer_id, event_id));
     if (
       !receipt ||
@@ -431,7 +551,12 @@ export function createMemoryMessageJobQueue({
     return { completed: true };
   }
 
-  function releaseEvent({ tenant_id, consumer_id, event_id, worker_id }: CompleteEventInput = {}): Record<string, unknown> {
+  function releaseEvent({
+    tenant_id,
+    consumer_id,
+    event_id,
+    worker_id,
+  }: CompleteEventInput = {}): Record<string, unknown> {
     const key = receiptKey(tenant_id, consumer_id, event_id);
     const receipt = receipts.get(key);
     if (
@@ -459,6 +584,11 @@ export function createMemoryMessageJobQueue({
   });
 }
 
-export function isTerminalMessageJobStatus(status: unknown): status is MessageJobStatus {
-  return typeof status === "string" && TERMINAL_JOB_STATES.has(status as MessageJobStatus);
+export function isTerminalMessageJobStatus(
+  status: unknown,
+): status is MessageJobStatus {
+  return (
+    typeof status === "string" &&
+    TERMINAL_JOB_STATES.has(status as MessageJobStatus)
+  );
 }
