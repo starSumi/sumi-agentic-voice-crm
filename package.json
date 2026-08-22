@@ -4,69 +4,147 @@
   "private": true,
   "description": "Contract-first agentic CRM reference platform with ASR, intent extraction and TTS.",
   "type": "module",
-  "main": "./dist/src/server.mjs",
+  "main": "./dist/src/server.ts",
   "files": [
     "dist/"
   ],
   "engines": {
-    "node": ">=24.18.0"
+    "node": ">=24.19.0",
+    "pnpm": "10.33.4"
   },
-  "packageManager": "npm@11.15.0",
+  "packageManager": "pnpm@10.33.4",
   "volta": {
-    "node": "24.18.0",
-    "npm": "11.15.0"
+    "node": "24.19.0"
   },
   "scripts": {
-    "start": "node dist/src/server.mjs",
-    "start:outbox": "node dist/src/outbox-worker.mjs",
-    "dev": "node src/server.mjs",
-    "test": "node --test \"test/*.test.mjs\"",
+    "start": "node dist/src/server.ts",
+    "start:outbox": "node dist/src/outbox-worker.ts",
+    "dev": "node src/server.ts",
+    "lint": "oxlint --deny-warnings .",
+    "duplication": "jscpd",
+    "rust:fmt": "node scripts/run-cargo.mjs fmt --all -- --check",
+    "rust:lint": "node scripts/run-cargo.mjs clippy --workspace --all-targets --locked -- -D warnings",
+    "rust:test": "node scripts/run-cargo.mjs test --workspace --locked",
+    "rust:build": "node scripts/run-cargo.mjs build --release --locked --package sumi-runtime-supervisor",
+    "rust:check": "pnpm run rust:fmt && pnpm run rust:lint && pnpm run rust:test",
+    "test": "pnpm run rust:build && pnpm run test:node",
+    "test:node": "node --test \"test/*.test.mjs\"",
     "test:postgres": "node scripts/test-postgres.mjs",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/check-protocol-drift.mjs",
+    "intent:check": "node scripts/check-agent-crm-intents.mjs",
+    "dataset:validate": "node scripts/validate-agent-crm-dataset.mjs",
+    "typecheck:runtime": "tsc -p tsconfig.runtime.json",
     "protocol:typecheck": "tsc -p packages/api-client/tsconfig.json",
+    "orchestration:generate": "node orchestration/cli.ts generate",
+    "orchestration:check": "node orchestration/cli.ts check",
+    "orchestration:simulate": "node orchestration/cli.ts next --plan orchestration/fixtures/change-plan.json --state orchestration/fixtures/change-state.json",
+    "typecheck:orchestration": "tsc -p orchestration/tsconfig.json",
+    "transport:check": "node scripts/check-transport-policy.mjs",
+    "authorization:check": "node scripts/check-authorization-policy.mjs",
+    "control-plane:check": "node scripts/check-control-plane-policy.mjs",
+    "contract:consumer-check": "node scripts/check-contract-consumers.mjs",
     "check": "node scripts/check.mjs",
-    "check:agent": "node scripts/check-agent.mjs && node scripts/agent-ops.mjs check",
-    "agent:health": "node scripts/agent-ops.mjs health",
-    "agent:resume": "node scripts/agent-ops.mjs resume",
-    "agent:snapshot": "node scripts/agent-ops.mjs snapshot",
-    "agent:incident": "node scripts/agent-incident.mjs",
-    "build": "npm run protocol:check && node scripts/build.mjs",
+    "build": "pnpm run protocol:check && pnpm run rust:build && node scripts/build.mjs",
     "check:dist": "node -e \"import('./scripts/build.mjs').then(({verifyBuildManifest})=>verifyBuildManifest('dist'))\"",
-    "sbom": "node -e \"require('node:fs').mkdirSync('artifacts/release',{recursive:true})\" && npm sbom --sbom-format=spdx --omit=dev > artifacts/release/sbom.spdx.json",
-    "smoke:dist": "npm run build && node scripts/smoke-dist.mjs",
+    "sbom": "node scripts/generate-sbom.mjs",
+    "sbom:check": "node scripts/verify-sbom.mjs",
+    "smoke:dist": "pnpm run build && node scripts/smoke-dist.mjs",
     "smoke:docker": "node scripts/smoke-docker.mjs",
     "docs:dev": "astro dev",
     "docs:check": "astro check",
     "docs:build": "astro check && astro build && node scripts/verify-docs-dist.mjs",
     "docs:preview": "astro preview",
     "verify:mcp": "node scripts/verify-docs-mcp.mjs",
-    "verify": "npm run protocol:check && npm run protocol:typecheck && npm test && npm run test:postgres && npm run check && npm run check:agent && npm run smoke:dist && npm run check:dist && npm run docs:build",
-    "audit:deps": "npm audit --audit-level=high --registry=https://registry.npmjs.org",
+    "verify": "NX_DAEMON=false nx run-many -t ci --all --exclude=sumi-postgres --parallel=3",
+    "verify:ci": "NX_DAEMON=false nx run-many -t ci --all --parallel=3",
+    "verify:platform": "pnpm run lint && pnpm run duplication && pnpm run typecheck:runtime && pnpm run intent:check && pnpm run transport:check && pnpm run authorization:check && pnpm run control-plane:check && pnpm run contract:consumer-check && pnpm run test:node && pnpm run check && pnpm run smoke:dist && pnpm run check:dist",
+    "verify:legacy": "pnpm run lint && pnpm run duplication && pnpm run rust:check && pnpm run typecheck:runtime && pnpm run protocol:check && pnpm run protocol:typecheck && pnpm run transport:check && pnpm run authorization:check && pnpm run control-plane:check && pnpm run contract:consumer-check && pnpm test && pnpm run test:postgres && pnpm run check && pnpm run smoke:dist && pnpm run check:dist && pnpm run docs:build && pnpm run orchestration:check && pnpm run typecheck:orchestration",
+    "workspace:projects": "NX_DAEMON=false nx show projects",
+    "workspace:graph": "NX_DAEMON=false nx graph --file=artifacts/nx-project-graph.json",
+    "workspace:check": "NX_DAEMON=false nx run-many -t check,typecheck,test --all --exclude=sumi-postgres --parallel=3",
+    "workspace:check:ci": "NX_DAEMON=false nx run-many -t check,typecheck,test --all --parallel=3",
+    "audit:deps": "pnpm audit --audit-level=high --registry=https://registry.npmjs.org",
     "drill:load": "node scripts/load-drill.mjs",
     "drill:fault": "node scripts/fault-drill.mjs",
-    "verify:release": "npm run audit:deps && npm run verify && npm run drill:load && npm run drill:fault",
-    "prepack": "npm run build"
+    "verify:release": "pnpm run audit:deps && pnpm run verify:ci && pnpm run drill:load && pnpm run drill:fault && pnpm run sbom && pnpm run sbom:check",
+    "prepack": "pnpm run build"
   },
   "license": "Apache-2.0",
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
     "@astrojs/starlight": "^0.41.7",
     "@hey-api/openapi-ts": "0.99.0",
+    "@sumi/voice-crm-api-client": "workspace:*",
+    "@types/node": "24.13.3",
+    "@typescript/native": "npm:typescript@7.0.2",
     "astro": "^7.2.2",
+    "jscpd": "5.0.12",
+    "nx": "23.1.1",
+    "oxlint": "1.76.0",
+    "prettier": "3.9.6",
     "sharp": "^0.35.3",
-    "typescript": "^5.9.3",
+    "smol-toml": "1.8.0",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "yaml": "^2.9.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1111.0",
     "@aws-sdk/s3-request-presigner": "3.1111.0",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
+    "@opentelemetry/resources": "2.10.0",
+    "@opentelemetry/sdk-trace-base": "2.10.0",
+    "@opentelemetry/sdk-trace-node": "2.10.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "jose": "6.2.8",
     "pg": "8.16.3"
   },
-  "overrides": {
-    "js-yaml": "4.3.1"
+  "pnpm": {
+    "overrides": {
+      "brace-expansion": "5.0.9",
+      "js-yaml": "4.3.1"
+    }
+  },
+  "nx": {
+    "tags": [
+      "scope:platform",
+      "type:application"
+    ],
+    "implicitDependencies": [
+      "@sumi/voice-crm-api-client",
+      "sumi-runtime-supervisor",
+      "@sumi/dev-orchestration",
+      "sumi-docs"
+    ],
+    "targets": {
+      "ci": {
+        "command": "pnpm run verify:platform",
+        "cache": false
+      },
+      "check": {
+        "command": "pnpm run check",
+        "cache": false
+      },
+      "typecheck": {
+        "command": "pnpm run typecheck:runtime"
+      },
+      "test": {
+        "command": "pnpm run test:node"
+      },
+      "build": {
+        "command": "pnpm run build",
+        "outputs": [
+          "{workspaceRoot}/dist"
+        ]
+      },
+      "docs-build": {
+        "command": "pnpm run docs:build",
+        "outputs": [
+          "{workspaceRoot}/artifacts/docs-site"
+        ]
+      }
+    }
   }
 }

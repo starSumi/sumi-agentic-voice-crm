@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Observability } from "../src/observability.mjs";
+import { Observability } from "../src/observability.ts";
 
 test("observability propagates trace context and emits bounded-cardinality metrics", () => {
   const logs = [];

@@ -1,0 +1,919 @@
+// @ts-nocheck
+import { createServer as createHttpServer } from "node:http";
+import { fileURLToPath } from "node:url";
+// HTTP transport adapter: Node request/response shapes are intentionally kept
+// at this edge; application services and protocol validators remain strict TS.
+import {
+  AskService,
+  createAttachmentRef,
+  normalizeAskCommand,
+  normalizeReviewCommand,
+  normalizeTtsCommand,
+  ReviewService,
+  TtsService,
+} from "./application/index.ts";
+import { authorizeAction } from "./application/services.ts";
+import { createRequestContext, createRuntime } from "./composition-root.ts";
+import {
+  ERROR_CODES,
+  errorEnvelope,
+  requestId,
+  sha256,
+  validateAudioInput,
+  validateIdempotencyKey,
+  validateTextAsk,
+} from "./contracts.ts";
+import { validateEvent, validateProtocol } from "./protocol-validation.ts";
+import { persistAudioAsset, persistInputAudio } from "./object-storage.ts";
+import {
+  DEFAULT_AUDIO_OUTPUT_MODE,
+  DEFAULT_LOCALE,
+  REQUEST_BODY_LIMITS,
+  REVIEW_ID_PATTERN,
+} from "./protocol-policy.ts";
+import { DEFAULT_TEARDOWN_TIMEOUT_MS } from "./control/index.ts";
+import { createMessageJobWorker } from "./message-job-worker.ts";
+
+function payloadTooLarge(limit) {
+  return Object.assign(new Error("request body exceeds " + limit + " bytes"), {
+    code: "PAYLOAD_TOO_LARGE",
+    details: { max_bytes: limit },
+  });
+}
+
+export async function readRequestBody(req, maxBytes) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
+    throw new Error("request body limit must be a positive integer");
+  const declaredLength = Number(req.headers?.["content-length"]);
+  if (
+    Number.isSafeInteger(declaredLength) &&
+    declaredLength >= 0 &&
+    declaredLength > maxBytes
+  )
+    throw payloadTooLarge(maxBytes);
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > maxBytes) throw payloadTooLarge(maxBytes);
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function teardownTimeout(value) {
+  const parsed = Number(value ?? DEFAULT_TEARDOWN_TIMEOUT_MS);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 30_000) {
+    throw new Error(
+      "RUNTIME_TEARDOWN_MS must be a positive integer no greater than 30000",
+    );
+  }
+  return parsed;
+}
+
+function configuredMessageJobTenants(env) {
+  return String(env?.MESSAGE_JOB_TENANT_IDS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function serializableJobInput(input) {
+  if (input?.type !== "audio") return input;
+  return {
+    type: "audio",
+    data_base64: Buffer.from(input.data).toString("base64"),
+    content_type: input.content_type,
+    sha256: input.sha256,
+  };
+}
+
+function jobIdentity(identity) {
+  const fields = [
+    "subject_id",
+    "actor_id",
+    "kind",
+    "principal_kind",
+    "tenant_id",
+    "status",
+    "workload_id",
+    "network_zone",
+  ];
+  const result = Object.fromEntries(
+    fields
+      .filter((field) => identity?.[field] !== undefined)
+      .map((field) => [field, identity[field]]),
+  );
+  for (const field of [
+    "roles",
+    "actor_scopes",
+    "token_scopes",
+    "authentication_methods",
+  ]) {
+    if (Array.isArray(identity?.[field])) result[field] = [...identity[field]];
+  }
+  return result;
+}
+
+function jobResponse(job, request_id, duplicate = false) {
+  return {
+    request_id,
+    job_id: job.id,
+    status: job.status,
+    attempts: job.attempts,
+    idempotency_replay: duplicate,
+    ...(job.result === undefined ? {} : { result: job.result }),
+  };
+}
+
+function askRequestFingerprint({ input, locale, outputMode, conversationId }) {
+  return sha256(
+    JSON.stringify({
+      input:
+        input.type === "audio"
+          ? {
+              type: "audio",
+              sha256: input.sha256,
+              content_type: input.content_type,
+            }
+          : { type: "text", text: input.text },
+      locale,
+      output_mode: outputMode,
+      conversation_id: conversationId ?? null,
+    }),
+  );
+}
+
+export function createApp({
+  runtime: suppliedRuntime,
+  runtimeFactory = createRuntime,
+  teardownTimeoutMs,
+} = {}) {
+  const runtime = suppliedRuntime ?? runtimeFactory();
+  const { store, authenticate, objectStorage, observability } = runtime;
+  const providers = runtime.providers;
+  const { providerReadiness } = providers;
+  let draining = false;
+  const shutdownController = new AbortController();
+  const resolvedTeardownTimeoutMs = teardownTimeout(
+    teardownTimeoutMs ?? runtime.env?.RUNTIME_TEARDOWN_MS,
+  );
+  const json = (res, status, body) => {
+    res.statusCode = status;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.end(JSON.stringify(body));
+  };
+  const authorizationPorts = Object.freeze({
+    authorize:
+      typeof runtime.authorize === "function"
+        ? (request) => runtime.authorize(request)
+        : undefined,
+  });
+  const askService = new AskService({
+    ...authorizationPorts,
+    beginInteraction: (args) => store.beginInteraction(args),
+    checkpointInteraction: (args) => store.checkpointInteraction(args),
+    completeInteraction: ({ outcome, ...args }) =>
+      store.completeInteraction({
+        ...args,
+        http_status: outcome === "review_required" ? 202 : 200,
+      }),
+    failInteraction: (args) =>
+      store.failInteraction({
+        ...args,
+        http_status: ERROR_CODES[args.error_code][0],
+      }),
+    abandonInteraction: (args) => store.abandonInteraction?.(args),
+    createReview: (args) => store.createReview(args),
+    executeCrm: (args) => store.execute(args),
+    recordInputAsset: (args) => store.recordInputAsset(args),
+    recordTts: (...args) => store.recordTts(...args),
+    transcribe: (...args) => providers.transcribe(...args),
+    understand: (...args) => providers.understand(...args),
+    synthesize: (...args) => providers.synthesize(...args),
+    ttsDefaultFormat: () => providers.ttsDefaultFormat(),
+    persistInputAudio: (...args) => persistInputAudio(objectStorage, ...args),
+    persistAudioAsset: (...args) => persistAudioAsset(objectStorage, ...args),
+    validateResponse: validateProtocol,
+    intentProviderName: runtime.env?.INTENT_PROVIDER || "mock",
+    intentProviderKind: runtime.env?.INTENT_PROVIDER || "unknown",
+    asrProviderKind: runtime.env?.ASR_PROVIDER || "unknown",
+    ttsProviderKind: runtime.env?.TTS_PROVIDER || "unknown",
+    storageKind: runtime.objectStorage?.provider || "unknown",
+    databaseKind:
+      runtime.env?.STORE_PROVIDER === "postgres" ? "postgresql" : "memory",
+    tracer: runtime.tracer,
+    progressSink: runtime.progressEvents,
+  });
+  const ttsService = new TtsService({
+    ...authorizationPorts,
+    replayTts: (...args) => store.replayTts(...args),
+    recordTts: (...args) => store.recordTts(...args),
+    synthesize: (...args) => providers.synthesize(...args),
+    persistAudioAsset: (...args) => persistAudioAsset(objectStorage, ...args),
+    validateResponse: validateProtocol,
+    ttsProviderKind: runtime.env?.TTS_PROVIDER || "unknown",
+    storageKind: runtime.objectStorage?.provider || "unknown",
+    databaseKind:
+      runtime.env?.STORE_PROVIDER === "postgres" ? "postgresql" : "memory",
+    tracer: runtime.tracer,
+    progressSink: runtime.progressEvents,
+  });
+  const reviewService = new ReviewService({
+    ...authorizationPorts,
+    decideReview:
+      typeof store.decideReview === "function"
+        ? (args) => store.decideReview(args)
+        : undefined,
+    validateResponse: validateProtocol,
+    databaseKind:
+      runtime.env?.STORE_PROVIDER === "postgres" ? "postgresql" : "memory",
+    tracer: runtime.tracer,
+    progressSink: runtime.progressEvents,
+  });
+
+  async function runApplication(name, context, service, command) {
+    const tracer = runtime.tracer;
+    if (typeof tracer?.startSpan !== "function")
+      return service.execute(context, command);
+    const span = tracer.startSpan(name, {
+      parent: context.traceparent,
+      signal: context.signal,
+      attributes: { "app.operation": name.slice("application.".length) },
+    });
+    const serviceContext = createRequestContext({
+      ...context,
+      traceparent: span.context.traceparent,
+    });
+    try {
+      const outcome = await service.execute(serviceContext, command);
+      span.end({
+        status: "ok",
+        attributes: {
+          "app.result": outcome.kind?.includes("review")
+            ? "needs_review"
+            : "completed",
+        },
+      });
+      return outcome;
+    } catch (error) {
+      span.end({
+        status: "error",
+        error,
+        attributes: { "app.result": "failed" },
+      });
+      throw error;
+    }
+  }
+
+  const messageJobWorker =
+    typeof store.claimMessageJobs === "function"
+      ? createMessageJobWorker({
+          queue: store,
+          tenantIds: configuredMessageJobTenants(runtime.env),
+          batchSize: Number(runtime.env?.MESSAGE_JOB_BATCH_SIZE || 10),
+          leaseMs: Number(runtime.env?.MESSAGE_JOB_LEASE_MS || 30_000),
+          maxAttempts: Number(runtime.env?.MESSAGE_JOB_MAX_ATTEMPTS || 3),
+          pollIntervalMs: Number(
+            runtime.env?.MESSAGE_JOB_POLL_INTERVAL_MS || 1_000,
+          ),
+          processJob: async (job, { signal }) => {
+            const payload = job.payload;
+            const identity =
+              typeof runtime.resolvePrincipal === "function"
+                ? await runtime.resolvePrincipal(payload.identity, { signal })
+                : payload.identity;
+            const input =
+              payload.command.input?.type === "audio"
+                ? {
+                    ...payload.command.input,
+                    data: Buffer.from(
+                      payload.command.input.data_base64,
+                      "base64",
+                    ),
+                  }
+                : payload.command.input;
+            const command = normalizeAskCommand({
+              ...payload.command,
+              input,
+            });
+            const context = createRequestContext({
+              request_id: job.request_id,
+              traceparent: payload.traceparent,
+              identity,
+              signal,
+            });
+            const outcome = await runApplication(
+              "application.ask",
+              context,
+              askService,
+              command,
+            );
+            return outcome.response;
+          },
+        })
+      : undefined;
+  for (const tenantId of configuredMessageJobTenants(runtime.env))
+    messageJobWorker?.registerTenant(tenantId);
+
+  function parseMultipart(buf, type) {
+    const boundary =
+      /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[1] ??
+      /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[2];
+    if (!boundary)
+      throw Object.assign(new Error("multipart boundary is required"), {
+        code: "INVALID_REQUEST",
+      });
+    const out = {};
+    for (const part of buf
+      .toString("binary")
+      .split(`--${boundary}`)
+      .slice(1, -1)) {
+      const i = part.indexOf("\r\n\r\n");
+      if (i < 0) continue;
+      const head = part.slice(0, i);
+      const payload = part.slice(i + 4).replace(/\r\n$/, "");
+      const name = /name="([^"]+)"/i.exec(head)?.[1];
+      if (!name) continue;
+      out[name] = /filename=/i.test(head)
+        ? {
+            data: Buffer.from(payload, "binary"),
+            content_type:
+              /Content-Type:\s*([^\r\n]+)/i.exec(head)?.[1]?.trim() ??
+              "application/octet-stream",
+          }
+        : payload;
+    }
+    return out;
+  }
+  function requestSignal(req, res) {
+    const controller = new AbortController();
+    const abort = () => {
+      if (!controller.signal.aborted) {
+        controller.abort(
+          Object.assign(new Error("client disconnected"), {
+            name: "AbortError",
+            code: "UPSTREAM_UNAVAILABLE",
+            breakerEligible: false,
+          }),
+        );
+      }
+      cleanup();
+    };
+    const close = () => {
+      if (!res.writableEnded) abort();
+    };
+    const stopForShutdown = () => {
+      if (!controller.signal.aborted)
+        controller.abort(shutdownController.signal.reason);
+      cleanup();
+    };
+    const cleanup = () => {
+      req.removeListener("aborted", abort);
+      res.removeListener("close", close);
+      shutdownController.signal.removeEventListener("abort", stopForShutdown);
+    };
+    req.once("aborted", abort);
+    res.once("close", close);
+    res.once("finish", cleanup);
+    if (shutdownController.signal.aborted) stopForShutdown();
+    else
+      shutdownController.signal.addEventListener("abort", stopForShutdown, {
+        once: true,
+      });
+    if (req.aborted || req.destroyed || res.destroyed) abort();
+    return controller.signal;
+  }
+  async function authenticateContext(req, res, rid, signal) {
+    signal.throwIfAborted();
+    const authenticatedIdentity = await authenticate(new Headers(req.headers), {
+      signal,
+    });
+    const identity =
+      typeof runtime.resolvePrincipal === "function"
+        ? await runtime.resolvePrincipal(authenticatedIdentity, { signal })
+        : authenticatedIdentity;
+    signal.throwIfAborted();
+    return createRequestContext({
+      request_id: rid,
+      traceparent: res.getHeader("traceparent"),
+      identity,
+      signal,
+    });
+  }
+  async function ask(req, res, rid, signal) {
+    const context = await authenticateContext(req, res, rid, signal);
+    const key = validateIdempotencyKey(req.headers["idempotency-key"]);
+    const multipart = req.headers["content-type"]?.startsWith(
+      "multipart/form-data",
+    );
+    const raw = await readRequestBody(
+      req,
+      multipart
+        ? REQUEST_BODY_LIMITS.askMultipart
+        : REQUEST_BODY_LIMITS.askJson,
+    );
+    let input;
+    let outputMode = "text";
+    let locale = DEFAULT_LOCALE;
+    let conversationId;
+    if (multipart) {
+      const parts = parseMultipart(raw, req.headers["content-type"]);
+      let metadata;
+      try {
+        metadata = JSON.parse(parts.metadata ?? "{}");
+      } catch {
+        throw Object.assign(new Error("metadata must be JSON"), {
+          code: "INVALID_REQUEST",
+        });
+      }
+      const parsed = validateProtocol("MultipartAskMetadata", {
+        ...metadata,
+        output_mode: metadata.output_mode ?? DEFAULT_AUDIO_OUTPUT_MODE,
+      });
+      outputMode = parsed.output_mode;
+      locale = parsed.locale ?? DEFAULT_LOCALE;
+      conversationId = parsed.conversation_id;
+      input = validateAudioInput({
+        data: parts.audio?.data,
+        content_type: parts.audio?.content_type,
+        locale,
+        output_mode: outputMode,
+        env: runtime.env,
+      });
+    } else {
+      const parsed = validateProtocol(
+        "AskRequest",
+        JSON.parse(raw.toString("utf8") || "{}"),
+      );
+      conversationId = parsed.conversation_id;
+      if (parsed.input?.type === "audio") {
+        input = validateAudioInput({
+          data: parsed.input.data_base64
+            ? Buffer.from(parsed.input.data_base64, "base64")
+            : Buffer.alloc(0),
+          content_type: parsed.input.content_type ?? "audio/wav",
+          locale: parsed.locale ?? locale,
+          output_mode: parsed.output_mode ?? "text",
+          env: runtime.env,
+        });
+      } else {
+        input = validateTextAsk(parsed);
+      }
+      outputMode = input.output_mode;
+      locale = input.locale;
+    }
+    const respondAsync = /\brespond-async\b/i.test(
+      String(req.headers.prefer ?? ""),
+    );
+    if (respondAsync) {
+      if (typeof store.enqueueMessageJob !== "function" || !messageJobWorker) {
+        throw Object.assign(
+          new Error("asynchronous message jobs are unavailable"),
+          {
+            code: "UPSTREAM_UNAVAILABLE",
+          },
+        );
+      }
+      await authorizeAction(authorizationPorts, context, "interaction.ask", {
+        type: "interaction",
+        id: conversationId ?? rid,
+      });
+      if (outputMode === "audio" || outputMode === "both") {
+        await authorizeAction(authorizationPorts, context, "media.tts.create", {
+          type: "media_asset",
+          id: `${rid}:tts`,
+        });
+      }
+      const queued = await store.enqueueMessageJob({
+        tenant_id: context.identity.tenant_id,
+        actor_id: context.identity.actor_id,
+        request_id: rid,
+        idempotency_key: key,
+        request_fingerprint: askRequestFingerprint({
+          input,
+          locale,
+          outputMode,
+          conversationId,
+        }),
+        payload: {
+          traceparent: context.traceparent,
+          identity: jobIdentity(context.identity),
+          command: {
+            idempotency_key: key,
+            input: serializableJobInput(input),
+            locale,
+            output_mode: outputMode,
+            conversation_id: conversationId,
+          },
+        },
+      });
+      messageJobWorker.registerTenant(context.identity.tenant_id);
+      messageJobWorker.start();
+      const response = jobResponse(queued.job, rid, queued.duplicate);
+      return json(
+        res,
+        queued.job.status === "succeeded" ? 200 : 202,
+        validateProtocol("MessageJobResponse", response),
+      );
+    }
+    const outcome = await runApplication(
+      "application.ask",
+      context,
+      askService,
+      normalizeAskCommand({
+        idempotency_key: key,
+        input,
+        locale,
+        output_mode: outputMode,
+        conversation_id: conversationId,
+      }),
+    );
+    return json(
+      res,
+      outcome.response.status === "needs_review" ? 202 : 200,
+      outcome.response,
+    );
+  }
+  async function tts(req, res, rid, signal) {
+    const context = await authenticateContext(req, res, rid, signal);
+    const key = validateIdempotencyKey(req.headers["idempotency-key"]);
+    const parsed = validateProtocol(
+      "TtsRequest",
+      JSON.parse(
+        (await readRequestBody(req, REQUEST_BODY_LIMITS.ttsJson)).toString(
+          "utf8",
+        ) || "{}",
+      ),
+    );
+    const outcome = await runApplication(
+      "application.tts",
+      context,
+      ttsService,
+      normalizeTtsCommand({
+        idempotency_key: key,
+        ...parsed,
+      }),
+    );
+    return json(res, 201, outcome.response);
+  }
+  async function reviewDecision(req, res, rid, signal) {
+    const context = await authenticateContext(req, res, rid, signal);
+    const key = validateIdempotencyKey(req.headers["idempotency-key"]);
+    const reviewId = decodeURIComponent(
+      req.url.slice("/v1/reviews/".length, -"/decision".length),
+    );
+    if (!REVIEW_ID_PATTERN.test(reviewId))
+      throw Object.assign(
+        new Error("review id is outside the published contract"),
+        { code: "INVALID_REQUEST" },
+      );
+    const parsed = validateProtocol(
+      "ReviewDecisionRequest",
+      JSON.parse(
+        (await readRequestBody(req, REQUEST_BODY_LIMITS.reviewJson)).toString(
+          "utf8",
+        ) || "{}",
+      ),
+    );
+    const outcome = await runApplication(
+      "application.review",
+      context,
+      reviewService,
+      normalizeReviewCommand({
+        idempotency_key: key,
+        review_id: reviewId,
+        ...parsed,
+      }),
+    );
+    return json(res, 200, outcome.response);
+  }
+  const server = createHttpServer(async (req, res) => {
+    const rid = requestId();
+    const telemetry = observability.begin(req, rid);
+    const signal = requestSignal(req, res);
+    let errorCode;
+    res.setHeader("traceparent", telemetry.traceparent);
+    res.setHeader("x-request-id", rid);
+    res.once("finish", () =>
+      observability.finish(telemetry, res.statusCode, errorCode),
+    );
+    try {
+      if (req.method === "GET" && req.url === "/health/live")
+        return json(res, 200, {
+          status: "ok",
+          service: "sumi-agentic-voice-crm",
+          request_id: rid,
+        });
+      if (req.method === "GET" && req.url === "/health/ready") {
+        const [database, objects, extensionStatus] = await Promise.all([
+          store.health(),
+          objectStorage.health(),
+          runtime.extensions?.health?.({ signal }) ?? {},
+        ]);
+        const providerStatus = providerReadiness();
+        const extensionsReady = Object.values(extensionStatus).every(
+          ({ ready }) => ready,
+        );
+        const ready =
+          !draining &&
+          database.ready &&
+          objects.ready &&
+          providerStatus.ready &&
+          extensionsReady;
+        return json(res, ready ? 200 : 503, {
+          status: ready ? "ready" : "not_ready",
+          dependencies: {
+            database,
+            objects,
+            providers: providerStatus.statuses,
+            extensions: extensionStatus,
+          },
+          request_id: rid,
+        });
+      }
+      if (req.method === "GET" && req.url === "/metrics") {
+        if (!observability.authorizeMetrics(req.headers.authorization))
+          throw Object.assign(new Error("metrics authentication required"), {
+            code: "UNAUTHORIZED",
+          });
+        res.statusCode = 200;
+        res.setHeader(
+          "content-type",
+          "text/plain; version=0.0.4; charset=utf-8",
+        );
+        return res.end(observability.renderMetrics());
+      }
+      if (req.method === "GET" && req.url === "/v1/jobs/stats") {
+        const context = await authenticateContext(req, res, rid, signal);
+        await authorizeAction(authorizationPorts, context, "interaction.ask", {
+          type: "interaction",
+          id: `${context.identity.tenant_id}:jobs`,
+        });
+        if (typeof store.messageJobStats !== "function")
+          throw Object.assign(new Error("message jobs are unavailable"), {
+            code: "UPSTREAM_UNAVAILABLE",
+          });
+        return json(
+          res,
+          200,
+          validateProtocol("MessageJobStatsResponse", {
+            request_id: rid,
+            tenant_id: context.identity.tenant_id,
+            jobs: await store.messageJobStats({
+              tenant_id: context.identity.tenant_id,
+            }),
+          }),
+        );
+      }
+      if (req.method === "GET" && req.url?.startsWith("/v1/jobs/")) {
+        const context = await authenticateContext(req, res, rid, signal);
+        await authorizeAction(authorizationPorts, context, "interaction.ask", {
+          type: "interaction",
+          id: req.url.slice("/v1/jobs/".length),
+        });
+        const jobId = decodeURIComponent(req.url.slice("/v1/jobs/".length));
+        if (!/^job_[0-9a-f]{32}$/.test(jobId))
+          throw Object.assign(new Error("invalid message job id"), {
+            code: "INVALID_REQUEST",
+          });
+        if (typeof store.getMessageJob !== "function")
+          throw Object.assign(new Error("message jobs are unavailable"), {
+            code: "UPSTREAM_UNAVAILABLE",
+          });
+        const job = await store.getMessageJob({
+          tenant_id: context.identity.tenant_id,
+          actor_id: context.identity.actor_id,
+          job_id: jobId,
+        });
+        if (!job)
+          throw Object.assign(new Error("message job not found"), {
+            code: "FORBIDDEN",
+          });
+        return json(
+          res,
+          200,
+          validateProtocol("MessageJobResponse", {
+            ...jobResponse(job, rid),
+            original_request_id: job.request_id,
+            ...(job.error_code === undefined
+              ? {}
+              : { error_code: job.error_code }),
+          }),
+        );
+      }
+      if (req.method === "GET" && req.url === "/v1/events") {
+        const context = await authenticateContext(req, res, rid, signal);
+        const { identity } = context;
+        await authorizeAction(authorizationPorts, context, "events.read", {
+          type: "event_stream",
+          id: `${identity.tenant_id}:events`,
+        });
+        const events = await store.events(
+          identity.tenant_id,
+          identity.actor_id,
+        );
+        return json(res, 200, {
+          events: events.filter(
+            (event) => validateEvent(event).tenant_id === identity.tenant_id,
+          ),
+          request_id: rid,
+        });
+      }
+      if (req.method === "POST" && req.url === "/v1/ask")
+        return await ask(req, res, rid, signal);
+      if (req.method === "POST" && req.url === "/v1/tts/synthesize")
+        return await tts(req, res, rid, signal);
+      if (
+        req.method === "POST" &&
+        req.url?.startsWith("/v1/reviews/") &&
+        req.url.endsWith("/decision")
+      )
+        return await reviewDecision(req, res, rid, signal);
+      if (req.method === "GET" && req.url?.startsWith("/v1/assets/")) {
+        const context = await authenticateContext(req, res, rid, signal);
+        const { identity } = context;
+        const contentRequest = req.url.endsWith("/content");
+        const encodedAssetId = contentRequest
+          ? req.url.slice(11, -"/content".length)
+          : req.url.slice(11);
+        const assetId = decodeURIComponent(encodedAssetId);
+        if (!/^ast_[A-Za-z0-9_-]{8,128}$/.test(assetId))
+          throw Object.assign(new Error("invalid asset id"), {
+            code: "INVALID_REQUEST",
+          });
+        await authorizeAction(authorizationPorts, context, "media.asset.read", {
+          type: "media_asset",
+          id: assetId,
+        });
+        const asset = await store.assetFor(identity.tenant_id, assetId);
+        if (!asset)
+          throw Object.assign(new Error("asset not found"), {
+            code: "FORBIDDEN",
+          });
+        if (
+          typeof asset.mime_type !== "string" ||
+          !asset.mime_type.startsWith("audio/")
+        ) {
+          throw Object.assign(new Error("asset media type is unavailable"), {
+            code: "UNSUPPORTED_MEDIA",
+          });
+        }
+        const objectKey = await store.objectKeyFor?.(
+          identity.tenant_id,
+          assetId,
+        );
+        if (contentRequest) {
+          if (!objectKey || typeof objectStorage.get !== "function") {
+            throw Object.assign(new Error("asset content is unavailable"), {
+              code: "UPSTREAM_UNAVAILABLE",
+            });
+          }
+          const stored = await objectStorage.get(objectKey);
+          res.statusCode = 200;
+          res.setHeader("content-type", asset.mime_type);
+          res.setHeader("content-length", stored.body.length);
+          res.setHeader("cache-control", "private, no-store");
+          res.setHeader("x-content-type-options", "nosniff");
+          return res.end(stored.body);
+        }
+        const attachment = createAttachmentRef({
+          ...asset,
+          kind: "audio",
+          url: `/v1/assets/${assetId}/content`,
+        });
+        return json(res, 200, validateProtocol("AttachmentRef", attachment));
+      }
+      return json(
+        res,
+        404,
+        validateProtocol(
+          "ErrorEnvelope",
+          errorEnvelope("INVALID_REQUEST", "route not found", rid),
+        ),
+      );
+    } catch (error) {
+      errorCode = ERROR_CODES[error.code] ? error.code : "INVALID_REQUEST";
+      const status = ERROR_CODES[errorCode]?.[0] ?? 400;
+      const details =
+        error?.details && typeof error.details === "object"
+          ? error.details
+          : {};
+      return json(
+        res,
+        status,
+        validateProtocol(
+          "ErrorEnvelope",
+          errorEnvelope(errorCode, error.message, rid, details),
+        ),
+      );
+    }
+  });
+  let shutdownPromise;
+  async function shutdown() {
+    if (shutdownPromise) return shutdownPromise;
+    draining = true;
+    shutdownPromise = (async () => {
+      if (!server.listening) {
+        shutdownController.abort(
+          Object.assign(new Error("runtime is closing"), {
+            name: "AbortError",
+            breakerEligible: false,
+          }),
+        );
+        await messageJobWorker?.close(
+          Object.assign(new Error("message job worker is stopping"), {
+            name: "AbortError",
+            breakerEligible: false,
+          }),
+        );
+        return await runtime.close({ timeoutMs: resolvedTeardownTimeoutMs });
+      }
+      let timer;
+      const serverClosed = new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+      server.closeIdleConnections?.();
+      timer = setTimeout(() => {
+        shutdownController.abort(
+          Object.assign(new Error("runtime teardown deadline reached"), {
+            name: "AbortError",
+            code: "UPSTREAM_UNAVAILABLE",
+            breakerEligible: false,
+          }),
+        );
+        server.closeAllConnections?.();
+      }, resolvedTeardownTimeoutMs);
+      const errors = [];
+      try {
+        await serverClosed;
+      } catch (error) {
+        errors.push(error);
+      } finally {
+        clearTimeout(timer);
+      }
+      try {
+        await messageJobWorker?.close(
+          Object.assign(new Error("message job worker is stopping"), {
+            name: "AbortError",
+            breakerEligible: false,
+          }),
+        );
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await runtime.close({ timeoutMs: resolvedTeardownTimeoutMs });
+      } catch (error) {
+        errors.push(error);
+      }
+      if (errors.length)
+        throw new AggregateError(errors, "application shutdown failed");
+    })();
+    return shutdownPromise;
+  }
+  return Object.freeze({
+    server,
+    runtime,
+    get draining() {
+      return draining;
+    },
+    listen(...args) {
+      return server.listen(...args);
+    },
+    startMessageJobs() {
+      return messageJobWorker?.start();
+    },
+    close: shutdown,
+  });
+}
+
+export const createServer = createApp;
+
+export async function createStartedApp(options = {}) {
+  const app = createApp(options);
+  await app.runtime.start?.();
+  if (configuredMessageJobTenants(app.runtime.env).length > 0)
+    app.startMessageJobs?.();
+  return app;
+}
+
+async function main() {
+  const port = Number(process.env.PORT || 8080);
+  const app = await createStartedApp();
+  app.listen(port, () =>
+    console.log(`sumi-agentic-voice-crm listening on :${port}`),
+  );
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, () =>
+      app.close().catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      }),
+    );
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1])
+  await main();

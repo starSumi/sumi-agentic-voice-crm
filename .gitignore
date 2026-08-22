@@ -8,6 +8,7 @@ dist/
 .dist.backup-*/
 artifacts/
 coverage/
+target/
 *.db
 *.sqlite
 *.sqlite3
@@ -23,8 +24,9 @@ protocol/.tmp/
 protocol/.cache/
 packages/api-client/.tmp/
 
-# Agent development environment: keep versioned .agent/ governance, ignore
-# local runners, caches, logs, reports and generated evidence.
+# Legacy runtime state and development-only evidence remain machine-local.
+.agent/
+.local/
 .agent.local/
 .agent-runtime/
 .agent-cache/
@@ -37,8 +39,13 @@ packages/api-client/.tmp/
 .agent-*.json
 .agent-*.tmp
 
-# Local agent/client session and editor state is never project source.
-.codex/
+# Generated repository adapters are versioned; all other Codex session state is local.
+.codex/*
+!.codex/config.toml
+!.codex/agents/
+.codex/agents/*
+!.codex/agents/*.toml
+.nx/
 .claude/
 .vscode/
 .idea/

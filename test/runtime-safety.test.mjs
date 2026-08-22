@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CrmStore } from "../src/store.mjs";
-import { assertTenant } from "../src/contracts.mjs";
-import { providerReadiness } from "../src/providers.mjs";
+import { CrmStore } from "../src/store.ts";
+import { assertTenant } from "../src/contracts.ts";
+import { providerReadiness } from "../src/providers.ts";
 
 test("CRM mutations are tenant-scoped and idempotent", () => {
   const store = new CrmStore();
@@ -49,7 +49,7 @@ test("TTS records are tenant-bound and reject fingerprint conflicts", () => {
 
 test("low-confidence review uses the same idempotency boundary", () => {
   const store = new CrmStore();
-  const args = { tenant_id: "tenant_demo", actor_id: "actor", request_id: "req_000000000000000000000007", idempotency_key: "review-key-1", request_fingerprint: "review-fingerprint", understanding: { entities: { customer: { name: "Unknown" } } } };
+  const args = { tenant_id: "tenant_demo", actor_id: "actor", request_id: "req_000000000000000000000007", idempotency_key: "review-key-1", request_fingerprint: "review-fingerprint", understanding: { intent: "crm.customer.create", entities: { customer: { name: "Unknown" } } } };
   const first = store.createReview(args);
   const replay = store.createReview({ ...args, request_id: "req_000000000000000000000008" });
   assert.deepEqual(replay, first);

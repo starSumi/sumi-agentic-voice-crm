@@ -27,43 +27,48 @@ flowchart LR
 ## Local gates
 
 ```powershell
-volta run npm ci
-volta run npm run protocol:generate
-volta run npm run verify:release
-volta run npm run smoke:docker
-volta run npm run verify:mcp
-volta run npm run sbom
-volta run npm pack --dry-run
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run protocol:generate
+pnpm run verify:release
+pnpm run smoke:docker
+pnpm run verify:mcp
+pnpm run sbom
+pnpm run sbom:check
+pnpm pack --dry-run
 ```
 
-The repository pins Node `24.18.0` and npm `11.15.0` through Volta. `build` first performs the clean temporary protocol drift check, then assembles a staging directory and atomically promotes it to `dist/` only after writing and re-reading `dist/BUILD-MANIFEST.json`. The manifest binds each artifact-relative POSIX path, byte count and SHA-256 digest to a sorted content-set digest; timestamps and host paths are excluded. A failed staging build leaves the previous `dist/` candidate intact. The candidate carries only the runtime source and its declared dependencies, not the development toolchain. `test:postgres` starts a disposable local PostgreSQL cluster and verifies repeatable migration, two-tenant RLS, encrypted interaction replay, durable CRM/media/review data, and outbox lease/retry/dead-letter behavior. `smoke:dist` starts the generated candidate, probes readiness, and stops it. `drill:load` records a bounded concurrent latency/error report; `drill:fault` records provider timeout/circuit/readiness and relay dead-letter behavior. Both JSON reports are written under ignored `artifacts/release/`. `smoke:docker` builds the OCI image, proves the declared production modules can be imported, starts the image's normal `dist/src/server.mjs` command as its unprivileged user, probes readiness, and removes its ephemeral image/container. `docs:build` produces the human site and MCP projection under `artifacts/docs-site/`. `verify:mcp` is a cross-repository gate and requires a built Sumi-Docs-MCP entry. `audit:deps` names the official npm registry because some package mirrors do not implement the audit API. `npm run sbom` writes a runtime SPDX document under `artifacts/release/`. Production CI and release-candidate acceptance require the drills and Docker smoke as well as repository secret-pattern checks, then upload the manifest, drill reports and SBOM as reviewed evidence; container scan, image provenance and signature tooling remain release gates.
+The repository pins Node `24.19.0` through Volta, pnpm `10.33.4` through the `packageManager` contract, and Rust through `rust-toolchain.toml`. `build` first performs the clean temporary protocol drift check, builds the locked Rust supervisor, then assembles a staging directory and atomically promotes it to `dist/` only after writing and re-reading `dist/BUILD-MANIFEST.json`. The manifest binds each artifact-relative POSIX path, byte count, executable bit and SHA-256 digest to a sorted content-set digest; timestamps and host paths are excluded. A failed staging build leaves the previous `dist/` candidate intact. The candidate carries only the runtime source, Rust supervisor, ordered database migrations and declared dependencies, not the development toolchain. `test:postgres` starts a disposable local PostgreSQL cluster and verifies repeatable migration, two-tenant RLS, encrypted interaction replay and conversation state, durable CRM/media/review data, and outbox lease/retry/dead-letter behavior. `smoke:dist` starts the generated candidate, probes readiness, and stops it. `drill:load` records a bounded concurrent latency/error report; `drill:fault` records provider timeout/circuit/readiness and relay dead-letter behavior. Both JSON reports are written under ignored `artifacts/release/`. `smoke:docker` builds the OCI image, proves the declared production modules and executable supervisor can be loaded, starts the image's normal `dist/src/server.ts` command as its unprivileged user, probes readiness, and removes its ephemeral image/container. `docs:build` produces the human site and MCP projection under `artifacts/docs-site/`. `verify:mcp` is a cross-repository gate and requires a built Sumi-Docs-MCP entry. `audit:deps` names the official npm registry because some package mirrors do not implement the audit API. `pnpm run sbom` writes an SPDX 2.3 document covering the production pnpm closure and locked Cargo workspace under `artifacts/release/`. It binds the exact source commit and verified runtime content-set digest, records an `after-build` generation context and generator tools, and carries lock-derived component hashes. `pnpm run sbom:check` fails closed when that context, a component hash, an immutable root purl, or the Rust supervisor binding is missing. Production CI and release-candidate acceptance require the drills, Docker smoke, Rust dependency audit and repository secret-pattern checks, then upload the manifest, drill reports and SBOM as reviewed evidence; container scan and immutable registry image attestation remain release gates.
 
-The Dockerfile is a multi-stage build. The build stage runs `npm ci --omit=dev --ignore-scripts` against the committed lockfile, so the copied dependency closure excludes `devDependencies`; it then produces `dist/`. The runtime stage contains `/app/dist`, `/app/node_modules`, and runs `node dist/src/server.mjs` as the unprivileged `node` user. `smoke:docker` is mandatory in CI and release-candidate acceptance. On a local host without a usable Docker CLI/daemon it reports an explicit not-run/failure condition rather than treating the dist-only smoke as container evidence.
+The Dockerfile is a multi-stage build. Its Rust stage builds the locked supervisor
+with the exact release toolchain. The Node build stage activates pinned pnpm and
+runs `pnpm install --prod --frozen-lockfile --ignore-scripts`, so the copied
+dependency closure excludes `devDependencies`; it then produces `dist/`. The
+runtime stage contains `/app/dist`, `/app/node_modules`, and runs
+`node dist/src/server.ts` as the unprivileged `node` user. `smoke:docker` is
+mandatory in CI and release-candidate acceptance. On a local host without a
+usable Docker CLI/daemon it reports an explicit not-run/failure condition rather
+than treating the dist-only smoke as container evidence.
 
 ## Release-candidate workflow
 
 `.github/workflows/release-candidate.yml` is manually dispatched with an exact
 reviewed `main` commit and package version. It refuses to package a stale branch,
-an uncompleted C6, or a mismatched version. The acceptance job runs the full
-verification, audit, SBOM and deterministic tarball checksum steps, then uploads
-an unprivileged candidate. A separate `production-release` environment gate
+or a mismatched version. The acceptance job runs the full verification, audit,
+SBOM generation and validation, and deterministic tarball checksum steps, then uploads an unprivileged
+candidate. A separate `production-release` environment gate
 attests the tarball and SBOM with pinned `actions/attest@v4`; it requires OIDC,
-attestation and artifact-metadata permissions. Private-repository attestation
-availability is plan-dependent, so an unavailable capability is a recorded
-release hold rather than a substituted unsigned artifact.
+attestation and artifact-metadata permissions. Required reviewers on that
+environment are the human promotion boundary; repository-local agent state is
+never an approval input. Private-repository attestation availability is
+plan-dependent, so an unavailable capability is a release hold rather than a
+substituted unsigned artifact.
 
 ## Branch and change policy
 
-- Target policy: protected `main`, required PRs, and CODEOWNERS review for contracts, security, database, and release files. Current enforcement status is recorded in [Development and release readiness](RELEASE-READINESS.md).
+- Target policy: protected `main`, required PRs, and CODEOWNERS review for contracts, security, database, and release files.
 - Conventional commits; one bounded change per PR; ADR required for boundary/schema/lifecycle changes.
 - Contract changes are additive by default; breaking changes require major API/event version and migration plan.
 - No generated artifact or secret committed; no direct production mutation from a development shell.
-
-## CI operations agent
-
-`.github/workflows/operations-agent.yml` observes completed `ci` runs on `main`, performs a weekly drift check, and supports manual inspection. The observation job has read-only repository permission and produces a 30-day JSON snapshot. Issue reconciliation is a separate job with only `issues: write`; it does not check out or execute repository code.
-
-The agent may open, update, or close the deterministic `[CI Operations] main requires attention` Issue. It may not modify source, change a checkpoint to complete, approve a release, create a tag, publish, or deploy. Its snapshot and Issue are operational signals, not release authorization.
 
 ## Release artifact
 
@@ -86,3 +91,10 @@ SHAs. The repository does not pretend to generate private-repository attestation
 when the GitHub plan cannot support them; the candidate remains held until the
 platform owner supplies that capability or records a time-bound waiver with a
 compensating control.
+
+VEX is accepted only as a separately authenticated assertion bound to exact
+product identifiers and vulnerability IDs. A `not_affected` statement requires
+an owned justification or impact statement; absence of VEX never suppresses a
+finding. SPDX, VEX and DSSE/SLSA attestations may be ingested by an external GUAC
+deployment for relationship queries, while the signed source artifacts remain
+the retained evidence and trust root.

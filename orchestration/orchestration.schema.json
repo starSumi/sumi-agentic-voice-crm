@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumi.invalid/schemas/dev-orchestration/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "runtime_state",
+    "scheduler",
+    "roles",
+    "workflows",
+    "projections",
+    "invariants"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "sumi.dev-orchestration.v1" },
+    "runtime_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storage",
+        "canonical_roots",
+        "repository_local_forbidden",
+        "live_state_in_git_forbidden"
+      ],
+      "properties": {
+        "storage": { "const": "external-durable-state" },
+        "canonical_roots": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 8 }
+        },
+        "repository_local_forbidden": { "const": true },
+        "live_state_in_git_forbidden": { "const": true }
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "max_concurrency",
+        "write_conflict",
+        "delivery",
+        "task_identity",
+        "state_transition",
+        "cancellation",
+        "soft_timeout_ms",
+        "hard_grace_ms",
+        "teardown_timeout_ms",
+        "retry"
+      ],
+      "properties": {
+        "algorithm": { "const": "dependency-dag" },
+        "max_concurrency": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "write_conflict": { "const": "path-prefix-overlap" },
+        "delivery": { "const": "at-least-once" },
+        "task_identity": { "const": "stable-idempotency-key" },
+        "state_transition": { "const": "versioned-compare-and-swap" },
+        "cancellation": { "const": "abort-signal" },
+        "soft_timeout_ms": { "type": "integer", "minimum": 1000 },
+        "hard_grace_ms": { "type": "integer", "minimum": 100 },
+        "teardown_timeout_ms": { "type": "integer", "minimum": 100 },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_attempts", "backoff", "jitter", "cancellation"],
+          "properties": {
+            "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+            "backoff": { "const": "bounded-exponential" },
+            "jitter": { "const": "deterministic-task-key" },
+            "cancellation": { "const": "neutral" }
+          }
+        }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/role" }
+    },
+    "workflows": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/workflow" }
+    },
+    "projections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codex", "skill"],
+      "properties": {
+        "codex": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["config", "agents_directory"],
+          "properties": {
+            "config": { "const": ".codex/config.toml" },
+            "agents_directory": { "const": ".codex/agents" }
+          }
+        },
+        "skill": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["directory", "metadata"],
+          "properties": {
+            "directory": { "const": ".agents/skills/sumi-orchestration" },
+            "metadata": {
+              "const": ".agents/skills/sumi-orchestration/agents/openai.yaml"
+            }
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 12,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/invariant" }
+    }
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$"
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "kind",
+        "projection",
+        "sandbox_mode",
+        "capabilities",
+        "write_policy",
+        "developer_instructions"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "description": { "type": "string", "minLength": 24, "maxLength": 240 },
+        "kind": {
+          "enum": ["supervisor", "discover", "worker", "reviewer", "verifier"]
+        },
+        "projection": { "enum": ["builtin", "custom"] },
+        "sandbox_mode": { "enum": ["read-only", "workspace-write"] },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "read",
+              "write",
+              "coordinate",
+              "integrate",
+              "verify",
+              "security-review",
+              "protocol-review",
+              "release-review"
+            ]
+          }
+        },
+        "write_policy": { "enum": ["none", "task-packet", "integration"] },
+        "developer_instructions": { "type": "string", "minLength": 80 }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "actor",
+        "depends_on",
+        "mode",
+        "required_evidence",
+        "human_gate"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "actor": { "enum": ["agent", "human"] },
+        "role": { "$ref": "#/$defs/slug" },
+        "depends_on": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/slug" }
+        },
+        "mode": { "enum": ["serial", "parallel"] },
+        "required_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/slug" }
+        },
+        "human_gate": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "actor": { "const": "agent" } } },
+          "then": {
+            "required": ["role"],
+            "properties": { "human_gate": { "const": false } }
+          },
+          "else": {
+            "not": { "required": ["role"] },
+            "properties": { "human_gate": { "const": true } }
+          }
+        }
+      ]
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "stages"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "description": { "type": "string", "minLength": 24 },
+        "stages": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/stage" }
+        }
+      }
+    },
+    "invariant": {
+      "enum": [
+        "one-supervisor-owns-plan-state",
+        "task-packets-have-bounded-write-sets",
+        "dependency-graphs-are-acyclic",
+        "overlapping-writers-never-run-concurrently",
+        "read-only-work-may-run-in-parallel",
+        "state-transitions-use-version-cas",
+        "task-identity-is-stable-across-retry",
+        "completion-requires-declared-evidence",
+        "cancellation-does-not-consume-retry-budget",
+        "teardown-is-bounded-and-observed",
+        "human-gates-cannot-be-self-approved",
+        "runtime-state-never-enters-git"
+      ]
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "schema_version": "sumi.dev-runtime-state.v1",
+  "plan_id": "change-17",
+  "tasks": [
+    {
+      "task_id": "discover-runtime",
+      "version": 5,
+      "observed_generation": 1,
+      "state": "completed",
+      "attempt": 1,
+      "owner_epoch": "supervisor-4",
+      "evidence": {
+        "source_map": "sha256:discover-map",
+        "unknowns": "sha256:discover-unknowns"
+      },
+      "updated_at": "2026-08-22T00:00:00.000Z"
+    },
+    {
+      "task_id": "plan-change",
+      "version": 5,
+      "observed_generation": 1,
+      "state": "completed",
+      "attempt": 1,
+      "owner_epoch": "supervisor-4",
+      "evidence": {
+        "dependency_graph": "sha256:plan-graph",
+        "write_sets": "sha256:plan-writes",
+        "rollback": "sha256:plan-rollback"
+      },
+      "updated_at": "2026-08-22T00:00:01.000Z"
+    },
+    {
+      "task_id": "implement-runtime",
+      "version": 2,
+      "observed_generation": 1,
+      "state": "admitted",
+      "attempt": 0,
+      "owner_epoch": "supervisor-4",
+      "evidence": {},
+      "updated_at": "2026-08-22T00:00:02.000Z"
+    },
+    {
+      "task_id": "implement-contract",
+      "version": 2,
+      "observed_generation": 1,
+      "state": "admitted",
+      "attempt": 0,
+      "owner_epoch": "supervisor-4",
+      "evidence": {},
+      "updated_at": "2026-08-22T00:00:02.000Z"
+    },
+    {
+      "task_id": "review-change",
+      "version": 1,
+      "observed_generation": 0,
+      "state": "planned",
+      "attempt": 0,
+      "evidence": {},
+      "updated_at": "2026-08-22T00:00:02.000Z"
+    }
+  ]
+}

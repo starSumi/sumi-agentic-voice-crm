@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createProviderRuntime } from "../src/providers.mjs";
+import { createProviderRuntime } from "../src/providers.ts";
 
 const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE"), Buffer.alloc(8)]);
 const mp3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00]);
@@ -139,7 +139,7 @@ test("DashScope intent uses JSON Object mode and validates the CRM schema locall
     env: dashscopeEnv(),
     fetchImpl: async () => jsonResponse({ choices: [{ message: { content: JSON.stringify(validUnderstanding({ extra: true })) } }] }),
   });
-  await assert.rejects(() => malformed.understand("find Acme", { locale: "en-US" }), (error) => error.code === "UPSTREAM_UNAVAILABLE" && /unexpected/.test(error.message));
+  await assert.rejects(() => malformed.understand("find Acme", { locale: "en-US" }), (error) => error.code === "UPSTREAM_UNAVAILABLE" && /Agent CRM contract/.test(error.message));
 });
 
 test("provider 4xx rejections are non-retryable and do not open the circuit", async () => {

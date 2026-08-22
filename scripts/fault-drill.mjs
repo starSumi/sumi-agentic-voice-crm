@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { OutboxRelay, outboxConfig } from "../src/outbox-relay.mjs";
+import { OutboxRelay, outboxConfig } from "../src/outbox-relay.ts";
 import { isolatedDrillEnv } from "./drill-env.mjs";
 
 async function listen(server) {
@@ -13,7 +13,7 @@ const provider = createServer(() => {});
 const providerPort = await listen(provider);
 const portProbe = createServer();
 const appPort = await listen(portProbe); await new Promise((resolve) => portProbe.close(resolve));
-const app = spawn(process.execPath, ["src/server.mjs"], {
+const app = spawn(process.execPath, ["src/server.ts"], {
   env: isolatedDrillEnv({
     PORT: String(appPort),
     APP_ENV: "test",

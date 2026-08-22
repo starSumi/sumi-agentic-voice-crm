@@ -7,9 +7,11 @@
   "include": [".astro/types.d.ts", "src/**/*", "scripts/**/*", "integrations/**/*", "packages/api-client/src/**/*"],
   "exclude": [
     ".agent",
+    ".local",
     "dist",
     "artifacts",
     ".agent/**",
+    ".local/**",
     ".agent.local/**",
     ".agent-runtime/**",
     ".agent-cache/**",

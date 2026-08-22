@@ -36,4 +36,45 @@ Projection/UI state is disposable and rebuilt from query/events.
 
 ## Shutdown and recovery
 
-Readiness is removed before termination. The orchestrator drains in-flight requests; workers finish leased jobs or let leases expire; outbox relay resumes from `published_at=NULL`; review tasks remain actionable; media cleanup is retention-driven.
+The composition root in `src/composition-root.ts` owns process-singleton resources:
+the environment snapshot, authenticator/JWKS cache, provider adapters and circuit
+breakers, object storage client, PostgreSQL pool, and observability registry.
+Each request gets an immutable context (`request_id`, traceparent, tenant/actor
+identity, `AbortSignal`); each provider call is an operation scope with a
+10-second cooperative deadline and a 2-second hard-stop grace; each
+PostgreSQL command is a transaction scope. Provider network calls never hold a
+database transaction open.
+
+Interactions hold a renewable database lease. Checkpoint and completion updates
+require the current owner and an unexpired lease. A new request may reclaim only
+`processing` work whose lease expired, using one conditional database update;
+the recovery transition and encrypted journal entry commit in the same
+transaction. The journal establishes transition order and incident evidence. It
+is not an event-sourcing log and does not replace the current interaction row.
+
+On `SIGTERM`/`SIGINT`, readiness is removed first, the HTTP server drains
+in-flight requests, and the composition root closes its resources. Workers finish
+leased jobs or release their leases on cooperative cancellation; cancellation
+does not consume a delivery attempt. The outbox relay resumes from
+`published_at=NULL`;
+review tasks remain actionable; media cleanup is retention-driven.
+
+Background loops are registered with the Control Engine's managed-task
+registry. It stops admission, sends one cooperative abort to every task, and
+waits concurrently for `RUNTIME_TEARDOWN_MS` (default 3000 ms). A terminate hook
+is valid only for a supervised process or worker. The HTTP adapter uses the same
+default drain budget, then aborts request signals and closes remaining
+connections. A non-cooperative in-process resource is reported as a teardown
+failure for the process supervisor; JavaScript does not pretend to kill it.
+
+Process-isolated extensions have an additional owner boundary. Node resolves a
+trusted absolute entrypoint and passes only allowlisted environment values. The
+Rust supervisor creates one process group, waits for an explicit bounded ready
+frame, sends `SIGTERM` on stop, and sends `SIGKILL` after the configured grace.
+Dropping the owner also terminates and waits for a live group.
+
+Conversation state has a separate optimistic lifecycle:
+`ABSENT -> revision 0 -> revision N+1`. A writer supplies the revision it read.
+Only an exact tenant/conversation/revision match replaces the encrypted state;
+otherwise the application service returns `CRM_CONFLICT` and the caller must
+read, merge, or abandon its projection.

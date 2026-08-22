@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 const outputRoot = resolve("artifacts", "docs-site");
 const mcpEntry = process.env.SUMI_DOCS_MCP_ENTRY
   ? resolve(process.env.SUMI_DOCS_MCP_ENTRY)
-  : resolve("..", ".sumi", "Sumi-Docs-MCP", "dist", "index.js");
+  : resolve("..", "Sumi-Docs-MCP", "dist", "index.js");
 await access(mcpEntry);
 await access(resolve(outputRoot, "_mcp", "sumi-docs-manifest.json"));
 
@@ -86,14 +86,14 @@ const calls = [
   [1, "tools/list", {}],
   [2, "tools/call", { name: "list_docs", arguments: {} }],
   [3, "tools/call", { name: "search_docs", arguments: { query: "idempotency" } }],
-  [4, "tools/call", { name: "fetch_doc", arguments: { path: "agent-guide.md" } }],
+  [4, "tools/call", { name: "fetch_doc", arguments: { path: "architecture.md" } }],
   [5, "tools/call", { name: "get_openapi_spec", arguments: { endpoint: "/v1/ask" } }],
   [6, "tools/call", { name: "search_docs", arguments: { query: "低置信度" } }],
-  [7, "tools/call", { name: "fetch_doc", arguments: { path: "zh-cn/agent-guide.md" } }],
+  [7, "tools/call", { name: "fetch_doc", arguments: { path: "zh-cn/architecture.md" } }],
   [8, "tools/call", { name: "search_docs", arguments: { query: "ASR_TIMEOUT" } }],
-  [9, "tools/call", { name: "search_docs", arguments: { query: "continuity-supervisor" } }],
-  [10, "tools/call", { name: "fetch_doc", arguments: { path: "maintenance.md" } }],
-  [11, "tools/call", { name: "fetch_doc", arguments: { path: "zh-cn/maintenance.md" } }],
+  [9, "tools/call", { name: "search_docs", arguments: { query: "outbox" } }],
+  [10, "tools/call", { name: "fetch_doc", arguments: { path: "operations.md" } }],
+  [11, "tools/call", { name: "fetch_doc", arguments: { path: "zh-cn/operations.md" } }],
 ];
 
 try {
@@ -120,21 +120,23 @@ try {
   const parseToolResult = (id) =>
     JSON.parse(responses.get(id)?.result?.content?.[0]?.text ?? "null");
   const listed = parseToolResult(2);
-  assert.equal(listed.length, 38);
+  assert.equal(listed.length, 33);
   assert.equal(
-    listed.find(({ path }) => path === "agent-guide.md")?.url,
-    `${baseUrl}agent-guide`,
+    listed.find(({ path }) => path === "architecture.md")?.url,
+    `${baseUrl}architecture`,
   );
   assert.ok(
-    parseToolResult(3).some(({ path }) => path === "agent-guide.md"),
-    "idempotency search should reach the agent onboarding contract",
+    parseToolResult(3).some(({ path }) =>
+      ["api.md", "architecture.md", "lifecycle.md"].includes(path),
+    ),
+    "idempotency search should reach a product contract",
   );
-  assert.match(parseToolResult(4)?.content ?? "", /Discovery sequence/);
+  assert.match(parseToolResult(4)?.content ?? "", /Ownership rules/);
   assert.deepEqual(Object.keys(parseToolResult(5)?.paths ?? {}), ["/v1/ask"]);
   const chineseResults = parseToolResult(6);
   assert.ok(chineseResults.length > 0);
   assert.ok(chineseResults.every(({ path }) => path.startsWith("zh-cn/")));
-  assert.match(parseToolResult(7)?.content ?? "", /推荐发现顺序/);
+  assert.match(parseToolResult(7)?.content ?? "", /系统分为四个平面/);
   assert.ok(
     parseToolResult(8).some(({ path }) =>
       ["operations.md", "troubleshooting.md", "zh-cn/operations.md"].includes(
@@ -143,11 +145,13 @@ try {
     ),
   );
   assert.ok(
-    parseToolResult(9).some(({ path }) => path === "maintenance.md"),
-    "continuity search should reach the maintenance contract",
+    parseToolResult(9).some(({ path }) =>
+      ["architecture.md", "events-audit.md", "operations.md"].includes(path),
+    ),
+    "outbox search should reach a product operations contract",
   );
-  assert.match(parseToolResult(10)?.content ?? "", /State ownership/);
-  assert.match(parseToolResult(11)?.content ?? "", /状态归属/);
+  assert.match(parseToolResult(10)?.content ?? "", /Common incidents/);
+  assert.match(parseToolResult(11)?.content ?? "", /outbox 状态/);
 
   const routeMap = JSON.parse(
     await readFile(
@@ -167,7 +171,7 @@ try {
   }
 
   console.log(
-    `Verified all four MCP tools, bilingual development-partner queries, and ${listed.length} human page URLs.`,
+    `Verified all four MCP tools, bilingual product queries, and ${listed.length} human page URLs.`,
   );
 } finally {
   lines.close();

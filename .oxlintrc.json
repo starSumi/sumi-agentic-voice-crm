@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "rules": {
+    "eslint/no-await-in-loop": "off",
+    "eslint/no-control-regex": "off",
+    "eslint/no-unmodified-loop-condition": "off",
+    "oxc/no-map-spread": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "ignorePatterns": [
+    ".astro/**",
+    "artifacts/**",
+    "dist/**",
+    "node_modules/**",
+    "packages/api-client/src/generated/**",
+    "protocol/schema/**",
+    "public/_mcp/**"
+  ],
+  "options": {
+    "reportUnusedDisableDirectives": "error"
+  }
+}

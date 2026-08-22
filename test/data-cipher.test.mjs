@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes } from "node:crypto";
-import { DataCipher } from "../src/data-cipher.mjs";
+import { DataCipher } from "../src/data-cipher.ts";
 
 test("interaction data is authenticated, encrypted and tenant-bound", () => {
   const key = randomBytes(32);

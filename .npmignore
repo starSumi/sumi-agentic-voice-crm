@@ -1,5 +1,6 @@
 # Governance source is for repository review, not the published runtime package.
 .agent/
+.local/
 .agent.local/
 .agent-runtime/
 .agent-cache/
@@ -12,6 +13,11 @@
 .dist.staging-*/
 .dist.backup-*/
 .codex/
+.agents/
+.nx/
+orchestration/
+nx.json
+pnpm-workspace.yaml
 .claude/
 .vscode/
 .idea/

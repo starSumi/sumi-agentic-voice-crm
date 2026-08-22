@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateProductionConfig } from "../src/production-config.mjs";
+import { validateProductionConfig } from "../src/production-config.ts";
 
 const production = {
   APP_ENV: "production", STORE_PROVIDER: "postgres", DATABASE_URL: "postgresql://db/app",
@@ -69,6 +69,10 @@ test("production API configuration supports mixed providers and DashScope aliase
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_TTS_MAX_BYTES: "0" }), /positive integer/);
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_TTS_MAX_BYTES: String(51 * 1024 * 1024) }), /no greater than/);
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, PROVIDER_TIMEOUT_MS: "120001" }), /no greater than/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, PROVIDER_SOFT_TIMEOUT_MS: "120001" }), /no greater than/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, PROVIDER_HARD_GRACE_MS: "30001" }), /no greater than/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, INTERACTION_LEASE_MS: "900001" }), /no greater than/);
+  assert.throws(() => validateProductionConfig({ ...dashscopeOnly, RUNTIME_TEARDOWN_MS: "30001" }), /no greater than/);
   assert.throws(() => validateProductionConfig({ ...dashscopeOnly, DASHSCOPE_AUDIO_HOST_SUFFIXES: "not-a-domain" }), /DNS suffixes/);
 });
 

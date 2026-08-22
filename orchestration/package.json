@@ -1,0 +1,37 @@
+{
+  "name": "@sumi/dev-orchestration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "generate": "node cli.ts generate",
+    "check": "node cli.ts check",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test ../test/orchestration-engine.test.mjs",
+    "ci": "pnpm run check && pnpm run typecheck && pnpm run test"
+  },
+  "nx": {
+    "tags": [
+      "scope:development",
+      "type:tool",
+      "boundary:control-plane"
+    ],
+    "targets": {
+      "ci": {
+        "cache": true,
+        "outputs": []
+      }
+    }
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "smol-toml": "1.8.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "npm:@typescript/typescript6@6.0.2"
+  }
+}

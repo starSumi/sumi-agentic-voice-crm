@@ -12,6 +12,94 @@ export type Locale = "zh-CN" | "en-US" | "hi-IN" | "te-IN";
 
 export type RequestId = string;
 
+export type JobId = string;
+
+export type AttachmentId = string;
+
+export type AttachmentKind = "audio" | "image" | "document";
+
+export type AttachmentMimeType = string;
+
+export type AttachmentSha256 = string;
+
+/**
+ * Opaque, JSON-safe attachment metadata. Object-storage keys, raw bytes, authorization metadata and signed URL query parameters are never part of this boundary. Image and document kinds are reserved for future adapters and are not accepted by the current ask request.
+ */
+export type AttachmentRef = {
+  asset_id: AttachmentId;
+  kind: AttachmentKind;
+  mime_type: AttachmentMimeType;
+  status: "pending" | "ready" | "failed";
+  byte_length?: number;
+  sha256?: AttachmentSha256;
+  expires_at?: string;
+  url?: string;
+};
+
+/**
+ * HTTP projection of the normative events.yaml envelope.
+ */
+export type EventStreamEnvelope = {
+  specversion: "1.0";
+  id: string;
+  type:
+    | "voice.request.received.v1"
+    | "voice.transcript.created.v1"
+    | "voice.understanding.created.v1"
+    | "crm.command.committed.v1"
+    | "crm.review.requested.v1"
+    | "tts.asset.created.v1"
+    | "voice.request.failed.v1";
+  source: "urn:sumi:voice-crm/crm";
+  subject: string;
+  time: string;
+  datacontenttype: "application/json";
+  tenant_id: string;
+  request_id: string;
+  traceparent?: string;
+  data: {
+    [key: string]: unknown;
+  };
+};
+
+export type EventStreamResponse = {
+  events: Array<EventStreamEnvelope>;
+  request_id: RequestId;
+};
+
+export type MessageJobResponse = {
+  request_id: RequestId;
+  original_request_id?: RequestId;
+  job_id: JobId;
+  status:
+    | "job_queued"
+    | "running"
+    | "succeeded"
+    | "retry_wait"
+    | "dead_letter"
+    | "cancelled";
+  attempts: number;
+  idempotency_replay: boolean;
+  error_code?: string;
+  result?: {
+    [key: string]: unknown;
+  };
+};
+
+export type MessageJobStatsResponse = {
+  request_id: RequestId;
+  tenant_id: TenantId;
+  jobs: {
+    inbound: number;
+    job_queued: number;
+    running: number;
+    succeeded: number;
+    retry_wait: number;
+    dead_letter: number;
+    cancelled: number;
+  };
+};
+
 export type TextInput = {
   type: "text";
   text: string;
@@ -58,19 +146,28 @@ export type MultipartAudioAskRequest = {
   metadata: string;
 };
 
+export type MultipartAskMetadata = {
+  output_mode?: "text" | "audio" | "both";
+  locale?: Locale;
+  conversation_id?: string;
+};
+
+export type AgentCrmIntent =
+  "crm.search" | "crm.customer.create" | "crm.deal.update_stage";
+
 export type Understanding = {
-  intent: string;
+  intent: AgentCrmIntent;
   confidence: number;
   entities: {
     [key: string]: unknown;
   };
   missing: Array<string>;
   needs_confirmation: boolean;
-  schema_version: string;
-  source?: {
-    transcript_hash?: string;
-    language?: string;
-    model?: string;
+  schema_version: "sumi.agent-crm-understanding.v1";
+  source: {
+    transcript_hash: string;
+    language: string;
+    model: string;
   };
 };
 
@@ -108,6 +205,23 @@ export type ReviewResponse = {
   };
 };
 
+export type ReviewId = string;
+
+export type ReviewDecisionRequest = {
+  decision: "approve" | "reject";
+  correction?: {
+    [key: string]: unknown;
+  };
+};
+
+export type ReviewDecisionResponse = {
+  review_id: ReviewId;
+  status: "approved" | "rejected";
+  decision: {
+    [key: string]: unknown;
+  };
+};
+
 export type TtsRequest = {
   text: string;
   language: Locale;
@@ -115,10 +229,16 @@ export type TtsRequest = {
   format: "mp3" | "wav" | "ogg";
 };
 
+/**
+ * Source-compatible audio response. New transport-neutral adapters use AttachmentRef; the optional common fields allow incremental adoption without changing existing TTS response requirements.
+ */
 export type TtsAsset = {
-  asset_id: string;
+  asset_id: AttachmentId;
+  kind?: AttachmentKind;
   url: string;
-  mime_type: string;
+  mime_type: AttachmentMimeType;
+  byte_length?: number;
+  sha256?: AttachmentSha256;
   duration_ms?: number;
   expires_at?: string;
   status: "ready" | "failed" | "pending";
@@ -150,7 +270,8 @@ export type ErrorEnvelope = {
       | "IDEMPOTENCY_CONFLICT"
       | "UPSTREAM_UNAVAILABLE"
       | "PROVIDER_REJECTED"
-      | "RATE_LIMITED";
+      | "RATE_LIMITED"
+      | "PAYLOAD_TOO_LARGE";
     message: string;
     retryable: boolean;
     details: {
@@ -169,6 +290,21 @@ export type TenantId2 = TenantId;
  */
 export type IdempotencyKey2 = IdempotencyKey;
 
+/**
+ * Set to respond-async to persist a message job and return a receipt before model processing.
+ */
+export type PreferAsync = "respond-async";
+
+/**
+ * Opaque durable message job identifier.
+ */
+export type JobId2 = JobId;
+
+/**
+ * Opaque tenant-scoped attachment identifier.
+ */
+export type AssetId = AttachmentId;
+
 export type AskData = {
   body: AskRequest;
   headers: {
@@ -180,6 +316,10 @@ export type AskData = {
      * Stable mutation key. Reuse with a different request fingerprint returns 409.
      */
     "Idempotency-Key": IdempotencyKey;
+    /**
+     * Set to respond-async to persist a message job and return a receipt before model processing.
+     */
+    Prefer?: "respond-async";
   };
   path?: never;
   query?: never;
@@ -206,6 +346,10 @@ export type AskErrors = {
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
+  413: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
   415: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
@@ -215,6 +359,10 @@ export type AskErrors = {
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
   429: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  502: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
@@ -233,9 +381,9 @@ export type AskResponses = {
    */
   200: AskResponse;
   /**
-   * Review required
+   * Review required or message accepted for asynchronous processing
    */
-  202: ReviewResponse;
+  202: ReviewResponse | MessageJobResponse;
 };
 
 export type AskResponse2 = AskResponses[keyof AskResponses];
@@ -277,11 +425,19 @@ export type SynthesizeErrors = {
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
+  413: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
   422: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
   429: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  502: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
@@ -304,12 +460,7 @@ export type SynthesizeResponses = {
 export type SynthesizeResponse = SynthesizeResponses[keyof SynthesizeResponses];
 
 export type DecideReviewData = {
-  body: {
-    decision: "approve" | "reject";
-    correction?: {
-      [key: string]: unknown;
-    };
-  };
+  body: ReviewDecisionRequest;
   headers: {
     /**
      * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
@@ -321,7 +472,7 @@ export type DecideReviewData = {
     "Idempotency-Key": IdempotencyKey;
   };
   path: {
-    review_id: string;
+    review_id: ReviewId;
   };
   query?: never;
   url: "/v1/reviews/{review_id}/decision";
@@ -347,6 +498,10 @@ export type DecideReviewErrors = {
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
+  413: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
   503: ErrorEnvelope;
 };
 
@@ -356,10 +511,235 @@ export type DecideReviewResponses = {
   /**
    * Review decision recorded
    */
-  200: {
-    [key: string]: unknown;
-  };
+  200: ReviewDecisionResponse;
 };
 
 export type DecideReviewResponse =
   DecideReviewResponses[keyof DecideReviewResponses];
+
+export type GetAssetData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path: {
+    /**
+     * Opaque tenant-scoped attachment identifier.
+     */
+    asset_id: AttachmentId;
+  };
+  query?: never;
+  url: "/v1/assets/{asset_id}";
+};
+
+export type GetAssetErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  400: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type GetAssetError = GetAssetErrors[keyof GetAssetErrors];
+
+export type GetAssetResponses = {
+  /**
+   * Attachment metadata
+   */
+  200: AttachmentRef;
+};
+
+export type GetAssetResponse = GetAssetResponses[keyof GetAssetResponses];
+
+export type GetAssetContentData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path: {
+    /**
+     * Opaque tenant-scoped attachment identifier.
+     */
+    asset_id: AttachmentId;
+  };
+  query?: never;
+  url: "/v1/assets/{asset_id}/content";
+};
+
+export type GetAssetContentErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  400: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type GetAssetContentError =
+  GetAssetContentErrors[keyof GetAssetContentErrors];
+
+export type GetAssetContentResponses = {
+  /**
+   * Attachment bytes using the stored media type
+   */
+  200: Blob | File;
+};
+
+export type GetAssetContentResponse =
+  GetAssetContentResponses[keyof GetAssetContentResponses];
+
+export type ListEventsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/events";
+};
+
+export type ListEventsErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type ListEventsError = ListEventsErrors[keyof ListEventsErrors];
+
+export type ListEventsResponses = {
+  /**
+   * Tenant event stream snapshot
+   */
+  200: EventStreamResponse;
+};
+
+export type ListEventsResponse = ListEventsResponses[keyof ListEventsResponses];
+
+export type ListMessageJobStatsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/jobs/stats";
+};
+
+export type ListMessageJobStatsErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type ListMessageJobStatsError =
+  ListMessageJobStatsErrors[keyof ListMessageJobStatsErrors];
+
+export type ListMessageJobStatsResponses = {
+  /**
+   * Message job counts by lifecycle state
+   */
+  200: MessageJobStatsResponse;
+};
+
+export type ListMessageJobStatsResponse =
+  ListMessageJobStatsResponses[keyof ListMessageJobStatsResponses];
+
+export type GetMessageJobData = {
+  body?: never;
+  headers?: {
+    /**
+     * Tenant boundary selected by an OIDC actor. Optional in static mode because the server binds the credential to one configured tenant; a conflicting value is rejected.
+     */
+    "X-Tenant-Id"?: TenantId;
+  };
+  path: {
+    /**
+     * Opaque durable message job identifier.
+     */
+    job_id: JobId;
+  };
+  query?: never;
+  url: "/v1/jobs/{job_id}";
+};
+
+export type GetMessageJobErrors = {
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  400: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  401: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  503: ErrorEnvelope;
+};
+
+export type GetMessageJobError = GetMessageJobErrors[keyof GetMessageJobErrors];
+
+export type GetMessageJobResponses = {
+  /**
+   * Message job status and completed result when available
+   */
+  200: MessageJobResponse;
+};
+
+export type GetMessageJobResponse =
+  GetMessageJobResponses[keyof GetMessageJobResponses];

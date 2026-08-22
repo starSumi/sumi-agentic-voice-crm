@@ -1,0 +1,46 @@
+{
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "name": "sumi-docs",
+  "projectType": "application",
+  "sourceRoot": "docs",
+  "implicitDependencies": ["@sumi/voice-crm-api-client"],
+  "tags": ["scope:docs", "type:application", "boundary:documentation"],
+  "targets": {
+    "check": {
+      "command": "pnpm run docs:check",
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/astro.config.mjs",
+        "{workspaceRoot}/src/content.config.ts",
+        "{workspaceRoot}/src/pages/**/*",
+        "{workspaceRoot}/src/scripts/**/*",
+        "{workspaceRoot}/src/styles/**/*"
+      ]
+    },
+    "build": {
+      "command": "pnpm run docs:build",
+      "outputs": ["{workspaceRoot}/artifacts/docs-site"],
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/astro.config.mjs",
+        "{workspaceRoot}/src/content.config.ts",
+        "{workspaceRoot}/src/pages/**/*",
+        "{workspaceRoot}/src/scripts/**/*",
+        "{workspaceRoot}/src/styles/**/*",
+        "{workspaceRoot}/src/assets/**/*"
+      ]
+    },
+    "test": {
+      "command": "node --test test/workbench-source.test.mjs",
+      "cache": true
+    },
+    "ci": {
+      "dependsOn": ["check", "build", "test"],
+      "command": "node -e \"console.log('Product documentation passed')\"",
+      "cache": true
+    }
+  }
+}

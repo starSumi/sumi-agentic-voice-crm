@@ -1,0 +1,7 @@
+interface:
+  display_name: Sumi Orchestration
+  short_description: Compile and verify bounded Sumi engineering workflows
+  default_prompt: Compile this work into bounded task packets, schedule only
+    dependency-ready non-conflicting tasks, and bind completion to evidence.
+policy:
+  allow_implicit_invocation: true

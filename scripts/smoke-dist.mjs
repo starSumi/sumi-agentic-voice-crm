@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 
 const port = 18_000 + (process.pid % 1_000);
-const child = spawn(process.execPath, ["dist/src/server.mjs"], {
+const child = spawn(process.execPath, ["dist/src/server.ts"], {
   env: { ...process.env, PORT: String(port) },
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,

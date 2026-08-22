@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+  - orchestration
+
+linkWorkspacePackages: false
+saveWorkspaceProtocol: rolling
+sharedWorkspaceLockfile: true
+disallowWorkspaceCycles: true
+failIfNoMatch: true

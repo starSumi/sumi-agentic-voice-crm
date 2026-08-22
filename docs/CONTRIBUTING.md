@@ -7,7 +7,7 @@ audience: both
 contentVersion: 0.1.0
 ---
 
-Start with the root `AGENTS.md`, the relevant architecture decision, and the checkpoint that owns the change. The root `CONTRIBUTING.md` is the concise repository contract; this page explains the working flow.
+Start with the root `AGENTS.md` and the relevant architecture decision. The root `CONTRIBUTING.md` is the concise repository contract; this page explains the working flow.
 
 ## Before implementation
 
@@ -21,7 +21,7 @@ Start with the root `AGENTS.md`, the relevant architecture decision, and the che
 
 Keep a pull request cohesive. Include the problem and user impact, contract or architecture effect, test evidence, security and data impact, documentation updates, and rollback. Draft pull requests are appropriate for early design review; passing CI is not a substitute for required owner review.
 
-The repository pull request template captures these fields and the required Web/MCP validation. CODEOWNERS review is required for contracts, database, agent governance, security, and release policy.
+The repository pull request template captures these fields and the required Web/MCP validation. CODEOWNERS review is required for contracts, database, security, and release policy.
 
 ## Commit quality
 
@@ -30,11 +30,11 @@ Use an imperative, scoped subject such as `docs: add MCP partner guide` or `fix(
 ## Required validation
 
 ```powershell
-npm run verify
-npm run verify:mcp
+pnpm run verify
+pnpm run verify:mcp
 ```
 
-If a gate cannot run, say exactly which one and why. Do not replace missing evidence with a status report or a confidence claim.
+`verify` is the deterministic local Nx graph and does not start PostgreSQL. Protected CI and release acceptance run `verify:ci`, which adds the disposable PostgreSQL integration project. If a gate cannot run, say exactly which one and why. Do not replace missing evidence with a status report or a confidence claim.
 
 ## Content changes
 

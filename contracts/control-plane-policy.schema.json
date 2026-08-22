@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumi.invalid/schemas/control-plane-policy/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model",
+    "resource_contract",
+    "controllers",
+    "retry_policy",
+    "agent_semantics",
+    "invariants",
+    "standards"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "sumi.control-plane-policy.v1" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern",
+        "desired_state",
+        "observed_state",
+        "wakeup",
+        "decision",
+        "source_of_truth",
+        "delivery",
+        "effects"
+      ],
+      "properties": {
+        "pattern": { "const": "declarative-controller-reconciliation" },
+        "desired_state": { "const": "spec" },
+        "observed_state": { "const": "status" },
+        "wakeup": { "const": "events-are-hints" },
+        "decision": { "const": "level-triggered" },
+        "source_of_truth": { "const": "durable-state" },
+        "delivery": { "const": "at-least-once" },
+        "effects": { "const": "idempotent-or-cas-guarded" }
+      }
+    },
+    "resource_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "generation",
+        "observed_generation",
+        "conditions",
+        "evidence_refs",
+        "status_writer"
+      ],
+      "properties": {
+        "scope": { "const": "new-public-declarative-resources" },
+        "generation": { "const": "required-when-spec-is-mutable" },
+        "observed_generation": { "const": "required-before-ready" },
+        "conditions": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "Ready" },
+            { "const": "Progressing" },
+            { "const": "Degraded" },
+            { "const": "Blocked" }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "evidence_refs": { "const": "required-for-verified" },
+        "status_writer": { "const": "owning-controller-only" }
+      }
+    },
+    "controllers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/controller" }
+    },
+    "retry_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "backoff",
+        "jitter",
+        "cancellation",
+        "dead_letter"
+      ],
+      "properties": {
+        "classification": {
+          "const": "retryable-terminal-or-cancellation"
+        },
+        "backoff": { "const": "bounded-exponential" },
+        "jitter": { "const": "required-before-horizontal-scale" },
+        "cancellation": { "const": "neutral" },
+        "dead_letter": { "const": "durable" }
+      }
+    },
+    "agent_semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_output",
+        "authority",
+        "irreversible_effects",
+        "completion",
+        "budgets",
+        "rollback",
+        "reasoning"
+      ],
+      "properties": {
+        "model_output": { "const": "untrusted-proposal" },
+        "authority": { "const": "server-policy-and-transaction-pep" },
+        "irreversible_effects": {
+          "const": "human-review-or-explicit-policy"
+        },
+        "completion": { "const": "current-condition-and-evidence" },
+        "budgets": { "const": "deadline-cost-and-attempts" },
+        "rollback": { "const": "compensation-or-versioned-cas" },
+        "reasoning": { "const": "never-required-as-audit-evidence" }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/invariant" }
+    },
+    "standards": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["controllers", "api_conventions", "finalizers", "leases"],
+      "properties": {
+        "controllers": {
+          "const": "https://kubernetes.io/docs/concepts/architecture/controller/"
+        },
+        "api_conventions": {
+          "const": "https://github.com/kubernetes/community/blob/main/contributors/devel/sig-architecture/api-conventions.md"
+        },
+        "finalizers": {
+          "const": "https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/"
+        },
+        "leases": {
+          "const": "https://kubernetes.io/docs/concepts/architecture/leases/"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "path": { "type": "string", "pattern": "^(?:src|db)/[a-z0-9_./-]+\\.ts$" },
+    "testPath": {
+      "type": "string",
+      "pattern": "^test/[a-z0-9_.-]+\\.test\\.mjs$"
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "resource",
+        "owner",
+        "mode",
+        "restart_policy",
+        "implementations",
+        "source_of_truth",
+        "wakeups",
+        "concurrency",
+        "idempotency",
+        "finalization",
+        "status_evidence",
+        "version_fence",
+        "recovery_scope",
+        "verification_tests"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "resource": { "$ref": "#/$defs/slug" },
+        "owner": { "$ref": "#/$defs/slug" },
+        "mode": {
+          "enum": [
+            "reconciled",
+            "state-machine",
+            "governed-lifecycle",
+            "cas-command"
+          ]
+        },
+        "restart_policy": {
+          "enum": [
+            "lease-reclaim",
+            "explicit-only",
+            "not-applicable",
+            "manual-review"
+          ]
+        },
+        "implementations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/path" }
+        },
+        "source_of_truth": { "$ref": "#/$defs/slug" },
+        "wakeups": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/slug" }
+        },
+        "concurrency": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/slug" }
+        },
+        "idempotency": { "$ref": "#/$defs/slug" },
+        "finalization": { "$ref": "#/$defs/slug" },
+        "status_evidence": { "$ref": "#/$defs/slug" },
+        "version_fence": { "$ref": "#/$defs/slug" },
+        "recovery_scope": { "$ref": "#/$defs/slug" },
+        "verification_tests": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/testPath" }
+        }
+      }
+    },
+    "invariant": {
+      "enum": [
+        "events-wake-reconciliation-but-never-define-truth",
+        "controllers-reobserve-before-effect",
+        "one-controller-owns-each-status-resource",
+        "status-never-mutates-spec",
+        "ready-requires-current-observed-generation",
+        "effects-are-idempotent-or-cas-guarded",
+        "leases-expire-and-stale-owners-cannot-commit",
+        "finalization-is-bounded-and-observable",
+        "authorization-precedes-side-effects",
+        "model-output-is-untrusted",
+        "durable-evidence-precedes-verified",
+        "cancellation-is-neutral-to-availability-circuits"
+      ]
+    }
+  }
+}

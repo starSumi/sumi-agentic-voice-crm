@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,7 +9,7 @@ const executables = ["initdb", "pg_ctl", "createdb", "dropdb", "psql"];
 for (const executable of executables) {
   const probe = spawnSync(executable, ["--version"], { encoding: "utf8", shell: false });
   if (probe.error || probe.status !== 0) {
-    throw new Error(`${executable} is required for npm run test:postgres`);
+    throw new Error(`${executable} is required for pnpm run test:postgres`);
   }
 }
 
@@ -61,15 +61,67 @@ try {
     throw new Error(`${error.message}\npostgres.log:\n${postgresLog}`, { cause: error });
   }
   started = true;
-  console.log("postgres integration: apply migration twice");
+  console.log("postgres integration: apply migrations twice");
   run("createdb", [database], { ...env, PGDATABASE: "postgres" });
-  run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-f", "db/migrations/001_initial.sql"], env);
-  run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-f", "db/migrations/001_initial.sql"], env);
+  const migrations = (await readdir("db/migrations"))
+    .filter((name) => /^\d{3}_[a-z0-9_]+\.sql$/.test(name))
+    .sort()
+    .map((name) => `db/migrations/${name}`);
+  if (migrations.length === 0) throw new Error("no PostgreSQL migrations found");
+  run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-f", migrations[0]], env);
+  if (migrations.includes("db/migrations/002_interaction_control_wal.sql")) {
+    run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-c", `
+      insert into tenants (id,slug,status)
+      values ('00000000-0000-4000-8000-000000000090','migration-upgrade','active');
+      insert into actors (id,tenant_id,subject,display_name,role)
+      values ('10000000-0000-4000-8000-000000000090','00000000-0000-4000-8000-000000000090','actor-upgrade','Upgrade Actor','agent');
+      insert into voice_interactions
+        (id,tenant_id,request_id,input_type,status,idempotency_key,request_fingerprint,input_payload_ciphertext,completed_at)
+      values
+        ('90000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000090','req_upgrade_processing','text','processing','upgrade-processing',repeat('9',64),'v1.fixture',null),
+        ('90000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000090','req_upgrade_completed','text','completed','upgrade-completed',repeat('8',64),'v1.fixture',now());
+    `], env);
+  }
+  for (const migration of migrations.slice(1)) {
+    run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-f", migration], env);
+  }
+  if (migrations.includes("db/migrations/002_interaction_control_wal.sql")) {
+    run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-c", `
+      do $$ begin
+        if not exists (
+          select 1 from voice_interactions
+          where request_id='req_upgrade_processing'
+            and lease_owner='req_upgrade_processing'
+            and lease_expires_at <= now()
+            and recovery_count=0
+        ) then raise exception 'processing interaction was not made reclaimable'; end if;
+        if exists (
+          select 1 from voice_interactions
+          where request_id='req_upgrade_completed'
+            and (lease_owner is not null or lease_expires_at is not null)
+        ) then raise exception 'completed interaction received a lease'; end if;
+      end $$;
+    `], env);
+  }
+  for (const migration of migrations) {
+    run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-f", migration], env);
+  }
   console.log("postgres integration: exercise RLS and transaction atomicity");
   const evidence = run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-f", "db/tests/001_rls_and_atomicity.sql"], env);
   if (!evidence.includes("sumi postgres integration passed")) {
     throw new Error("PostgreSQL test did not emit its acceptance marker");
   }
+  run("psql", ["-X", "-v", "ON_ERROR_STOP=1", "-c", `
+    update actors
+    set scopes='["interaction.ask","crm.search","crm.customer.create","crm.deal.update_stage","media.tts.create","media.asset.read","events.read","progress.subscribe"]'::jsonb
+    where tenant_id='00000000-0000-4000-8000-000000000001' and subject='actor-a';
+    insert into actors (id,tenant_id,subject,display_name,role,scopes,status)
+    values
+      ('10000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','actor-reviewer','Actor Reviewer','reviewer','["crm.search","crm.customer.create","crm.deal.update_stage","review.decide","media.asset.read","events.read","progress.subscribe"]'::jsonb,'active'),
+      ('10000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000001','actor-suspended','Actor Suspended','agent','["crm.customer.create"]'::jsonb,'suspended')
+    on conflict (tenant_id,subject) do update
+    set role=excluded.role,scopes=excluded.scopes,status=excluded.status;
+  `], env);
   const runtimeUrl = `postgresql://sumi_app@127.0.0.1:${port}/${database}`;
   run(process.execPath, ["db/tests/postgres-store.integration.mjs"], { ...env, DATABASE_URL: runtimeUrl }, { inherit: true });
   console.log(`postgres integration passed: migration reapplied cleanly, two-tenant RLS and atomic commit/rollback verified on PostgreSQL ${run("psql", ["--version"], env).trim()}`);

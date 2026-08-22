@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GetBucketLocationCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { createObjectStorage, persistAudioAsset, persistInputAudio, S3ObjectStorage } from "../src/object-storage.mjs";
+import { createObjectStorage, persistAudioAsset, persistInputAudio, S3ObjectStorage } from "../src/object-storage.ts";
 
 const env = {
   APP_ENV: "test",

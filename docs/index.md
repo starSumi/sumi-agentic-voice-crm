@@ -20,7 +20,6 @@ The current `0.1.0` runtime defaults to deterministic mock providers and an in-m
 | Understand state ownership | [Architecture](/architecture/) | [Lifecycle](/lifecycle/) and [data model](/data-model/) |
 | Review safety controls | [Security](/security/) | [Events and audit](/events-audit/) |
 | Contribute code or docs | [Development](/development/) | [Contributing](/contributing/) |
-| Connect an AI developer | [Agent guide](/agent-guide/) | [Traceability](/traceability/) |
 | Operate or recover | [Operations](/operations/) | [Troubleshooting](/troubleshooting/) |
 
 ## What is implemented
@@ -34,7 +33,7 @@ The current `0.1.0` runtime defaults to deterministic mock providers and an in-m
 
 ## What remains a production target
 
-OIDC/JWKS, PostgreSQL RLS, private S3-compatible storage, encrypted interaction replay, OpenAI-compatible adapters, an outbox worker, HTTP metrics and local load/fault drills are implemented. Real provider quality, malware/rate-limit/security exercises, staging, signed artifacts, disaster recovery and production approval remain open checkpoints. [Release readiness](/release-readiness/) is the authority for current evidence.
+OIDC/JWKS, PostgreSQL RLS, private S3-compatible storage, encrypted interaction replay, OpenAI-compatible adapters, an outbox worker, HTTP metrics and local load/fault drills are implemented. Real provider quality, malware/rate-limit/security exercises, staging, signed artifacts, disaster recovery and production approval remain release gates. [Build and release](/build-release/) defines the evidence and approval path.
 
 ## Documentation contract
 

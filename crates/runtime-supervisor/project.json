@@ -1,0 +1,29 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "sumi-runtime-supervisor",
+  "projectType": "library",
+  "sourceRoot": "crates/runtime-supervisor/src",
+  "implicitDependencies": ["sumi-protocol"],
+  "tags": ["scope:runtime", "type:rust", "boundary:process"],
+  "targets": {
+    "format": {
+      "command": "node scripts/run-cargo.mjs fmt --all -- --check",
+      "cache": true
+    },
+    "lint": {
+      "command": "node scripts/run-cargo.mjs clippy --workspace --all-targets --locked -- -D warnings"
+    },
+    "test": {
+      "command": "node scripts/run-cargo.mjs test --workspace --locked"
+    },
+    "build": {
+      "command": "node scripts/run-cargo.mjs build --release --locked --package sumi-runtime-supervisor",
+      "outputs": ["{workspaceRoot}/target/release/sumi-runtime-supervisor"]
+    },
+    "ci": {
+      "dependsOn": ["format", "lint", "test", "build"],
+      "command": "node -e \"console.log('Rust supervisor checks passed')\"",
+      "cache": true
+    }
+  }
+}

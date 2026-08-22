@@ -7,17 +7,29 @@
   "sources": {
     "http": "contracts/openapi.yaml",
     "events": "contracts/events.yaml",
+    "agent_crm_intents": "contracts/agent-crm-intents.json",
+    "supervisor": "contracts/runtime-supervisor.schema.json",
+    "authorization": "contracts/authorization-policy.json",
+    "transports": "contracts/transport-policy.json",
     "database": "db/migrations"
   },
   "generated": {
     "json_schema_bundle": "protocol/schema/json/openapi.bundle.json",
     "event_schema_bundle": "protocol/schema/json/events.bundle.json",
-    "typescript_client": "packages/api-client/src/generated"
+    "typescript_client": "packages/api-client/src/generated",
+    "typescript_supervisor": "src/extensions/generated/runtime-supervisor-protocol.ts",
+    "typescript_agent_crm": "src/generated/agent-crm-contract.ts",
+    "rust_supervisor": "crates/runtime-supervisor/src/generated/protocol.rs"
   },
+  "consumer_roots": [
+    "src/scripts",
+    "packages/api-client/src/contract-fixture.ts"
+  ],
   "commands": {
-    "generate": "npm run protocol:generate",
-    "drift_check": "npm run protocol:check",
-    "consumer_check": "npm run protocol:typecheck"
+    "generate": "pnpm run protocol:generate",
+    "drift_check": "pnpm run protocol:check",
+    "authorization_check": "pnpm run authorization:check",
+    "consumer_check": "pnpm run contract:consumer-check"
   },
   "breaking_change_policy": "major-version-and-migration-plan-required",
   "rollback": "restore the previous compatible source and regenerated projections"
