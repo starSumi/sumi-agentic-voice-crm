@@ -11,12 +11,11 @@ const roots = [
   "packages/api-client/src/generated",
   "src/extensions/generated",
   "src/generated",
-  "crates/runtime-supervisor/src/generated",
 ];
 
-async function files(root) {
-  const found = [];
-  async function walk(directory) {
+async function files(root: string): Promise<string[]> {
+  const found: string[] = [];
+  async function walk(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) await walk(path);
@@ -27,7 +26,7 @@ async function files(root) {
   return found.sort();
 }
 
-async function exists(path) {
+async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);
     return true;
@@ -38,17 +37,13 @@ async function exists(path) {
 
 const generated = await mkdtemp(join(tmpdir(), "sumi-protocol-"));
 try {
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/generate-protocol.mjs"],
-    {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-      env: { ...process.env, PROTOCOL_OUTPUT_ROOT: generated },
-      shell: false,
-      stdio: "inherit",
-    },
-  );
+  const result = spawnSync(process.execPath, ["scripts/generate-protocol.ts"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: { ...process.env, PROTOCOL_OUTPUT_ROOT: generated },
+    shell: false,
+    stdio: "inherit",
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 

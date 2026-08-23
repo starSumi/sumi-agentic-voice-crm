@@ -53,7 +53,7 @@
         "typescript_client",
         "typescript_supervisor",
         "typescript_agent_crm",
-        "rust_supervisor"
+        "rust_supervisor_schema"
       ],
       "properties": {
         "json_schema_bundle": { "type": "string" },
@@ -61,7 +61,7 @@
         "typescript_client": { "type": "string" },
         "typescript_supervisor": { "type": "string" },
         "typescript_agent_crm": { "type": "string" },
-        "rust_supervisor": { "type": "string" }
+        "rust_supervisor_schema": { "type": "string" }
       }
     },
     "consumer_roots": {

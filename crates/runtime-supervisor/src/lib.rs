@@ -13,55 +13,33 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-#[path = "generated/protocol.rs"]
 mod protocol;
 pub use protocol::{
     EXTENSION_READY_FRAME, MAX_ARGUMENT_BYTES, MAX_ARGUMENTS, MAX_ENVIRONMENT_KEYS,
     MAX_ENVIRONMENT_VALUE_BYTES, MAX_FRAME_BYTES, MAX_GRACE_MS, MAX_PROGRAM_BYTES,
-    MAX_REQUEST_ID_BYTES, PROTOCOL_VERSION, ProtocolError, Request, Response, SupervisorState,
+    MAX_REQUEST_ID_BYTES, PROTOCOL_VERSION, Request, Response, SupervisorState,
+};
+use protocol::{
+    INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, JsonRpcId, METHOD_NOT_FOUND, PARSE_ERROR,
+    ResultPayload, StartParams,
 };
 
+pub fn generate_protocol_outputs(output_root: &Path) -> io::Result<()> {
+    protocol::generate_outputs(output_root)
+}
+
 impl Response {
-    fn success(request_id: impl Into<String>, state: SupervisorState) -> Self {
-        Self {
-            protocol: PROTOCOL_VERSION,
-            request_id: request_id.into(),
-            ok: true,
-            state,
-            ready: None,
-            child_pid: None,
-            forced: None,
-            exit_code: None,
-            signal: None,
-            error: None,
-        }
+    fn success_result(id: JsonRpcId, result: ResultPayload) -> Self {
+        Self::success(id, result)
     }
 
-    fn failure(
-        request_id: impl Into<String>,
+    fn failure_result(
+        id: Option<JsonRpcId>,
         state: SupervisorState,
-        code: &str,
+        code: i32,
         message: impl Into<String>,
     ) -> Self {
-        let message = message.into();
-        Self {
-            protocol: PROTOCOL_VERSION,
-            request_id: request_id.into(),
-            ok: false,
-            state,
-            ready: Some(false),
-            child_pid: None,
-            forced: None,
-            exit_code: None,
-            signal: None,
-            error: Some(ProtocolError {
-                code: code.to_owned(),
-                message: message
-                    .chars()
-                    .take(protocol::MAX_ERROR_MESSAGE_BYTES)
-                    .collect(),
-            }),
-        }
+        Self::error(id, code, message, state)
     }
 }
 
@@ -233,57 +211,51 @@ impl Supervisor {
     }
 
     pub fn handle(&mut self, request: Request) -> (Response, bool) {
-        let request_id = request.request_id().to_owned();
+        let request_id = request.id().clone();
         if let Err(message) = validate_common(&request) {
             return (
-                Response::failure(request_id, self.state, "INVALID_REQUEST", message),
+                Response::failure_result(
+                    Some(request_id.clone()),
+                    self.state,
+                    INVALID_REQUEST,
+                    message,
+                ),
                 false,
             );
         }
         if let Err(error) = self.refresh() {
             self.state = SupervisorState::Failed;
             return (
-                Response::failure(request_id, self.state, "SUPERVISOR_IO", error.to_string()),
+                Response::failure_result(
+                    Some(request_id),
+                    self.state,
+                    INTERNAL_ERROR,
+                    error.to_string(),
+                ),
                 false,
             );
         }
 
         match request {
-            Request::Start {
-                extension_id,
-                program,
-                args,
-                env,
-                startup_timeout_ms,
-                shutdown_grace_ms,
-                ..
-            } => {
+            Request::Start { id, params, .. } => {
                 if self.state != SupervisorState::Created {
                     return (
-                        Response::failure(
-                            request_id,
+                        Response::failure_result(
+                            Some(id),
                             self.state,
-                            "INVALID_STATE",
+                            protocol::APPLICATION_ERROR,
                             "start is allowed exactly once",
                         ),
                         false,
                     );
                 }
-                match validate_start(
-                    &extension_id,
-                    &program,
-                    &args,
-                    &env,
-                    startup_timeout_ms,
-                    shutdown_grace_ms,
-                )
-                .and_then(|()| {
+                match validate_start(&params).and_then(|()| {
                     OwnedChild::spawn(
-                        &program,
-                        &args,
-                        &env,
-                        Duration::from_millis(startup_timeout_ms),
-                        Duration::from_millis(shutdown_grace_ms),
+                        &params.program,
+                        &params.args,
+                        &params.env,
+                        Duration::from_millis(params.startup_timeout_ms),
+                        Duration::from_millis(params.shutdown_grace_ms),
                     )
                     .map_err(|error| error.to_string())
                 }) {
@@ -291,33 +263,42 @@ impl Supervisor {
                         let child_pid = child.id();
                         self.child = Some(child);
                         self.state = SupervisorState::Running;
-                        let mut response = Response::success(request_id, self.state);
-                        response.ready = Some(true);
-                        response.child_pid = Some(child_pid);
-                        (response, false)
+                        let result = ResultPayload {
+                            state: self.state,
+                            ready: Some(true),
+                            child_pid: Some(child_pid),
+                            forced: None,
+                            exit_code: None,
+                            signal: None,
+                        };
+                        (Response::success_result(id, result), false)
                     }
                     Err(message) => {
                         self.state = SupervisorState::Failed;
                         (
-                            Response::failure(request_id, self.state, "START_FAILED", message),
+                            Response::failure_result(
+                                Some(id),
+                                self.state,
+                                protocol::APPLICATION_ERROR,
+                                message,
+                            ),
                             false,
                         )
                     }
                 }
             }
-            Request::Health { .. } => {
-                let mut response = Response::success(request_id, self.state);
-                response.ready = Some(self.state == SupervisorState::Running);
-                if let Some(child) = self.child.as_ref() {
-                    response.child_pid = Some(child.id());
-                }
-                if let Some(exit) = self.last_exit.as_ref() {
-                    response.exit_code = exit.code;
-                    response.signal = exit.signal;
-                }
-                (response, false)
+            Request::Health { id, .. } => {
+                let result = ResultPayload {
+                    state: self.state,
+                    ready: Some(self.state == SupervisorState::Running),
+                    child_pid: self.child.as_ref().map(OwnedChild::id),
+                    forced: None,
+                    exit_code: self.last_exit.as_ref().and_then(|exit| exit.code),
+                    signal: self.last_exit.as_ref().and_then(|exit| exit.signal),
+                };
+                (Response::success_result(id, result), false)
             }
-            Request::Stop { .. } => {
+            Request::Stop { id, .. } => {
                 let result = match self.child.take() {
                     Some(child) => child.stop(),
                     None => Ok((
@@ -331,18 +312,21 @@ impl Supervisor {
                 self.state = SupervisorState::Stopped;
                 match result {
                     Ok((exit, forced)) => {
-                        let mut response = Response::success(request_id, self.state);
-                        response.ready = Some(false);
-                        response.forced = Some(forced);
-                        response.exit_code = exit.code;
-                        response.signal = exit.signal;
-                        (response, true)
+                        let result = ResultPayload {
+                            state: self.state,
+                            ready: Some(false),
+                            child_pid: None,
+                            forced: Some(forced),
+                            exit_code: exit.code,
+                            signal: exit.signal,
+                        };
+                        (Response::success_result(id, result), true)
                     }
                     Err(error) => (
-                        Response::failure(
-                            request_id,
+                        Response::failure_result(
+                            Some(id),
                             SupervisorState::Failed,
-                            "STOP_FAILED",
+                            protocol::APPLICATION_ERROR,
                             error.to_string(),
                         ),
                         true,
@@ -354,36 +338,31 @@ impl Supervisor {
 }
 
 fn validate_common(request: &Request) -> Result<(), String> {
-    if request.protocol() != PROTOCOL_VERSION {
-        return Err("unsupported supervisor protocol".to_owned());
+    if !request.id().valid() {
+        return Err("request id is invalid".to_owned());
     }
-    validate_identifier(request.request_id(), false, "request_id")
+    Ok(())
 }
 
-fn validate_start(
-    extension_id: &str,
-    program: &str,
-    args: &[String],
-    env: &BTreeMap<String, String>,
-    startup_timeout_ms: u64,
-    shutdown_grace_ms: u64,
-) -> Result<(), String> {
-    validate_identifier(extension_id, true, "extension_id")?;
-    if program.len() > MAX_PROGRAM_BYTES || !Path::new(program).is_absolute() {
+fn validate_start(params: &StartParams) -> Result<(), String> {
+    validate_identifier(&params.extension_id, true, "extension_id")?;
+    if params.program.len() > MAX_PROGRAM_BYTES || !Path::new(&params.program).is_absolute() {
         return Err("program must be a bounded absolute path".to_owned());
     }
-    if args.len() > MAX_ARGUMENTS || args.iter().any(|arg| arg.len() > MAX_ARGUMENT_BYTES) {
+    if params.args.len() > MAX_ARGUMENTS
+        || params.args.iter().any(|arg| arg.len() > MAX_ARGUMENT_BYTES)
+    {
         return Err("args exceed the supervisor bounds".to_owned());
     }
-    if env.len() > MAX_ENVIRONMENT_KEYS
-        || env.iter().any(|(key, value)| {
+    if params.env.len() > MAX_ENVIRONMENT_KEYS
+        || params.env.iter().any(|(key, value)| {
             !valid_environment_key(key) || value.len() > MAX_ENVIRONMENT_VALUE_BYTES
         })
     {
         return Err("env exceeds the supervisor bounds".to_owned());
     }
-    if !(1..=MAX_GRACE_MS).contains(&startup_timeout_ms)
-        || !(1..=MAX_GRACE_MS).contains(&shutdown_grace_ms)
+    if !(1..=MAX_GRACE_MS).contains(&params.startup_timeout_ms)
+        || !(1..=MAX_GRACE_MS).contains(&params.shutdown_grace_ms)
     {
         return Err(
             "startup_timeout_ms and shutdown_grace_ms must be between 1 and 30000".to_owned(),
@@ -478,26 +457,18 @@ pub fn serve(mut reader: impl BufRead, mut writer: impl Write) -> io::Result<()>
         let (response, stop) = match read_frame(&mut reader)? {
             Frame::Eof => break,
             Frame::TooLarge => (
-                Response::failure(
-                    "invalid",
+                Response::failure_result(
+                    None,
                     supervisor.state(),
-                    "FRAME_TOO_LARGE",
+                    INVALID_REQUEST,
                     "supervisor frame exceeds 65536 bytes",
                 ),
                 false,
             ),
             Frame::Line(line) if line.is_empty() => continue,
-            Frame::Line(line) => match serde_json::from_slice::<Request>(&line) {
+            Frame::Line(line) => match decode_request(&line, supervisor.state()) {
                 Ok(request) => supervisor.handle(request),
-                Err(_) => (
-                    Response::failure(
-                        "invalid",
-                        supervisor.state(),
-                        "INVALID_JSON",
-                        "supervisor request is not valid protocol JSON",
-                    ),
-                    false,
-                ),
+                Err(response) => (response, false),
             },
         };
         serde_json::to_writer(&mut writer, &response)?;
@@ -510,52 +481,240 @@ pub fn serve(mut reader: impl BufRead, mut writer: impl Write) -> io::Result<()>
     Ok(())
 }
 
+fn decode_request(line: &[u8], state: SupervisorState) -> Result<Request, Response> {
+    let value: serde_json::Value = serde_json::from_slice(line).map_err(|_| {
+        Response::failure_result(
+            None,
+            state,
+            PARSE_ERROR,
+            "supervisor request is not valid JSON",
+        )
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        Response::failure_result(
+            None,
+            state,
+            INVALID_REQUEST,
+            "JSON-RPC request must be an object",
+        )
+    })?;
+    if object.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0") {
+        return Err(Response::failure_result(
+            parse_id(object.get("id")),
+            state,
+            INVALID_REQUEST,
+            "JSON-RPC request must declare version 2.0",
+        ));
+    }
+    if !matches!(
+        object.get("id"),
+        Some(serde_json::Value::String(_) | serde_json::Value::Number(_))
+    ) {
+        return Err(Response::failure_result(
+            None,
+            state,
+            INVALID_REQUEST,
+            "JSON-RPC request id is required and must be a string or number",
+        ));
+    }
+    let method = object
+        .get("method")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            Response::failure_result(
+                None,
+                state,
+                INVALID_REQUEST,
+                "JSON-RPC request method is missing",
+            )
+        })?;
+    if !matches!(method, "runtime.start" | "runtime.health" | "runtime.stop") {
+        return Err(Response::failure_result(
+            parse_id(object.get("id")),
+            state,
+            METHOD_NOT_FOUND,
+            "runtime supervisor method was not found",
+        ));
+    }
+    let allowed = ["jsonrpc", "id", "method", "params"];
+    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return Err(Response::failure_result(
+            parse_id(object.get("id")),
+            state,
+            INVALID_REQUEST,
+            "JSON-RPC request contains an unknown field",
+        ));
+    }
+    let params = object.get("params").and_then(serde_json::Value::as_object);
+    let params_valid = match (method, params) {
+        ("runtime.start", Some(params)) => {
+            let allowed = [
+                "extension_id",
+                "program",
+                "args",
+                "env",
+                "startup_timeout_ms",
+                "shutdown_grace_ms",
+            ];
+            allowed.iter().all(|key| params.contains_key(*key))
+                && params.keys().all(|key| allowed.contains(&key.as_str()))
+        }
+        ("runtime.health" | "runtime.stop", Some(params)) => params.is_empty(),
+        _ => false,
+    };
+    if !params_valid {
+        return Err(Response::failure_result(
+            parse_id(object.get("id")),
+            state,
+            INVALID_PARAMS,
+            "JSON-RPC request parameters are invalid",
+        ));
+    }
+    let id = parse_id(object.get("id"));
+    serde_json::from_value(value.clone()).map_err(|_| {
+        Response::failure_result(
+            id,
+            state,
+            INVALID_PARAMS,
+            "JSON-RPC request parameters are invalid",
+        )
+    })
+}
+
+fn parse_id(value: Option<&serde_json::Value>) -> Option<JsonRpcId> {
+    match value {
+        Some(serde_json::Value::String(value)) => Some(JsonRpcId::String(value.clone())),
+        Some(serde_json::Value::Number(value)) => value.as_i64().map(JsonRpcId::Number),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
 
-    fn request(line: &str) -> Request {
-        serde_json::from_str(line).expect("valid request fixture")
+    fn response_values(input: impl Into<Vec<u8>>) -> Vec<serde_json::Value> {
+        let mut output = Vec::new();
+        serve(Cursor::new(input.into()), &mut output).expect("serve protocol fixtures");
+        String::from_utf8(output)
+            .expect("UTF-8 responses")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("JSON response"))
+            .collect()
     }
 
     #[test]
-    fn protocol_rejects_unknown_fields_and_relative_programs() {
-        assert!(serde_json::from_str::<Request>(
-            r#"{"protocol":"sumi.runtime.supervisor.v1","request_id":"r1","op":"health","extra":true}"#,
-        )
-        .is_err());
-
-        let mut supervisor = Supervisor::default();
-        let (response, _) = supervisor.handle(request(
-            r#"{"protocol":"sumi.runtime.supervisor.v1","request_id":"r1","op":"start","extension_id":"fixture.worker","program":"node","args":[],"env":{},"startup_timeout_ms":100,"shutdown_grace_ms":100}"#,
-        ));
-        assert!(!response.ok);
-        assert_eq!(response.state, SupervisorState::Failed);
+    fn parse_error_uses_json_rpc_code() {
+        let values = response_values(b"not-json\n".to_vec());
+        assert_eq!(values[0]["error"]["code"], PARSE_ERROR);
+        assert!(values[0]["id"].is_null());
     }
 
     #[test]
-    fn health_is_not_ready_before_start() {
-        let mut supervisor = Supervisor::default();
-        let (response, stop) = supervisor.handle(request(
-            r#"{"protocol":"sumi.runtime.supervisor.v1","request_id":"r1","op":"health"}"#,
-        ));
-        assert!(!stop);
-        assert!(response.ok);
-        assert_eq!(response.ready, Some(false));
-        assert_eq!(response.state, SupervisorState::Created);
+    fn invalid_request_and_unknown_method_are_distinct() {
+        let values = response_values(
+            b"[]\n{\"jsonrpc\":\"1.0\",\"id\":\"v1\",\"method\":\"runtime.health\",\"params\":{}}\n{\"jsonrpc\":\"2.0\",\"id\":\"u\",\"method\":\"runtime.health\",\"params\":{},\"extra\":true}\n{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"method\":\"runtime.nope\",\"params\":{}}\n"
+                .to_vec(),
+        );
+        assert_eq!(values[0]["error"]["code"], INVALID_REQUEST);
+        assert_eq!(values[1]["error"]["code"], INVALID_REQUEST);
+        assert_eq!(values[1]["id"], "v1");
+        assert_eq!(values[2]["error"]["code"], INVALID_REQUEST);
+        assert_eq!(values[2]["id"], "u");
+        assert_eq!(values[3]["error"]["code"], METHOD_NOT_FOUND);
+        assert_eq!(values[3]["id"], "x");
+    }
+
+    #[test]
+    fn invalid_params_unknown_fields_and_ids_fail_closed() {
+        let values = response_values(
+            b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"runtime.health\",\"params\":{\"x\":true}}\n"
+                .to_vec(),
+        );
+        assert_eq!(values[0]["error"]["code"], INVALID_PARAMS);
+        assert_eq!(values[0]["id"], 7);
     }
 
     #[test]
     fn oversized_frames_are_rejected_without_unbounded_allocation() {
         let input = format!(
-            "{}\n{{\"protocol\":\"sumi.runtime.supervisor.v1\",\"request_id\":\"r2\",\"op\":\"health\"}}\n",
+            "{}\n{{\"jsonrpc\":\"2.0\",\"id\":\"r2\",\"method\":\"runtime.health\",\"params\":{{}}}}\n",
             "x".repeat(MAX_FRAME_BYTES + 1)
         );
-        let mut output = Vec::new();
-        serve(Cursor::new(input), &mut output).expect("serve protocol fixtures");
-        let lines = String::from_utf8(output).expect("UTF-8 responses");
-        assert!(lines.contains("FRAME_TOO_LARGE"));
-        assert!(lines.contains("\"request_id\":\"r2\""));
+        let values = response_values(input.into_bytes());
+        assert_eq!(values[0]["error"]["code"], INVALID_REQUEST);
+        assert_eq!(values[1]["id"], "r2");
+        assert_eq!(values[1]["result"]["state"], "created");
+    }
+
+    #[test]
+    fn health_response_is_json_rpc_result_with_created_state() {
+        let values = response_values(
+            b"{\"jsonrpc\":\"2.0\",\"id\":\"health-1\",\"method\":\"runtime.health\",\"params\":{}}\n"
+                .to_vec(),
+        );
+        assert_eq!(values[0]["jsonrpc"], "2.0");
+        assert_eq!(values[0]["id"], "health-1");
+        assert_eq!(values[0]["result"]["state"], "created");
+        assert_eq!(values[0]["result"]["ready"], false);
+    }
+
+    #[test]
+    fn application_error_is_returned_for_invalid_start_program() {
+        let request: Request = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","id":"start-1","method":"runtime.start","params":{"extension_id":"fixture.health","program":"node","args":[],"env":{},"startup_timeout_ms":1000,"shutdown_grace_ms":1000}}"#,
+        )
+        .expect("valid start request");
+        let (response, stop) = Supervisor::default().handle(request);
+        assert!(!stop);
+        let value = serde_json::to_value(response).expect("JSON-RPC response");
+        assert_eq!(value["error"]["code"], protocol::APPLICATION_ERROR);
+        assert_eq!(value["id"], "start-1");
+    }
+
+    #[test]
+    fn lifecycle_start_health_stop_is_bounded_and_cooperative() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "start-1",
+            "method": "runtime.start",
+            "params": {
+                "extension_id": "fixture.health",
+                "program": "/bin/sh",
+                "args": ["-c", "printf 'sumi.runtime.extension.ready.v1\\n'; trap 'exit 0' TERM; sleep 5"],
+                "env": {},
+                "startup_timeout_ms": 1_000,
+                "shutdown_grace_ms": 1_000
+            }
+        }))
+        .expect("valid lifecycle start request");
+        let mut supervisor = Supervisor::default();
+        let (started, stop) = supervisor.handle(request);
+        assert!(!stop);
+        let started_value = serde_json::to_value(started).expect("start response");
+        assert_eq!(started_value["result"]["state"], "running");
+
+        let health: Request = serde_json::from_value(serde_json::json!({
+            "jsonrpc": "2.0", "id": "health-1", "method": "runtime.health", "params": {}
+        }))
+        .expect("valid health request");
+        let (healthy, stop) = supervisor.handle(health);
+        assert!(!stop);
+        assert_eq!(
+            serde_json::to_value(healthy).expect("health response")["result"]["ready"],
+            true
+        );
+
+        let stop_request: Request = serde_json::from_value(serde_json::json!({
+            "jsonrpc": "2.0", "id": "stop-1", "method": "runtime.stop", "params": {}
+        }))
+        .expect("valid stop request");
+        let (stopped, stop) = supervisor.handle(stop_request);
+        assert!(stop);
+        assert_eq!(
+            serde_json::to_value(stopped).expect("stop response")["result"]["state"],
+            "stopped"
+        );
     }
 }

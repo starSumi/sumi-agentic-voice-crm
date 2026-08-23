@@ -12,9 +12,14 @@ contentVersion: 0.1.0
 进程隔离扩展由 Rust 二进制 `sumi-runtime-supervisor` 持有。JavaScript
 扩展注册表仍负责启动顺序与回滚；Rust 进程只负责一个子进程组及其操作系统生命周期。
 
-内部协议 `sumi.runtime.supervisor.v1` 使用 NDJSON，每帧最多 64 KiB，规范位于
-`contracts/runtime-supervisor.schema.json`。双方都校验协议版本、请求标识、操作字段、
-绝对可执行路径、参数、环境、启动超时和关闭宽限期。
+内部协议 `sumi.runtime.supervisor.v2` 使用 JSON-RPC 2.0 over NDJSON，每帧最多 64 KiB。
+规范位于 `contracts/runtime-supervisor.schema.json`，由
+`crates/runtime-supervisor/src/protocol.rs` 中的 Rust 类型生成；TypeScript 适配器也由
+同一来源生成。双方都校验版本、请求标识、方法/参数、绝对可执行路径、参数、环境、
+启动超时和关闭宽限期。
+
+当前支持 `runtime.start`、`runtime.health` 和 `runtime.stop`。扩展 readiness 行仍是独立的
+有界握手，不属于业务事件或 CRM 协议。
 
 ## 所有权边界
 

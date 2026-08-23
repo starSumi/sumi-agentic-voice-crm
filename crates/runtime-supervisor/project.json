@@ -7,17 +7,17 @@
   "tags": ["scope:runtime", "type:rust", "boundary:process"],
   "targets": {
     "format": {
-      "command": "node scripts/run-cargo.mjs fmt --all -- --check",
+      "command": "node scripts/run-cargo.ts fmt --all -- --check",
       "cache": true
     },
     "lint": {
-      "command": "node scripts/run-cargo.mjs clippy --workspace --all-targets --locked -- -D warnings"
+      "command": "node scripts/run-cargo.ts clippy --workspace --all-targets --locked -- -D warnings"
     },
     "test": {
-      "command": "node scripts/run-cargo.mjs test --workspace --locked"
+      "command": "node scripts/run-cargo.ts test --workspace --locked"
     },
     "build": {
-      "command": "node scripts/run-cargo.mjs build --release --locked --package sumi-runtime-supervisor",
+      "command": "node scripts/run-cargo.ts build --release --locked --package sumi-runtime-supervisor",
       "outputs": ["{workspaceRoot}/target/release/sumi-runtime-supervisor"]
     },
     "ci": {

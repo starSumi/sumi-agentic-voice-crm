@@ -7,17 +7,14 @@ import type { ExtensionManifest } from "./manifest.ts";
 import {
   RUST_SUPERVISOR_LIMITS,
   RUST_SUPERVISOR_PROTOCOL_VERSION,
-  SUPERVISOR_RESPONSE_KEYS,
-  SUPERVISOR_STATES,
-  type SupervisorRequest,
   type SupervisorResponse,
   type SupervisorState,
 } from "./generated/runtime-supervisor-protocol.ts";
 
 export { RUST_SUPERVISOR_PROTOCOL_VERSION };
 const MAX_FRAME_BYTES = RUST_SUPERVISOR_LIMITS.maxFrameBytes;
-const RESPONSE_KEYS = new Set<string>(SUPERVISOR_RESPONSE_KEYS);
-const STATES = new Set<string>(SUPERVISOR_STATES);
+const RESPONSE_KEYS = new Set(["jsonrpc", "id", "result", "error"]);
+const STATES = new Set(["created", "running", "stopped", "failed"]);
 type LaunchSpec = {
   program: string;
   args: readonly string[];
@@ -123,58 +120,33 @@ export function validateSupervisorResponse(value: unknown): SupervisorResponse {
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some((key) => !RESPONSE_KEYS.has(key)))
     throw new Error("supervisor returned an unknown field");
-  if (record.protocol !== RUST_SUPERVISOR_PROTOCOL_VERSION)
-    throw new Error("supervisor protocol version mismatch");
-  if (
-    typeof record.request_id !== "string" ||
-    !record.request_id ||
-    record.request_id.length > RUST_SUPERVISOR_LIMITS.requestIdMax
-  )
-    throw new Error("supervisor response omitted request_id");
-  if (typeof record.ok !== "boolean" || !STATES.has(record.state as string))
-    throw new Error("supervisor response shape is invalid");
-  if (
-    record.child_pid !== undefined &&
-    (!Number.isSafeInteger(record.child_pid) ||
-      (record.child_pid as number) <= 0)
-  ) {
-    throw new Error("supervisor child_pid is invalid");
-  }
-  for (const key of ["ready", "forced"] as const) {
-    if (record[key] !== undefined && typeof record[key] !== "boolean") {
-      throw new Error(`supervisor ${key} is invalid`);
-    }
-  }
-  for (const key of ["exit_code", "signal"] as const) {
-    if (record[key] !== undefined && !Number.isSafeInteger(record[key])) {
-      throw new Error(`supervisor ${key} is invalid`);
-    }
-  }
-  if (typeof record.signal === "number" && record.signal < 1) {
-    throw new Error("supervisor signal is invalid");
+  if (record.jsonrpc !== "2.0") throw new Error("supervisor JSON-RPC version mismatch");
+  const result = record.result;
+  if (result !== undefined) {
+    if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("supervisor result is invalid");
+    const fields = result as Record<string, unknown>;
+    if (!STATES.has(fields.state as string)) throw new Error("supervisor response state is invalid");
+    if (fields.child_pid !== undefined && (!Number.isSafeInteger(fields.child_pid) || (fields.child_pid as number) <= 0)) throw new Error("supervisor child_pid is invalid");
+    for (const key of ["ready", "forced"] as const) if (fields[key] !== undefined && typeof fields[key] !== "boolean") throw new Error(`supervisor ${key} is invalid`);
+    for (const key of ["exit_code", "signal"] as const) if (fields[key] !== undefined && !Number.isSafeInteger(fields[key])) throw new Error(`supervisor ${key} is invalid`);
+    if (typeof fields.signal === "number" && fields.signal < 1) throw new Error("supervisor signal is invalid");
   }
   const error = record.error;
   if (error !== undefined) {
-    if (!error || typeof error !== "object" || Array.isArray(error)) {
-      throw new Error("supervisor error response is invalid");
-    }
+    if (!error || typeof error !== "object" || Array.isArray(error)) throw new Error("supervisor error response is invalid");
     const fields = error as Record<string, unknown>;
-    if (
-      Object.keys(fields).some((key) => !["code", "message"].includes(key)) ||
-      typeof fields.code !== "string" ||
-      !fields.code ||
-      fields.code.length > RUST_SUPERVISOR_LIMITS.errorCodeMax ||
-      typeof fields.message !== "string" ||
-      !fields.message ||
-      fields.message.length > RUST_SUPERVISOR_LIMITS.errorMessageMax
-    ) {
-      throw new Error("supervisor error response is invalid");
-    }
+    if (Object.keys(fields).some((key) => !["code", "message", "data"].includes(key)) || typeof fields.code !== "number" || !Number.isSafeInteger(fields.code) || typeof fields.message !== "string" || !fields.message || fields.message.length > RUST_SUPERVISOR_LIMITS.errorMessageMax) throw new Error("supervisor error response is invalid");
   }
-  if (!record.ok && error === undefined) {
-    throw new Error("supervisor error response is invalid");
-  }
+  if ((result === undefined) === (error === undefined)) throw new Error("supervisor response must contain exactly one result or error");
   return record as unknown as SupervisorResponse;
+}
+
+function responseResult(response: SupervisorResponse) {
+  return "result" in response ? response.result : undefined;
+}
+
+function responseErrorCode(response: SupervisorResponse): string | number {
+  return "error" in response ? response.error.code : "START_FAILED";
 }
 
 /**
@@ -295,16 +267,13 @@ export class RustSupervisedExtension {
         startup_timeout_ms: this.startupTimeoutMs,
         shutdown_grace_ms: this.shutdownGraceMs,
       });
-      if (
-        !response.ok ||
-        response.state !== "running" ||
-        response.ready !== true
-      ) {
+      const result = responseResult(response);
+      if (!result || result.state !== "running" || result.ready !== true) {
         throw new Error(
-          `supervisor rejected extension start: ${response.error?.code ?? "START_FAILED"}`,
+          `supervisor rejected extension start: ${responseErrorCode(response)}`,
         );
       }
-      this.#childPid = response.child_pid;
+      this.#childPid = result.child_pid;
       this.#state = "running";
     } catch (error: unknown) {
       await this.terminate();
@@ -324,11 +293,12 @@ export class RustSupervisedExtension {
       });
     try {
       const response = await this.#request("health");
-      if (response.state !== "running" || response.ready !== true) {
-        this.#state = response.state;
+      const result = responseResult(response);
+      if (!result || result.state !== "running" || result.ready !== true) {
+        this.#state = result?.state ?? "failed";
         return Object.freeze({
           ready: false,
-          reason: `process_${response.state}`,
+          reason: `process_${result?.state ?? "failed"}`,
         });
       }
       return Object.freeze({ ready: true });
@@ -347,7 +317,7 @@ export class RustSupervisedExtension {
     this.#state = "stopped";
     this.#supervisor.stdin.end();
     await this.#exitPromise;
-    return Object.freeze({ forced: response.forced === true });
+    return Object.freeze({ forced: responseResult(response)?.forced === true });
   }
 
   async terminate(): Promise<void> {
@@ -429,18 +399,18 @@ export class RustSupervisedExtension {
         void this.terminate();
         return;
       }
-      const pending = this.#pending.get(response.request_id);
+      const pending = this.#pending.get(String(response.id));
       if (!pending) {
         void this.terminate();
         return;
       }
-      this.#pending.delete(response.request_id);
+      this.#pending.delete(String(response.id));
       pending.resolve(response);
     }
   }
 
   #request(
-    op: SupervisorRequest["op"],
+    op: "start" | "health" | "stop",
     fields: Record<string, unknown> = {},
   ): Promise<SupervisorResponse> {
     if (!this.#supervisor || this.#supervisor.exitCode !== null) {
@@ -449,11 +419,12 @@ export class RustSupervisedExtension {
       );
     }
     const requestId = `${this.manifest.id}.${++this.#requestSequence}`;
+    const method = `runtime.${op}`;
     const frame = `${JSON.stringify({
-      protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
-      request_id: requestId,
-      op,
-      ...fields,
+      jsonrpc: "2.0",
+      id: requestId,
+      method,
+      params: fields,
     })}\n`;
     if (Buffer.byteLength(frame) > MAX_FRAME_BYTES) {
       return Promise.reject(

@@ -28,7 +28,7 @@ contracts/events.yaml  ──parse/normalize─> protocol/schema/json/events.bun
 ```
 
 The server compiles its input validators from the JSON bundle. The
-`openapi-ts.config.mjs` input is that generated JSON bundle (never YAML), so
+`openapi-ts.config.ts` input is that generated JSON bundle (never YAML), so
 runtime validation and the TypeScript client consume the same exact document.
 The event bundle remains a standalone JSON Schema 2020-12 artifact because
 CloudEvents are broker messages rather than REST operations; its event-type

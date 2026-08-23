@@ -8,7 +8,7 @@
     "http": "contracts/openapi.yaml",
     "events": "contracts/events.yaml",
     "agent_crm_intents": "contracts/agent-crm-intents.json",
-    "supervisor": "contracts/runtime-supervisor.schema.json",
+    "supervisor": "crates/runtime-supervisor/src/protocol.rs",
     "authorization": "contracts/authorization-policy.json",
     "transports": "contracts/transport-policy.json",
     "database": "db/migrations"
@@ -19,7 +19,7 @@
     "typescript_client": "packages/api-client/src/generated",
     "typescript_supervisor": "src/extensions/generated/runtime-supervisor-protocol.ts",
     "typescript_agent_crm": "src/generated/agent-crm-contract.ts",
-    "rust_supervisor": "crates/runtime-supervisor/src/generated/protocol.rs"
+    "rust_supervisor_schema": "contracts/runtime-supervisor.schema.json"
   },
   "consumer_roots": [
     "src/scripts",

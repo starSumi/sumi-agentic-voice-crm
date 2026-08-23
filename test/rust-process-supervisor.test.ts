@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import { createRuntime } from "../src/composition-root.ts";
 import {
   createExtensionRegistry,
@@ -74,29 +75,37 @@ test("supervisor protocol fixtures conform to the committed closed schema", asyn
   const schema = JSON.parse(
     await readFile("contracts/runtime-supervisor.schema.json", "utf8"),
   );
-  const validate = new Ajv2020({ strict: true }).compile(schema);
+  const ajv = new Ajv2020({ strict: true });
+  addFormats(ajv);
+  ajv.addFormat("int64", true);
+  ajv.addFormat("uint64", true);
+  ajv.addFormat("int32", true);
+  ajv.addFormat("uint32", true);
+  const validate = ajv.compile(schema);
   const start = {
-    protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
-    request_id: "fixture.start.1",
-    op: "start",
-    extension_id: "fixture.health",
-    program: process.execPath,
-    args: [],
-    env: {},
-    startup_timeout_ms: 2_000,
-    shutdown_grace_ms: 2_000,
+    jsonrpc: "2.0",
+    id: "fixture.start.1",
+    method: "runtime.start",
+    params: {
+      extension_id: "fixture.health",
+      program: process.execPath,
+      args: [],
+      env: {},
+      startup_timeout_ms: 2_000,
+      shutdown_grace_ms: 2_000,
+    },
   };
   assert.equal(validate(start), true, JSON.stringify(validate.errors));
   assert.equal(validate({ ...start, unknown: true }), false);
-  assert.equal(validate({ ...start, program: "node" }), false);
+  assert.equal(
+    validate({ ...start, params: { ...start.params, program: "node" } }),
+    false,
+  );
   assert.equal(
     validate({
-      protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
-      request_id: "fixture.health.1",
-      ok: true,
-      state: "running",
-      ready: true,
-      child_pid: 123,
+      jsonrpc: "2.0",
+      id: "fixture.health.1",
+      result: { state: "running", ready: true, child_pid: 123 },
     }),
     true,
     JSON.stringify(validate.errors),
@@ -106,33 +115,27 @@ test("supervisor protocol fixtures conform to the committed closed schema", asyn
 test("Node response validator matches the generated supervisor schema projection", () => {
   assert.deepEqual(
     validateSupervisorResponse({
-      protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
-      request_id: "fixture.signal.1",
-      ok: true,
-      state: "stopped",
-      signal: 15,
-    }).signal,
+      jsonrpc: "2.0",
+      id: "fixture.signal.1",
+      result: { state: "stopped", signal: 15 },
+    }).result.signal,
     15,
   );
   assert.throws(
     () =>
       validateSupervisorResponse({
-        protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
-        request_id: "fixture.signal.2",
-        ok: true,
-        state: "stopped",
-        signal: "SIGTERM",
+        jsonrpc: "2.0",
+        id: "fixture.signal.2",
+        result: { state: "stopped", signal: "SIGTERM" },
       }),
     /signal is invalid/,
   );
   assert.throws(
     () =>
       validateSupervisorResponse({
-        protocol: RUST_SUPERVISOR_PROTOCOL_VERSION,
-        request_id: "fixture.error.1",
-        ok: false,
-        state: "failed",
-        error: { code: "FAILED" },
+        jsonrpc: "2.0",
+        id: "fixture.error.1",
+        error: { code: -32_000, message: "", data: { state: "failed" } },
       }),
     /error response is invalid/,
   );
@@ -263,7 +266,7 @@ test("startup fails closed when the extension omits its readiness frame", async 
     manifest: manifest("fixture.not-ready"),
     ports: {},
   });
-  await assert.rejects(instance.start(), /START_FAILED/);
+  await assert.rejects(instance.start(), /-32000/);
   assert.equal(instance.state, "stopped");
 });
 

@@ -13,11 +13,17 @@ Process-isolated extensions are owned by the `sumi-runtime-supervisor` Rust
 binary. The JavaScript extension registry remains the orchestration authority;
 the Rust process owns one child process group and its operating-system lifetime.
 
-The internal `sumi.runtime.supervisor.v1` protocol is newline-delimited JSON and
-is bounded to 64 KiB per frame. Its committed JSON Schema is
-`contracts/runtime-supervisor.schema.json`. Version, request identifiers,
-operation fields, executable paths, arguments, environment values, startup
-timeout, and shutdown grace are validated on both sides of the boundary.
+The internal `sumi.runtime.supervisor.v2` protocol is JSON-RPC 2.0 over
+newline-delimited JSON and is bounded to 64 KiB per frame. Its committed JSON
+Schema is `contracts/runtime-supervisor.schema.json`, generated from the Rust
+types in `crates/runtime-supervisor/src/protocol.rs`; the TypeScript adapter is
+generated from the same source. Version, request identifiers, method/params,
+executable paths, arguments, environment values, startup timeout, and shutdown
+grace are validated on both sides of the boundary.
+
+The supported methods are `runtime.start`, `runtime.health`, and
+`runtime.stop`. The extension readiness line remains a separate bounded
+handshake and is not a business event or a CRM protocol.
 
 ## Ownership boundary
 
