@@ -1,6 +1,11 @@
-// @ts-nocheck
-import { createServer as createHttpServer } from "node:http";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type IncomingHttpHeaders,
+  type ServerResponse,
+} from "node:http";
 import { fileURLToPath } from "node:url";
+import authorizationPolicy from "../contracts/authorization-policy.json" with { type: "json" };
 // HTTP transport adapter: Node request/response shapes are intentionally kept
 // at this edge; application services and protocol validators remain strict TS.
 import {
@@ -13,7 +18,14 @@ import {
   TtsService,
 } from "./application/index.ts";
 import { authorizeAction } from "./application/services.ts";
-import { createRequestContext, createRuntime } from "./composition-root.ts";
+import {
+  createRequestContext,
+  createRuntime,
+  type Runtime,
+  type RuntimeStore,
+} from "./composition-root.ts";
+import type { ApplicationRequestContext } from "./application/commands.ts";
+import type { AuthIdentity } from "./auth.ts";
 import {
   ERROR_CODES,
   errorEnvelope,
@@ -33,15 +45,534 @@ import {
 } from "./protocol-policy.ts";
 import { DEFAULT_TEARDOWN_TIMEOUT_MS } from "./control/index.ts";
 import { createMessageJobWorker } from "./message-job-worker.ts";
+import type { AudioInput, TextAskInput } from "./contracts.ts";
+import type { MessageJob, MessageJobWorkerQueue } from "./message-job-queue.ts";
+import type {
+  CheckpointInteractionInput,
+  CreateReviewInput,
+  CrmStore,
+  ExecuteCrmInput,
+} from "./store.ts";
+import type {
+  Action,
+  ActionGrant,
+  AuthorizationRequest,
+  PrincipalKind,
+  ResourceType,
+  Role,
+} from "./authorization/index.ts";
 
-function payloadTooLarge(limit) {
+type DataRecord = Record<string, unknown>;
+type AskInput = TextAskInput | (AudioInput & { readonly sha256?: string });
+type MultipartFile = { data: Buffer; content_type: string };
+type MultipartParts = Record<string, string | MultipartFile>;
+type RequestBodyChunk = Buffer | string | Uint8Array;
+type RequestBodyStream = {
+  readonly headers?: IncomingHttpHeaders;
+  [Symbol.asyncIterator]?: () => AsyncIterator<RequestBodyChunk>;
+};
+type ApplicationOutcome = Readonly<{ kind: string; response: unknown }>;
+type ApplicationService = {
+  execute(
+    context: ApplicationRequestContext,
+    command: DataRecord,
+  ): Promise<ApplicationOutcome>;
+};
+type JobPayload = {
+  traceparent?: string;
+  identity: AuthIdentity;
+  command: DataRecord & { input: DataRecord };
+};
+type PrincipalResolver = (
+  identity: AuthIdentity,
+  options?: { signal?: AbortSignal },
+) => unknown | PromiseLike<unknown>;
+type RequestAuthenticator = (
+  headers: Headers,
+  options?: { signal?: AbortSignal },
+) => AuthIdentity | PromiseLike<AuthIdentity>;
+type Awaitable<T> = T | PromiseLike<T>;
+type AppStore = MessageJobWorkerQueue & {
+  health(): Awaitable<DataRecord & { ready: boolean }>;
+  beginInteraction(
+    input: Parameters<CrmStore["beginInteraction"]>[0],
+  ): Awaitable<unknown>;
+  checkpointInteraction(input: CheckpointInteractionInput): Awaitable<unknown>;
+  completeInteraction(
+    input: Parameters<CrmStore["completeInteraction"]>[0],
+  ): Awaitable<unknown>;
+  failInteraction(
+    input: Parameters<CrmStore["failInteraction"]>[0],
+  ): Awaitable<unknown>;
+  abandonInteraction(
+    input: Parameters<CrmStore["abandonInteraction"]>[0],
+  ): Awaitable<unknown>;
+  createReview(input: CreateReviewInput): Awaitable<unknown>;
+  execute(input: ExecuteCrmInput): Awaitable<unknown>;
+  recordInputAsset(
+    input: Parameters<CrmStore["recordInputAsset"]>[0],
+  ): Awaitable<unknown>;
+  recordTts(...input: Parameters<CrmStore["recordTts"]>): Awaitable<unknown>;
+  replayTts(...input: Parameters<CrmStore["replayTts"]>): Awaitable<unknown>;
+  enqueueMessageJob(
+    input: Parameters<CrmStore["enqueueMessageJob"]>[0],
+  ): Awaitable<{ duplicate: boolean; job: MessageJob }>;
+  messageJobStats(input?: {
+    tenant_id?: string;
+  }): Awaitable<Record<string, number>>;
+  getMessageJob(input: {
+    tenant_id?: string;
+    actor_id?: string;
+    job_id?: string;
+    idempotency_key?: string;
+  }): Awaitable<MessageJob | undefined>;
+  events(tenantId?: string, actorId?: string): Awaitable<unknown[]>;
+  assetFor(
+    tenantId: string,
+    assetId: string,
+  ): Awaitable<DataRecord | undefined>;
+  objectKeyFor(
+    tenantId: string,
+    assetId: string,
+  ): Awaitable<string | undefined>;
+  decideReview?: (args: DataRecord) => unknown | PromiseLike<unknown>;
+};
+type AppRuntime = Pick<
+  Runtime,
+  "providers" | "objectStorage" | "observability" | "close"
+> & {
+  authenticate: RequestAuthenticator;
+  store: AppStore;
+} & Partial<
+    Pick<
+      Runtime,
+      | "authorize"
+      | "control"
+      | "env"
+      | "extensions"
+      | "progressEvents"
+      | "resolvePrincipal"
+      | "start"
+      | "tracer"
+    >
+  >;
+type CreateAppOptions = {
+  runtime?: AppRuntime;
+  runtimeFactory?: () => Runtime;
+  teardownTimeoutMs?: number;
+};
+type PostgresRuntimeStore = Exclude<RuntimeStore, CrmStore>;
+type JsonValue =
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+const AUTHORIZATION_ACTIONS = new Set<string>(authorizationPolicy.actions);
+const AUTHORIZATION_GRANTS = new Set<string>([
+  ...authorizationPolicy.actions,
+  ...authorizationPolicy.allowed_action_wildcards,
+]);
+const AUTHORIZATION_ROLES = new Set<string>(authorizationPolicy.roles);
+const AUTHORIZATION_RESOURCE_TYPES = new Set<string>(
+  authorizationPolicy.resource_types,
+);
+
+function isDataRecord(value: unknown): value is DataRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPostgresStore(store: RuntimeStore): store is PostgresRuntimeStore {
+  return "principalFor" in store && typeof store.principalFor === "function";
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isDataRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+function isAction(value: unknown): value is Action {
+  return typeof value === "string" && AUTHORIZATION_ACTIONS.has(value);
+}
+
+function isActionGrant(value: unknown): value is ActionGrant {
+  return typeof value === "string" && AUTHORIZATION_GRANTS.has(value);
+}
+
+function isRole(value: unknown): value is Role {
+  return typeof value === "string" && AUTHORIZATION_ROLES.has(value);
+}
+
+function isResourceType(value: unknown): value is ResourceType {
+  return typeof value === "string" && AUTHORIZATION_RESOURCE_TYPES.has(value);
+}
+
+function isPrincipalKind(value: unknown): value is PrincipalKind {
+  return value === "human" || value === "agent" || value === "workload";
+}
+
+function runtimeAuthorizationRequest(value: unknown): AuthorizationRequest {
+  if (!isDataRecord(value))
+    throw new TypeError("authorization request must be an object");
+  const principal = value.principal;
+  const resource = value.resource;
+  const context = value.context;
+  if (
+    !isDataRecord(principal) ||
+    !isDataRecord(resource) ||
+    !isDataRecord(context)
+  ) {
+    throw new TypeError("authorization request fields must be objects");
+  }
+  if (!isAction(value.action))
+    throw new TypeError("authorization action is invalid");
+  if (!isPrincipalKind(principal.kind))
+    throw new TypeError("authorization principal kind is invalid");
+  if (principal.status !== "active" && principal.status !== "suspended") {
+    throw new TypeError("authorization principal status is invalid");
+  }
+  if (!Array.isArray(principal.roles) || !principal.roles.every(isRole)) {
+    throw new TypeError("authorization principal roles are invalid");
+  }
+  if (
+    !Array.isArray(principal.actor_scopes) ||
+    !principal.actor_scopes.every(isActionGrant)
+  ) {
+    throw new TypeError("authorization principal scopes are invalid");
+  }
+  if (!isResourceType(resource.type)) {
+    throw new TypeError("authorization resource type is invalid");
+  }
+  if (
+    !Array.isArray(context.token_scopes) ||
+    !context.token_scopes.every(isActionGrant)
+  ) {
+    throw new TypeError("authorization token scopes are invalid");
+  }
+  const authenticationMethods = context.authentication_methods;
+  if (
+    authenticationMethods !== undefined &&
+    (!Array.isArray(authenticationMethods) ||
+      !authenticationMethods.every((entry) => typeof entry === "string"))
+  ) {
+    throw new TypeError("authorization authentication methods are invalid");
+  }
+  const networkZone = context.network_zone;
+  if (
+    networkZone !== undefined &&
+    networkZone !== "public" &&
+    networkZone !== "private" &&
+    networkZone !== "service"
+  ) {
+    throw new TypeError("authorization network zone is invalid");
+  }
+  return {
+    action: value.action,
+    principal: {
+      subject_id: requiredString(principal.subject_id, "principal.subject_id"),
+      kind: principal.kind,
+      tenant_id: requiredString(principal.tenant_id, "principal.tenant_id"),
+      status: principal.status,
+      roles: principal.roles,
+      actor_scopes: principal.actor_scopes,
+      workload_id:
+        principal.workload_id === undefined
+          ? undefined
+          : requiredString(principal.workload_id, "principal.workload_id"),
+    },
+    resource: {
+      type: resource.type,
+      id: requiredString(resource.id, "resource.id"),
+      tenant_id: requiredString(resource.tenant_id, "resource.tenant_id"),
+      owner_id:
+        resource.owner_id === undefined
+          ? undefined
+          : requiredString(resource.owner_id, "resource.owner_id"),
+    },
+    context: {
+      token_scopes: context.token_scopes,
+      authentication_methods: authenticationMethods,
+      network_zone: networkZone,
+      request_id:
+        context.request_id === undefined
+          ? undefined
+          : requiredString(context.request_id, "context.request_id"),
+    },
+  };
+}
+
+function postgresCheckpoint(
+  input: CheckpointInteractionInput,
+): Parameters<PostgresRuntimeStore["checkpointInteraction"]>[0] {
+  const providerInvocations = input.provider_invocations?.map((invocation) => {
+    if (typeof invocation.status !== "string") {
+      throw new TypeError(
+        "provider invocation status is required for PostgreSQL",
+      );
+    }
+    return { ...invocation, status: invocation.status };
+  });
+  return { ...input, provider_invocations: providerInvocations };
+}
+
+function postgresReview(
+  input: CreateReviewInput,
+): Parameters<PostgresRuntimeStore["createReview"]>[0] {
+  return {
+    ...input,
+    idempotency_key: requiredString(input.idempotency_key, "idempotency_key"),
+  };
+}
+
+function postgresExecute(
+  input: ExecuteCrmInput,
+): Parameters<PostgresRuntimeStore["execute"]>[0] {
+  return {
+    ...input,
+    request_id: requiredString(input.request_id, "request_id"),
+  };
+}
+
+function postgresReviewDecision(
+  input: DataRecord,
+): Parameters<PostgresRuntimeStore["decideReview"]>[0] {
+  const decision = input.decision;
+  if (decision !== "approve" && decision !== "reject") {
+    throw new TypeError("review decision must be approve or reject");
+  }
+  if (
+    input.correction !== undefined &&
+    (!isDataRecord(input.correction) || !isJsonValue(input.correction))
+  ) {
+    throw new TypeError("review correction must be JSON-safe");
+  }
+  return {
+    tenant_id: requiredString(input.tenant_id, "tenant_id"),
+    actor_id: typeof input.actor_id === "string" ? input.actor_id : undefined,
+    review_id: requiredString(input.review_id, "review_id"),
+    decision,
+    idempotency_key: requiredString(input.idempotency_key, "idempotency_key"),
+    request_id: requiredString(input.request_id, "request_id"),
+    correction: input.correction,
+  };
+}
+
+function appStore(store: RuntimeStore): AppStore {
+  if (!isPostgresStore(store)) return store;
+  return {
+    health: () => store.health(),
+    beginInteraction: (input) => store.beginInteraction(input),
+    checkpointInteraction: (input) =>
+      store.checkpointInteraction(postgresCheckpoint(input)),
+    completeInteraction: (input) => store.completeInteraction(input),
+    failInteraction: (input) => store.failInteraction(input),
+    abandonInteraction: (input) => store.abandonInteraction(input),
+    createReview: (input) => store.createReview(postgresReview(input)),
+    execute: (input) => store.execute(postgresExecute(input)),
+    recordInputAsset: (input) => store.recordInputAsset(input),
+    recordTts: (...input) => store.recordTts(...input),
+    replayTts: (...input) => store.replayTts(...input),
+    claimMessageJobs: (input) =>
+      store.claimMessageJobs({
+        tenant_id: requiredString(input.tenant_id, "tenant_id"),
+        worker_id: requiredString(input.worker_id, "worker_id"),
+        batch_size:
+          input.limit === undefined
+            ? undefined
+            : positiveNumber(input.limit, "limit"),
+        lease_ms:
+          input.lease_ms === undefined
+            ? undefined
+            : positiveNumber(input.lease_ms, "lease_ms"),
+      }),
+    completeMessageJob: (input) =>
+      store.completeMessageJob({
+        tenant_id: requiredString(input.tenant_id, "tenant_id"),
+        job_id: requiredString(input.job_id, "job_id"),
+        worker_id: requiredString(input.worker_id, "worker_id"),
+        result: input.result,
+      }),
+    failMessageJob: (input) =>
+      store.failMessageJob({
+        tenant_id: requiredString(input.tenant_id, "tenant_id"),
+        job_id: requiredString(input.job_id, "job_id"),
+        worker_id: requiredString(input.worker_id, "worker_id"),
+        error_code: input.error_code,
+        error_message: input.error_message,
+        max_attempts:
+          input.max_attempts === undefined
+            ? undefined
+            : positiveNumber(input.max_attempts, "max_attempts"),
+      }),
+    releaseMessageJob: (input) =>
+      store.releaseMessageJob({
+        tenant_id: requiredString(input.tenant_id, "tenant_id"),
+        job_id: requiredString(input.job_id, "job_id"),
+        worker_id: requiredString(input.worker_id, "worker_id"),
+        reason: input.reason,
+      }),
+    enqueueMessageJob: (input) =>
+      store.enqueueMessageJob({
+        tenant_id: requiredString(input.tenant_id, "tenant_id"),
+        actor_id:
+          typeof input.actor_id === "string" ? input.actor_id : undefined,
+        request_id: requiredString(input.request_id, "request_id"),
+        idempotency_key: requiredString(
+          input.idempotency_key,
+          "idempotency_key",
+        ),
+        request_fingerprint: requiredString(
+          input.request_fingerprint,
+          "request_fingerprint",
+        ),
+        payload: input.payload,
+      }),
+    messageJobStats: (input) =>
+      store.messageJobStats({
+        tenant_id: requiredString(input?.tenant_id, "tenant_id"),
+      }),
+    getMessageJob: (input) =>
+      store.getMessageJob({
+        tenant_id: requiredString(input.tenant_id, "tenant_id"),
+        actor_id: input.actor_id,
+        job_id: input.job_id,
+        idempotency_key: input.idempotency_key,
+      }),
+    events: (tenantId, actorId) =>
+      store.events(requiredString(tenantId, "tenant_id"), actorId),
+    assetFor: async (...input) => {
+      const asset = await store.assetFor(...input);
+      return isDataRecord(asset) ? asset : undefined;
+    },
+    objectKeyFor: async (...input) => {
+      const key = await store.objectKeyFor(...input);
+      return typeof key === "string" ? key : undefined;
+    },
+    decideReview: (input) => store.decideReview(postgresReviewDecision(input)),
+  };
+}
+
+function appRuntime(runtime: Runtime): AppRuntime {
+  return Object.freeze({ ...runtime, store: appStore(runtime.store) });
+}
+
+function tenantIdentity(value: unknown): AuthIdentity & {
+  tenant_id: string;
+  actor_id: string;
+} {
+  if (
+    !isDataRecord(value) ||
+    typeof value.tenant_id !== "string" ||
+    typeof value.actor_id !== "string"
+  ) {
+    throw new Error("request context requires request_id and tenant identity");
+  }
+  return { ...value, tenant_id: value.tenant_id, actor_id: value.actor_id };
+}
+
+function applicationRequestContext({
+  request_id,
+  traceparent,
+  identity,
+  signal,
+}: {
+  request_id: string;
+  traceparent?: string;
+  identity: unknown;
+  signal?: AbortSignal;
+}): ApplicationRequestContext {
+  const resolvedIdentity = Object.freeze(tenantIdentity(identity));
+  const context = createRequestContext({
+    request_id,
+    traceparent,
+    identity: resolvedIdentity,
+    signal,
+  });
+  return Object.freeze({ ...context, identity: resolvedIdentity });
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.length === 0)
+    throw Object.assign(new Error(`${name} must be a non-empty string`), {
+      code: "INVALID_REQUEST",
+    });
+  return value;
+}
+
+function positiveNumber(value: unknown, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new TypeError(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function webHeaders(headers: IncomingHttpHeaders): Headers {
+  const result = new Headers();
+  for (const [name, value] of Object.entries(headers)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) result.append(name, entry);
+    } else if (typeof value === "string") {
+      result.set(name, value);
+    }
+  }
+  return result;
+}
+
+function protocolRecord(
+  name: Parameters<typeof validateProtocol>[0],
+  value: unknown,
+): DataRecord {
+  const parsed = validateProtocol(name, value);
+  if (!isDataRecord(parsed))
+    throw Object.assign(new Error(`${name} must be an object`), {
+      code: "INVALID_REQUEST",
+    });
+  return parsed;
+}
+
+function errorDetails(error: unknown): {
+  code?: string;
+  details?: DataRecord;
+  message?: string;
+} {
+  if (!isDataRecord(error)) return {};
+  return {
+    code: typeof error.code === "string" ? error.code : undefined,
+    details: isDataRecord(error.details) ? error.details : undefined,
+    message: typeof error.message === "string" ? error.message : undefined,
+  };
+}
+
+function jobPayload(value: unknown): JobPayload {
+  if (
+    !isDataRecord(value) ||
+    !isDataRecord(value.identity) ||
+    !isDataRecord(value.command) ||
+    !isDataRecord(value.command.input)
+  ) {
+    throw Object.assign(new Error("message job payload is invalid"), {
+      code: "INVALID_REQUEST",
+    });
+  }
+  return {
+    traceparent:
+      typeof value.traceparent === "string" ? value.traceparent : undefined,
+    identity: value.identity,
+    command: { ...value.command, input: value.command.input },
+  };
+}
+
+function payloadTooLarge(limit: number) {
   return Object.assign(new Error("request body exceeds " + limit + " bytes"), {
     code: "PAYLOAD_TOO_LARGE",
     details: { max_bytes: limit },
   });
 }
 
-export async function readRequestBody(req, maxBytes) {
+export async function readRequestBody(
+  req: RequestBodyStream,
+  maxBytes: number,
+) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
     throw new Error("request body limit must be a positive integer");
   const declaredLength = Number(req.headers?.["content-length"]);
@@ -51,9 +582,15 @@ export async function readRequestBody(req, maxBytes) {
     declaredLength > maxBytes
   )
     throw payloadTooLarge(maxBytes);
-  const chunks = [];
+  const chunks: Buffer[] = [];
   let total = 0;
-  for await (const chunk of req) {
+  const iteratorFactory = req[Symbol.asyncIterator];
+  if (!iteratorFactory)
+    throw new TypeError("request body must be an async iterable");
+  const body: AsyncIterable<RequestBodyChunk> = {
+    [Symbol.asyncIterator]: () => iteratorFactory.call(req),
+  };
+  for await (const chunk of body) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += buffer.length;
     if (total > maxBytes) throw payloadTooLarge(maxBytes);
@@ -62,7 +599,7 @@ export async function readRequestBody(req, maxBytes) {
   return Buffer.concat(chunks, total);
 }
 
-function teardownTimeout(value) {
+function teardownTimeout(value: unknown): number {
   const parsed = Number(value ?? DEFAULT_TEARDOWN_TIMEOUT_MS);
   if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 30_000) {
     throw new Error(
@@ -72,14 +609,14 @@ function teardownTimeout(value) {
   return parsed;
 }
 
-function configuredMessageJobTenants(env) {
+function configuredMessageJobTenants(env: NodeJS.ProcessEnv): string[] {
   return String(env?.MESSAGE_JOB_TENANT_IDS ?? "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
 }
 
-function serializableJobInput(input) {
+function serializableJobInput(input: AskInput) {
   if (input?.type !== "audio") return input;
   return {
     type: "audio",
@@ -89,7 +626,7 @@ function serializableJobInput(input) {
   };
 }
 
-function jobIdentity(identity) {
+function jobIdentity(identity: AuthIdentity): AuthIdentity {
   const fields = [
     "subject_id",
     "actor_id",
@@ -116,7 +653,7 @@ function jobIdentity(identity) {
   return result;
 }
 
-function jobResponse(job, request_id, duplicate = false) {
+function jobResponse(job: MessageJob, request_id: string, duplicate = false) {
   return {
     request_id,
     job_id: job.id,
@@ -127,7 +664,17 @@ function jobResponse(job, request_id, duplicate = false) {
   };
 }
 
-function askRequestFingerprint({ input, locale, outputMode, conversationId }) {
+function askRequestFingerprint({
+  input,
+  locale,
+  outputMode,
+  conversationId,
+}: {
+  input: AskInput;
+  locale: string;
+  outputMode: string;
+  conversationId?: string;
+}) {
   return sha256(
     JSON.stringify({
       input:
@@ -149,52 +696,92 @@ export function createApp({
   runtime: suppliedRuntime,
   runtimeFactory = createRuntime,
   teardownTimeoutMs,
-} = {}) {
-  const runtime = suppliedRuntime ?? runtimeFactory();
+}: CreateAppOptions = {}) {
+  const runtime = suppliedRuntime ?? appRuntime(runtimeFactory());
   const { store, authenticate, objectStorage, observability } = runtime;
+  const env = runtime.env ?? {};
+  const authenticateRequest: RequestAuthenticator = authenticate;
+  const resolvePrincipal: PrincipalResolver | undefined =
+    typeof runtime.resolvePrincipal === "function"
+      ? runtime.resolvePrincipal
+      : undefined;
   const providers = runtime.providers;
   const { providerReadiness } = providers;
   let draining = false;
   const shutdownController = new AbortController();
   const resolvedTeardownTimeoutMs = teardownTimeout(
-    teardownTimeoutMs ?? runtime.env?.RUNTIME_TEARDOWN_MS,
+    teardownTimeoutMs ?? env.RUNTIME_TEARDOWN_MS,
   );
-  const json = (res, status, body) => {
+  const json = (res: ServerResponse, status: number, body: unknown) => {
     res.statusCode = status;
     res.setHeader("content-type", "application/json; charset=utf-8");
     res.end(JSON.stringify(body));
   };
+  const authorize = runtime.authorize;
   const authorizationPorts = Object.freeze({
     authorize:
-      typeof runtime.authorize === "function"
-        ? (request) => runtime.authorize(request)
+      typeof authorize === "function"
+        ? (request: DataRecord) =>
+            authorize(runtimeAuthorizationRequest(request))
         : undefined,
   });
   const askService = new AskService({
     ...authorizationPorts,
-    beginInteraction: (args) => store.beginInteraction(args),
-    checkpointInteraction: (args) => store.checkpointInteraction(args),
-    completeInteraction: ({ outcome, ...args }) =>
+    beginInteraction: (args: Parameters<CrmStore["beginInteraction"]>[0]) =>
+      store.beginInteraction(args),
+    checkpointInteraction: (
+      args: Parameters<CrmStore["checkpointInteraction"]>[0],
+    ) => store.checkpointInteraction(args),
+    completeInteraction: ({
+      outcome,
+      ...args
+    }: Omit<Parameters<CrmStore["completeInteraction"]>[0], "http_status"> & {
+      outcome: string;
+    }) =>
       store.completeInteraction({
         ...args,
         http_status: outcome === "review_required" ? 202 : 200,
       }),
-    failInteraction: (args) =>
+    failInteraction: (
+      args: Omit<Parameters<CrmStore["failInteraction"]>[0], "http_status">,
+    ) =>
       store.failInteraction({
         ...args,
         http_status: ERROR_CODES[args.error_code][0],
       }),
-    abandonInteraction: (args) => store.abandonInteraction?.(args),
-    createReview: (args) => store.createReview(args),
-    executeCrm: (args) => store.execute(args),
-    recordInputAsset: (args) => store.recordInputAsset(args),
-    recordTts: (...args) => store.recordTts(...args),
-    transcribe: (...args) => providers.transcribe(...args),
-    understand: (...args) => providers.understand(...args),
-    synthesize: (...args) => providers.synthesize(...args),
+    abandonInteraction: (args: Parameters<CrmStore["abandonInteraction"]>[0]) =>
+      store.abandonInteraction?.(args),
+    createReview: (args: Parameters<CrmStore["createReview"]>[0]) =>
+      store.createReview(args),
+    executeCrm: (args: Parameters<CrmStore["execute"]>[0]) =>
+      store.execute(args),
+    recordInputAsset: (args: Parameters<CrmStore["recordInputAsset"]>[0]) =>
+      store.recordInputAsset(args),
+    recordTts: (...args: Parameters<CrmStore["recordTts"]>) =>
+      store.recordTts(...args),
+    transcribe: (...args: Parameters<typeof providers.transcribe>) =>
+      providers.transcribe(...args),
+    understand: (...args: Parameters<typeof providers.understand>) =>
+      providers.understand(...args),
+    synthesize: (...args: Parameters<typeof providers.synthesize>) =>
+      providers.synthesize(...args),
     ttsDefaultFormat: () => providers.ttsDefaultFormat(),
-    persistInputAudio: (...args) => persistInputAudio(objectStorage, ...args),
-    persistAudioAsset: (...args) => persistAudioAsset(objectStorage, ...args),
+    persistInputAudio: (
+      ...args: Parameters<typeof persistInputAudio> extends [
+        unknown,
+        ...infer Rest,
+      ]
+        ? Rest
+        : never
+    ) => persistInputAudio(objectStorage, ...args),
+    persistAudioAsset: (
+      ...args: Parameters<typeof persistAudioAsset> extends [
+        unknown,
+        ...infer Rest,
+      ]
+        ? Rest
+        : never
+    ) => persistAudioAsset(objectStorage, ...args),
     validateResponse: validateProtocol,
     intentProviderName: runtime.env?.INTENT_PROVIDER || "mock",
     intentProviderKind: runtime.env?.INTENT_PROVIDER || "unknown",
@@ -208,10 +795,20 @@ export function createApp({
   });
   const ttsService = new TtsService({
     ...authorizationPorts,
-    replayTts: (...args) => store.replayTts(...args),
-    recordTts: (...args) => store.recordTts(...args),
-    synthesize: (...args) => providers.synthesize(...args),
-    persistAudioAsset: (...args) => persistAudioAsset(objectStorage, ...args),
+    replayTts: (...args: Parameters<CrmStore["replayTts"]>) =>
+      store.replayTts(...args),
+    recordTts: (...args: Parameters<CrmStore["recordTts"]>) =>
+      store.recordTts(...args),
+    synthesize: (...args: Parameters<typeof providers.synthesize>) =>
+      providers.synthesize(...args),
+    persistAudioAsset: (
+      ...args: Parameters<typeof persistAudioAsset> extends [
+        unknown,
+        ...infer Rest,
+      ]
+        ? Rest
+        : never
+    ) => persistAudioAsset(objectStorage, ...args),
     validateResponse: validateProtocol,
     ttsProviderKind: runtime.env?.TTS_PROVIDER || "unknown",
     storageKind: runtime.objectStorage?.provider || "unknown",
@@ -220,11 +817,12 @@ export function createApp({
     tracer: runtime.tracer,
     progressSink: runtime.progressEvents,
   });
+  const decideReview = store.decideReview;
   const reviewService = new ReviewService({
     ...authorizationPorts,
     decideReview:
-      typeof store.decideReview === "function"
-        ? (args) => store.decideReview(args)
+      typeof decideReview === "function"
+        ? (args: DataRecord) => decideReview(args)
         : undefined,
     validateResponse: validateProtocol,
     databaseKind:
@@ -233,7 +831,12 @@ export function createApp({
     progressSink: runtime.progressEvents,
   });
 
-  async function runApplication(name, context, service, command) {
+  async function runApplication(
+    name: string,
+    context: ApplicationRequestContext,
+    service: ApplicationService,
+    command: DataRecord,
+  ): Promise<ApplicationOutcome> {
     const tracer = runtime.tracer;
     if (typeof tracer?.startSpan !== "function")
       return service.execute(context, command);
@@ -242,8 +845,10 @@ export function createApp({
       signal: context.signal,
       attributes: { "app.operation": name.slice("application.".length) },
     });
-    const serviceContext = createRequestContext({
-      ...context,
+    const serviceContext = applicationRequestContext({
+      request_id: context.request_id,
+      identity: context.identity,
+      signal: context.signal,
       traceparent: span.context.traceparent,
     });
     try {
@@ -271,25 +876,25 @@ export function createApp({
     typeof store.claimMessageJobs === "function"
       ? createMessageJobWorker({
           queue: store,
-          tenantIds: configuredMessageJobTenants(runtime.env),
-          batchSize: Number(runtime.env?.MESSAGE_JOB_BATCH_SIZE || 10),
-          leaseMs: Number(runtime.env?.MESSAGE_JOB_LEASE_MS || 30_000),
-          maxAttempts: Number(runtime.env?.MESSAGE_JOB_MAX_ATTEMPTS || 3),
-          pollIntervalMs: Number(
-            runtime.env?.MESSAGE_JOB_POLL_INTERVAL_MS || 1_000,
-          ),
+          tenantIds: configuredMessageJobTenants(env),
+          batchSize: Number(env.MESSAGE_JOB_BATCH_SIZE || 10),
+          leaseMs: Number(env.MESSAGE_JOB_LEASE_MS || 30_000),
+          maxAttempts: Number(env.MESSAGE_JOB_MAX_ATTEMPTS || 3),
+          pollIntervalMs: Number(env.MESSAGE_JOB_POLL_INTERVAL_MS || 1_000),
           processJob: async (job, { signal }) => {
-            const payload = job.payload;
-            const identity =
-              typeof runtime.resolvePrincipal === "function"
-                ? await runtime.resolvePrincipal(payload.identity, { signal })
-                : payload.identity;
+            const payload = jobPayload(job.payload);
+            const identity = resolvePrincipal
+              ? await resolvePrincipal(payload.identity, { signal })
+              : payload.identity;
             const input =
               payload.command.input?.type === "audio"
                 ? {
                     ...payload.command.input,
                     data: Buffer.from(
-                      payload.command.input.data_base64,
+                      requiredString(
+                        payload.command.input.data_base64,
+                        "message job audio data_base64",
+                      ),
                       "base64",
                     ),
                   }
@@ -298,7 +903,7 @@ export function createApp({
               ...payload.command,
               input,
             });
-            const context = createRequestContext({
+            const context = applicationRequestContext({
               request_id: job.request_id,
               traceparent: payload.traceparent,
               identity,
@@ -314,10 +919,10 @@ export function createApp({
           },
         })
       : undefined;
-  for (const tenantId of configuredMessageJobTenants(runtime.env))
+  for (const tenantId of configuredMessageJobTenants(env))
     messageJobWorker?.registerTenant(tenantId);
 
-  function parseMultipart(buf, type) {
+  function parseMultipart(buf: Buffer, type: string): MultipartParts {
     const boundary =
       /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[1] ??
       /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[2];
@@ -325,7 +930,7 @@ export function createApp({
       throw Object.assign(new Error("multipart boundary is required"), {
         code: "INVALID_REQUEST",
       });
-    const out = {};
+    const out: MultipartParts = {};
     for (const part of buf
       .toString("binary")
       .split(`--${boundary}`)
@@ -347,7 +952,10 @@ export function createApp({
     }
     return out;
   }
-  function requestSignal(req, res) {
+  function requestSignal(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): AbortSignal {
     const controller = new AbortController();
     const abort = () => {
       if (!controller.signal.aborted) {
@@ -385,24 +993,37 @@ export function createApp({
     if (req.aborted || req.destroyed || res.destroyed) abort();
     return controller.signal;
   }
-  async function authenticateContext(req, res, rid, signal) {
+  async function authenticateContext(
+    req: IncomingMessage,
+    res: ServerResponse,
+    rid: string,
+    signal: AbortSignal,
+  ): Promise<ApplicationRequestContext> {
     signal.throwIfAborted();
-    const authenticatedIdentity = await authenticate(new Headers(req.headers), {
-      signal,
-    });
-    const identity =
-      typeof runtime.resolvePrincipal === "function"
-        ? await runtime.resolvePrincipal(authenticatedIdentity, { signal })
-        : authenticatedIdentity;
+    const authenticatedIdentity = await authenticateRequest(
+      webHeaders(req.headers),
+      {
+        signal,
+      },
+    );
+    const identity = resolvePrincipal
+      ? await resolvePrincipal(authenticatedIdentity, { signal })
+      : authenticatedIdentity;
     signal.throwIfAborted();
-    return createRequestContext({
+    const traceparent = res.getHeader("traceparent");
+    return applicationRequestContext({
       request_id: rid,
-      traceparent: res.getHeader("traceparent"),
+      traceparent: typeof traceparent === "string" ? traceparent : undefined,
       identity,
       signal,
     });
   }
-  async function ask(req, res, rid, signal) {
+  async function ask(
+    req: IncomingMessage,
+    res: ServerResponse,
+    rid: string,
+    signal: AbortSignal,
+  ) {
     const context = await authenticateContext(req, res, rid, signal);
     const key = validateIdempotencyKey(req.headers["idempotency-key"]);
     const multipart = req.headers["content-type"]?.startsWith(
@@ -414,48 +1035,75 @@ export function createApp({
         ? REQUEST_BODY_LIMITS.askMultipart
         : REQUEST_BODY_LIMITS.askJson,
     );
-    let input;
+    let input: AskInput;
     let outputMode = "text";
     let locale = DEFAULT_LOCALE;
-    let conversationId;
+    let conversationId: string | undefined;
     if (multipart) {
-      const parts = parseMultipart(raw, req.headers["content-type"]);
-      let metadata;
+      const parts = parseMultipart(
+        raw,
+        requiredString(req.headers["content-type"], "content-type"),
+      );
+      let metadata: DataRecord;
       try {
-        metadata = JSON.parse(parts.metadata ?? "{}");
+        const metadataPart = parts.metadata;
+        const decoded: unknown = JSON.parse(
+          typeof metadataPart === "string" ? metadataPart : "{}",
+        );
+        if (!isDataRecord(decoded)) throw new Error("metadata must be JSON");
+        metadata = decoded;
       } catch {
         throw Object.assign(new Error("metadata must be JSON"), {
           code: "INVALID_REQUEST",
         });
       }
-      const parsed = validateProtocol("MultipartAskMetadata", {
+      const parsed = protocolRecord("MultipartAskMetadata", {
         ...metadata,
         output_mode: metadata.output_mode ?? DEFAULT_AUDIO_OUTPUT_MODE,
       });
-      outputMode = parsed.output_mode;
-      locale = parsed.locale ?? DEFAULT_LOCALE;
-      conversationId = parsed.conversation_id;
+      outputMode = requiredString(parsed.output_mode, "output_mode");
+      locale =
+        typeof parsed.locale === "string" ? parsed.locale : DEFAULT_LOCALE;
+      conversationId =
+        typeof parsed.conversation_id === "string"
+          ? parsed.conversation_id
+          : undefined;
+      const audio = parts.audio;
       input = validateAudioInput({
-        data: parts.audio?.data,
-        content_type: parts.audio?.content_type,
+        data: typeof audio === "object" ? audio.data : Buffer.alloc(0),
+        content_type:
+          typeof audio === "object"
+            ? audio.content_type
+            : "application/octet-stream",
         locale,
         output_mode: outputMode,
         env: runtime.env,
       });
     } else {
-      const parsed = validateProtocol(
+      const parsed = protocolRecord(
         "AskRequest",
         JSON.parse(raw.toString("utf8") || "{}"),
       );
-      conversationId = parsed.conversation_id;
-      if (parsed.input?.type === "audio") {
+      conversationId =
+        typeof parsed.conversation_id === "string"
+          ? parsed.conversation_id
+          : undefined;
+      const parsedInput = isDataRecord(parsed.input) ? parsed.input : undefined;
+      if (parsedInput?.type === "audio") {
         input = validateAudioInput({
-          data: parsed.input.data_base64
-            ? Buffer.from(parsed.input.data_base64, "base64")
-            : Buffer.alloc(0),
-          content_type: parsed.input.content_type ?? "audio/wav",
-          locale: parsed.locale ?? locale,
-          output_mode: parsed.output_mode ?? "text",
+          data:
+            typeof parsedInput.data_base64 === "string"
+              ? Buffer.from(parsedInput.data_base64, "base64")
+              : Buffer.alloc(0),
+          content_type:
+            typeof parsedInput.content_type === "string"
+              ? parsedInput.content_type
+              : "audio/wav",
+          locale: typeof parsed.locale === "string" ? parsed.locale : locale,
+          output_mode:
+            typeof parsed.output_mode === "string"
+              ? parsed.output_mode
+              : "text",
           env: runtime.env,
         });
       } else {
@@ -530,16 +1178,22 @@ export function createApp({
         conversation_id: conversationId,
       }),
     );
+    const response = isDataRecord(outcome.response) ? outcome.response : {};
     return json(
       res,
-      outcome.response.status === "needs_review" ? 202 : 200,
+      response.status === "needs_review" ? 202 : 200,
       outcome.response,
     );
   }
-  async function tts(req, res, rid, signal) {
+  async function tts(
+    req: IncomingMessage,
+    res: ServerResponse,
+    rid: string,
+    signal: AbortSignal,
+  ) {
     const context = await authenticateContext(req, res, rid, signal);
     const key = validateIdempotencyKey(req.headers["idempotency-key"]);
-    const parsed = validateProtocol(
+    const parsed = protocolRecord(
       "TtsRequest",
       JSON.parse(
         (await readRequestBody(req, REQUEST_BODY_LIMITS.ttsJson)).toString(
@@ -558,18 +1212,26 @@ export function createApp({
     );
     return json(res, 201, outcome.response);
   }
-  async function reviewDecision(req, res, rid, signal) {
+  async function reviewDecision(
+    req: IncomingMessage,
+    res: ServerResponse,
+    rid: string,
+    signal: AbortSignal,
+  ) {
     const context = await authenticateContext(req, res, rid, signal);
     const key = validateIdempotencyKey(req.headers["idempotency-key"]);
     const reviewId = decodeURIComponent(
-      req.url.slice("/v1/reviews/".length, -"/decision".length),
+      requiredString(req.url, "request URL").slice(
+        "/v1/reviews/".length,
+        -"/decision".length,
+      ),
     );
     if (!REVIEW_ID_PATTERN.test(reviewId))
       throw Object.assign(
         new Error("review id is outside the published contract"),
         { code: "INVALID_REQUEST" },
       );
-    const parsed = validateProtocol(
+    const parsed = protocolRecord(
       "ReviewDecisionRequest",
       JSON.parse(
         (await readRequestBody(req, REQUEST_BODY_LIMITS.reviewJson)).toString(
@@ -593,8 +1255,9 @@ export function createApp({
     const rid = requestId();
     const telemetry = observability.begin(req, rid);
     const signal = requestSignal(req, res);
-    let errorCode;
-    res.setHeader("traceparent", telemetry.traceparent);
+    let errorCode: string | undefined;
+    if (telemetry.traceparent)
+      res.setHeader("traceparent", telemetry.traceparent);
     res.setHeader("x-request-id", rid);
     res.once("finish", () =>
       observability.finish(telemetry, res.statusCode, errorCode),
@@ -607,14 +1270,17 @@ export function createApp({
           request_id: rid,
         });
       if (req.method === "GET" && req.url === "/health/ready") {
-        const [database, objects, extensionStatus] = await Promise.all([
+        const [database, objects, rawExtensionStatus] = await Promise.all([
           store.health(),
           objectStorage.health(),
           runtime.extensions?.health?.({ signal }) ?? {},
         ]);
+        const extensionStatus = isDataRecord(rawExtensionStatus)
+          ? rawExtensionStatus
+          : {};
         const providerStatus = providerReadiness();
         const extensionsReady = Object.values(extensionStatus).every(
-          ({ ready }) => ready,
+          (status) => isDataRecord(status) && status.ready === true,
         );
         const ready =
           !draining &&
@@ -710,14 +1376,17 @@ export function createApp({
           type: "event_stream",
           id: `${identity.tenant_id}:events`,
         });
-        const events = await store.events(
+        const events: unknown[] = await store.events(
           identity.tenant_id,
           identity.actor_id,
         );
         return json(res, 200, {
-          events: events.filter(
-            (event) => validateEvent(event).tenant_id === identity.tenant_id,
-          ),
+          events: events.filter((event) => {
+            validateEvent(event);
+            return (
+              isDataRecord(event) && event.tenant_id === identity.tenant_id
+            );
+          }),
           request_id: rid,
         });
       }
@@ -794,24 +1463,25 @@ export function createApp({
         ),
       );
     } catch (error) {
-      errorCode = ERROR_CODES[error.code] ? error.code : "INVALID_REQUEST";
+      const failure = errorDetails(error);
+      errorCode =
+        failure.code && ERROR_CODES[failure.code]
+          ? failure.code
+          : "INVALID_REQUEST";
       const status = ERROR_CODES[errorCode]?.[0] ?? 400;
-      const details =
-        error?.details && typeof error.details === "object"
-          ? error.details
-          : {};
+      const details = failure.details ?? {};
       return json(
         res,
         status,
         validateProtocol(
           "ErrorEnvelope",
-          errorEnvelope(errorCode, error.message, rid, details),
+          errorEnvelope(errorCode, failure.message, rid, details),
         ),
       );
     }
   });
-  let shutdownPromise;
-  async function shutdown() {
+  let shutdownPromise: Promise<void> | undefined;
+  async function shutdown(): Promise<void> {
     if (shutdownPromise) return shutdownPromise;
     draining = true;
     shutdownPromise = (async () => {
@@ -830,8 +1500,8 @@ export function createApp({
         );
         return await runtime.close({ timeoutMs: resolvedTeardownTimeoutMs });
       }
-      let timer;
-      const serverClosed = new Promise((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+      const serverClosed = new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
       server.closeIdleConnections?.();
@@ -845,13 +1515,13 @@ export function createApp({
         );
         server.closeAllConnections?.();
       }, resolvedTeardownTimeoutMs);
-      const errors = [];
+      const errors: unknown[] = [];
       try {
         await serverClosed;
       } catch (error) {
         errors.push(error);
       } finally {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
       }
       try {
         await messageJobWorker?.close(
@@ -879,8 +1549,14 @@ export function createApp({
     get draining() {
       return draining;
     },
-    listen(...args) {
-      return server.listen(...args);
+    listen(
+      port: number,
+      hostOrCallback?: string | (() => void),
+      callback?: () => void,
+    ) {
+      return typeof hostOrCallback === "string"
+        ? server.listen(port, hostOrCallback, callback)
+        : server.listen(port, hostOrCallback);
     },
     startMessageJobs() {
       return messageJobWorker?.start();
@@ -894,7 +1570,7 @@ export const createServer = createApp;
 export async function createStartedApp(options = {}) {
   const app = createApp(options);
   await app.runtime.start?.();
-  if (configuredMessageJobTenants(app.runtime.env).length > 0)
+  if (configuredMessageJobTenants(app.runtime.env ?? {}).length > 0)
     app.startMessageJobs?.();
   return app;
 }

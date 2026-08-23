@@ -129,7 +129,7 @@ test("Cargo builds remap host paths and disable incremental output", () => {
   });
   assert.equal(environment.CARGO_INCREMENTAL, "0");
   assert.equal("RUSTFLAGS" in environment, false);
-  const flags = environment.CARGO_ENCODED_RUSTFLAGS.split("\u001f");
+  const flags = (environment.CARGO_ENCODED_RUSTFLAGS ?? "").split("\u001f");
   assert.ok(flags.some((flag) => flag.endsWith("=/workspace")));
   assert.ok(flags.includes("--remap-path-prefix=/tmp/sumi-cargo-home=/cargo"));
   assert.equal(flags.includes("untrusted"), false);

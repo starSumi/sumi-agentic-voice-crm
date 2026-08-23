@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { testError, testErrorDetails } from "./test-types.ts";
 import {
   AskService,
   normalizeAskCommand,
@@ -11,8 +13,30 @@ import {
 import { createRequestContext } from "../src/composition-root.ts";
 import { understanding } from "../src/contracts.ts";
 import { createApp } from "../src/server.ts";
+import { CrmStore } from "../src/store.ts";
+import { MemoryObjectStorage } from "../src/object-storage.ts";
+import { createObservability } from "../src/observability.ts";
+import type {
+  AuthorizationDecision,
+  AuthorizationRequest as RuntimeAuthorizationRequest,
+  AuthorizationReasonCode,
+} from "../src/authorization/index.ts";
 
 const REQUEST_ID = "req_authorization0123456789";
+type ServiceAuthorizationRequest = {
+  readonly action: string;
+  readonly resource: Readonly<Record<string, unknown>> & {
+    readonly id?: string;
+    readonly type?: string;
+  };
+};
+
+function tcpPort(address: AddressInfo | string | null): number {
+  if (!address || typeof address === "string") {
+    throw new TypeError("expected TCP server address");
+  }
+  return address.port;
+}
 
 function context() {
   return createRequestContext({
@@ -40,7 +64,7 @@ function askCommand(text = "find acme") {
   });
 }
 
-function allow(policyVersion = "test-policy") {
+function allow(policyVersion = "test-policy"): AuthorizationDecision {
   return {
     effect: "allow",
     policy_version: policyVersion,
@@ -49,7 +73,9 @@ function allow(policyVersion = "test-policy") {
   };
 }
 
-function deny(reason = "RBAC_DENY") {
+function deny(
+  reason: AuthorizationReasonCode = "RBAC_DENY",
+): AuthorizationDecision & { internal_debug: string } {
   return {
     effect: "deny",
     policy_version: "test-policy",
@@ -72,8 +98,8 @@ test("application services default-deny when the authorization port is absent", 
   });
 
   await assert.rejects(service.execute(context(), askCommand()), (error) => {
-    assert.equal(error.code, "FORBIDDEN");
-    assert.deepEqual(error.details, {
+    assert.equal(testError(error).code, "FORBIDDEN");
+    assert.deepEqual(testErrorDetails(error), {
       policy_version: "unknown",
       reason_codes: ["DEFAULT_DENY"],
     });
@@ -84,11 +110,11 @@ test("application services default-deny when the authorization port is absent", 
 });
 
 test("entry denial is normalized and occurs before store or provider effects", async () => {
-  const decisions = [];
+  const decisions: ServiceAuthorizationRequest[] = [];
   let storeCalls = 0;
   let providerCalls = 0;
   const service = new AskService({
-    authorize: async (request) => {
+    authorize: async (request: ServiceAuthorizationRequest) => {
       decisions.push(request);
       return deny();
     },
@@ -101,12 +127,12 @@ test("entry denial is normalized and occurs before store or provider effects", a
   });
 
   await assert.rejects(service.execute(context(), askCommand()), (error) => {
-    assert.equal(error.code, "FORBIDDEN");
-    assert.deepEqual(Object.keys(error.details).sort(), [
+    assert.equal(testError(error).code, "FORBIDDEN");
+    assert.deepEqual(Object.keys(testErrorDetails(error)).sort(), [
       "policy_version",
       "reason_codes",
     ]);
-    assert.deepEqual(error.details.reason_codes, ["RBAC_DENY"]);
+    assert.deepEqual(testErrorDetails(error).reason_codes, ["RBAC_DENY"]);
     return true;
   });
   assert.equal(storeCalls, 0);
@@ -135,7 +161,7 @@ test("entry denial is normalized and occurs before store or provider effects", a
 });
 
 test("AskService performs intent authorization after understanding and before CRM effects", async () => {
-  const actions = [];
+  const actions: ServiceAuthorizationRequest[] = [];
   const calls = {
     begin: 0,
     checkpoint: 0,
@@ -145,7 +171,7 @@ test("AskService performs intent authorization after understanding and before CR
     failed: 0,
   };
   const service = new AskService({
-    authorize: async (request) => {
+    authorize: async (request: ServiceAuthorizationRequest) => {
       actions.push(request);
       return request.action === "interaction.ask"
         ? allow()
@@ -188,14 +214,14 @@ test("AskService performs intent authorization after understanding and before CR
   await assert.rejects(
     service.execute(context(), askCommand("move deal 42")),
     (error) =>
-      error.code === "FORBIDDEN" &&
-      error.details.reason_codes[0] === "TOKEN_SCOPE_DENY",
+      testError(error).code === "FORBIDDEN" &&
+      testErrorDetails(error).reason_codes[0] === "TOKEN_SCOPE_DENY",
   );
   assert.deepEqual(
     actions.map(({ action }) => action),
     ["interaction.ask", "crm.deal.update_stage"],
   );
-  assert.deepEqual(actions[1].resource, {
+  assert.deepEqual(actions[1]?.resource, {
     type: "deal",
     id: "deal-42",
     tenant_id: "tenant_demo",
@@ -212,9 +238,9 @@ test("TTS and review authorization precede every delegated effect", async (t) =>
   await t.test("TTS", async () => {
     let replayCalls = 0;
     let providerCalls = 0;
-    const actions = [];
+    const actions: ServiceAuthorizationRequest[] = [];
     const service = new TtsService({
-      authorize: async (request) => {
+      authorize: async (request: ServiceAuthorizationRequest) => {
         actions.push(request);
         return deny();
       },
@@ -235,18 +261,18 @@ test("TTS and review authorization precede every delegated effect", async (t) =>
           format: "mp3",
         }),
       ),
-      (error) => error.code === "FORBIDDEN",
+      (error) => testError(error).code === "FORBIDDEN",
     );
-    assert.equal(actions[0].action, "media.tts.create");
+    assert.equal(actions[0]?.action, "media.tts.create");
     assert.equal(replayCalls, 0);
     assert.equal(providerCalls, 0);
   });
 
   await t.test("review", async () => {
     let decideCalls = 0;
-    const actions = [];
+    const actions: ServiceAuthorizationRequest[] = [];
     const service = new ReviewService({
-      authorize: async (request) => {
+      authorize: async (request: ServiceAuthorizationRequest) => {
         actions.push(request);
         return deny();
       },
@@ -263,56 +289,90 @@ test("TTS and review authorization precede every delegated effect", async (t) =>
           decision: "approve",
         }),
       ),
-      (error) => error.code === "FORBIDDEN",
+      (error) => testError(error).code === "FORBIDDEN",
     );
-    assert.equal(actions[0].action, "review.decide");
-    assert.equal(actions[0].resource.id, "rev_authorization");
+    assert.equal(actions[0]?.action, "review.decide");
+    assert.equal(actions[0]?.resource.id, "rev_authorization");
     assert.equal(decideCalls, 0);
   });
 });
 
 test("events and asset routes authorize before reading tenant data", async (t) => {
-  const actions = [];
+  const actions: RuntimeAuthorizationRequest[] = [];
   const reads = { events: 0, asset: 0 };
+  const store = new CrmStore();
+  store.events = () => {
+    reads.events += 1;
+    return [];
+  };
+  store.assetFor = () => {
+    reads.asset += 1;
+    return undefined;
+  };
   const runtime = {
     env: {},
     authenticate: async () => context().identity,
-    authorize: async (request) => {
+    authorize: async (request: RuntimeAuthorizationRequest) => {
       actions.push(request);
       return deny();
     },
-    store: {
-      health: async () => ({ ready: true }),
-      events: async () => {
-        reads.events += 1;
-        return [];
-      },
-      assetFor: async () => {
-        reads.asset += 1;
-        return undefined;
-      },
-    },
+    store,
     providers: {
-      providerReadiness: () => ({ ready: true, statuses: {} }),
+      providerReadiness: () => ({
+        ready: true,
+        names: { asr: "test", intent: "test", tts: "test" },
+        statuses: {
+          asr: { provider: "test", ready: true, circuit: "closed" },
+          intent: { provider: "test", ready: true, circuit: "closed" },
+          tts: { provider: "test", ready: true, circuit: "closed" },
+        },
+      }),
+      transcribe: async () => ({
+        text: "test",
+        language: "en",
+        confidence: 1,
+        provider: "test",
+        model: "test",
+        duration_ms: 0,
+      }),
+      understand: async () => ({
+        intent: "crm.search",
+        confidence: 1,
+        entities: {},
+        missing: [],
+        needs_confirmation: false,
+        schema_version: "sumi.agent-crm-understanding.v1",
+        source: {
+          transcript_hash: `sha256:${"0".repeat(64)}`,
+          language: "en",
+          model: "test",
+        },
+      }),
+      synthesize: async () => ({
+        asset_id: "ast_test",
+        url: "/v1/assets/ast_test",
+        mime_type: "audio/mpeg",
+        duration_ms: 0,
+        expires_at: "2030-01-01T00:00:00.000Z",
+        voice: "test",
+        provider: "test",
+        model: "test",
+        status: "ready",
+        data_base64: "",
+      }),
+      ttsDefaultFormat: () => "mp3",
     },
-    objectStorage: {
-      health: async () => ({ ready: true }),
-    },
-    observability: {
-      begin: () => ({ traceparent: "00-route-authorization" }),
-      finish: () => {},
-      authorizeMetrics: () => false,
-      renderMetrics: () => "",
-    },
+    objectStorage: new MemoryObjectStorage(),
+    observability: createObservability({ write: () => {} }),
     close: async () => {},
   };
   const app = createApp({ runtime });
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     app.server.once("error", reject);
     app.listen(0, "127.0.0.1", resolve);
   });
   t.after(() => app.close());
-  const origin = `http://127.0.0.1:${app.server.address().port}`;
+  const origin = `http://127.0.0.1:${tcpPort(app.server.address())}`;
 
   const eventsResponse = await fetch(`${origin}/v1/events`);
   const assetResponse = await fetch(`${origin}/v1/assets/ast_12345678`);

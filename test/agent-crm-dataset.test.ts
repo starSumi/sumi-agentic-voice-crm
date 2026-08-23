@@ -3,7 +3,12 @@ import test from "node:test";
 import { validateAgentCrmDataset } from "../scripts/validate-agent-crm-dataset.ts";
 
 const version = "sumi.agent-crm-training-example.v1";
-const example = (example_id, group_id, split, expected) =>
+const example = (
+  example_id: string,
+  group_id: string,
+  split: "train" | "validation" | "test",
+  expected: Readonly<Record<string, unknown>>,
+) =>
   JSON.stringify({
     schema_version: version,
     example_id,

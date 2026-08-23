@@ -4,19 +4,67 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { spawnCargoSync } from "./run-cargo.ts";
 
-type Json = Record<string, any>;
+type JsonObject = Record<string, unknown>;
+type BuildManifestFile = Readonly<{ path: string; sha256: string }>;
 
-const packageJson = JSON.parse(await readFile("package.json", "utf8")) as Json;
+function isJsonObject(value: unknown): value is JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function objectValue(value: unknown, label: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return value;
+}
+
+function parseObject(source: string, label: string): JsonObject {
+  return objectValue(JSON.parse(source), label);
+}
+
+function stringValue(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label} must be a non-empty string`);
+  }
+  return value;
+}
+
+function optionalObject(value: unknown, label: string): JsonObject | undefined {
+  return value === undefined ? undefined : objectValue(value, label);
+}
+
+function objectArray(value: unknown, label: string): JsonObject[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value.map((entry, index) => objectValue(entry, `${label}[${index}]`));
+}
+
+function stringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value.map((entry, index) => stringValue(entry, `${label}[${index}]`));
+}
+
+const packageJson = parseObject(
+  await readFile("package.json", "utf8"),
+  "package.json",
+);
+const packageName = stringValue(packageJson.name, "package.json name");
+const packageVersion = stringValue(packageJson.version, "package.json version");
+const packageManager = stringValue(
+  packageJson.packageManager,
+  "package.json packageManager",
+);
+const packageEngines = objectValue(packageJson.engines, "package.json engines");
+const packageLicense =
+  typeof packageJson.license === "string" ? packageJson.license : undefined;
 const lockfile = await readFile("pnpm-lock.yaml");
 const cargoLockfile = await readFile("Cargo.lock");
-const buildManifest = JSON.parse(
+const buildManifest = parseObject(
   await readFile("dist/BUILD-MANIFEST.json", "utf8"),
-) as Json;
-const expectedPnpm = packageJson.packageManager?.match(
-  /^pnpm@(\d+\.\d+\.\d+)$/,
-)?.[1];
+  "dist/BUILD-MANIFEST.json",
+);
+const expectedPnpm = packageManager.match(/^pnpm@(\d+\.\d+\.\d+)$/)?.[1];
 
-if (!expectedPnpm || packageJson.engines?.pnpm !== expectedPnpm) {
+if (!expectedPnpm || packageEngines.pnpm !== expectedPnpm) {
   throw new Error(
     "package.json must pin one exact pnpm version in packageManager and engines.pnpm",
   );
@@ -91,12 +139,21 @@ function readCargoChecksums(source: string): Map<string, string> {
 if (
   buildManifest.schema_version !== "sumi.runtime-build-manifest.v1" ||
   buildManifest.hash_algorithm !== "sha256" ||
+  typeof buildManifest.content_set_sha256 !== "string" ||
   !/^[a-f0-9]{64}$/.test(buildManifest.content_set_sha256)
 ) {
   throw new Error(
     "dist/BUILD-MANIFEST.json is not a verified runtime manifest",
   );
 }
+const buildContentSetSha256 = buildManifest.content_set_sha256;
+const buildManifestFiles: BuildManifestFile[] = objectArray(
+  buildManifest.files,
+  "build manifest files",
+).map((entry, index) => ({
+  path: stringValue(entry.path, `build manifest files[${index}].path`),
+  sha256: stringValue(entry.sha256, `build manifest files[${index}].sha256`),
+}));
 
 const sourceCommit = runGit(["rev-parse", "HEAD"]);
 const worktreeStatus = runGit([
@@ -118,14 +175,30 @@ if (actualPnpm !== expectedPnpm) {
   );
 }
 
-const [project] = JSON.parse(
+const projectList: unknown = JSON.parse(
   runPnpm(["list", "--prod", "--json", "--depth", "Infinity"]),
-) as [Json];
-const parsedPnpmLock = parseYaml(lockfile.toString("utf8")) as Json;
+);
+if (!Array.isArray(projectList) || projectList.length !== 1) {
+  throw new Error("pnpm list must return one project");
+}
+const project = objectValue(projectList[0], "pnpm project");
+const parsedPnpmLock = objectValue(
+  parseYaml(lockfile.toString("utf8")),
+  "pnpm lockfile",
+);
 const npmIntegrityByKey = new Map<string, string>();
-for (const [locator, entry] of Object.entries(parsedPnpmLock.packages ?? {})) {
-  const integrity = (entry as Json)?.resolution?.integrity as
-    string | undefined;
+const lockPackages =
+  optionalObject(parsedPnpmLock.packages, "pnpm lockfile packages") ?? {};
+for (const [locator, rawEntry] of Object.entries(lockPackages)) {
+  const entry = objectValue(rawEntry, `pnpm lockfile package ${locator}`);
+  const resolution = optionalObject(
+    entry.resolution,
+    `pnpm lockfile package ${locator} resolution`,
+  );
+  const integrity =
+    typeof resolution?.integrity === "string"
+      ? resolution.integrity
+      : undefined;
   if (!integrity) continue;
   const key = locator.replace(/\(.+$/, "");
   const previous = npmIntegrityByKey.get(key);
@@ -134,21 +207,30 @@ for (const [locator, entry] of Object.entries(parsedPnpmLock.packages ?? {})) {
   }
   npmIntegrityByKey.set(key, integrity);
 }
-const licenses = JSON.parse(
+const licenses = parseObject(
   runPnpm(["licenses", "list", "--prod", "--json"]),
-) as Record<string, any>;
-const licenseByPackage = new Map<string, Json>();
-for (const entries of Object.values(licenses) as Json[][]) {
-  for (const entry of entries as Json[]) {
-    for (const version of entry.versions) {
-      licenseByPackage.set(`${entry.name}@${version}`, entry);
+  "pnpm licenses",
+);
+const licenseByPackage = new Map<string, JsonObject>();
+for (const [license, rawEntries] of Object.entries(licenses)) {
+  const entries = objectArray(rawEntries, `pnpm license ${license}`);
+  for (const [index, entry] of entries.entries()) {
+    const name = stringValue(
+      entry.name,
+      `pnpm license ${license}[${index}].name`,
+    );
+    for (const version of stringArray(
+      entry.versions,
+      `pnpm license ${license}[${index}].versions`,
+    )) {
+      licenseByPackage.set(`${name}@${version}`, entry);
     }
   }
 }
 
-const packageByKey = new Map<string, Json>();
+const packageByKey = new Map<string, JsonObject>();
 const relationships = new Set<string>();
-const rootKey = `${packageJson.name}@${packageJson.version}`;
+const rootKey = `${packageName}@${packageVersion}`;
 
 function spdxId(key: string) {
   return `SPDXRef-Package-${createHash("sha256").update(key).digest("hex").slice(0, 20)}`;
@@ -156,15 +238,20 @@ function spdxId(key: string) {
 
 function purlName(name: string) {
   if (!name.startsWith("@")) return encodeURIComponent(name);
-  const [scope, packageName] = name.split("/");
-  return `${encodeURIComponent(scope)}/${encodeURIComponent(packageName)}`;
+  const [scope, unscopedName] = name.split("/");
+  return `${encodeURIComponent(scope)}/${encodeURIComponent(unscopedName)}`;
 }
 
-function visit(parentKey: string, dependencies: Json = {}) {
-  for (const [name, dependency] of Object.entries(dependencies) as Array<
-    [string, Json]
-  >) {
-    const key = `${name}@${dependency.version}`;
+function visit(parentKey: string, dependencies: unknown): void {
+  if (dependencies === undefined) return;
+  const entries = objectValue(dependencies, `dependencies of ${parentKey}`);
+  for (const [name, rawDependency] of Object.entries(entries)) {
+    const dependency = objectValue(rawDependency, `dependency ${name}`);
+    const version = stringValue(
+      dependency.version,
+      `dependency ${name} version`,
+    );
+    const key = `${name}@${version}`;
     packageByKey.set(key, { name, ...dependency });
     relationships.add(`${spdxId(parentKey)} DEPENDS_ON ${spdxId(key)}`);
     visit(key, dependency.dependencies);
@@ -175,21 +262,34 @@ function visit(parentKey: string, dependencies: Json = {}) {
 visit(rootKey, project.dependencies);
 visit(rootKey, project.optionalDependencies);
 
-const cargoMetadata = JSON.parse(
+const cargoMetadata: unknown = JSON.parse(
   runCargo(["metadata", "--locked", "--format-version", "1"]),
-) as Json;
+);
+const cargoMetadataObject = objectValue(cargoMetadata, "cargo metadata");
 const cargoVersion = runCargo(["--version"]);
 const cargoChecksums = readCargoChecksums(cargoLockfile.toString("utf8"));
-const cargoPackageById = new Map<string, Json>(
-  (cargoMetadata.packages as Json[]).map((entry: Json) => [entry.id, entry]),
-);
-const cargoNodeById = new Map<string, Json>(
-  ((cargoMetadata.resolve?.nodes ?? []) as Json[]).map((entry: Json) => [
-    entry.id,
+const cargoPackageById = new Map<string, JsonObject>();
+for (const [index, entry] of objectArray(
+  cargoMetadataObject.packages,
+  "cargo packages",
+).entries()) {
+  cargoPackageById.set(
+    stringValue(entry.id, `cargo packages[${index}].id`),
     entry,
-  ]),
-);
-const cargoReachable = new Set();
+  );
+}
+const cargoResolve = objectValue(cargoMetadataObject.resolve, "cargo resolve");
+const cargoNodeById = new Map<string, JsonObject>();
+for (const [index, entry] of objectArray(
+  cargoResolve.nodes,
+  "cargo resolve nodes",
+).entries()) {
+  cargoNodeById.set(
+    stringValue(entry.id, `cargo resolve nodes[${index}].id`),
+    entry,
+  );
+}
+const cargoReachable = new Set<string>();
 
 function cargoKey(id: string) {
   return `cargo:${id}`;
@@ -199,7 +299,10 @@ function visitCargo(id: string): void {
   if (cargoReachable.has(id)) return;
   cargoReachable.add(id);
   const node = cargoNodeById.get(id);
-  for (const dependencyId of node?.dependencies ?? []) {
+  for (const dependencyId of stringArray(
+    node?.dependencies ?? [],
+    `cargo dependencies of ${id}`,
+  )) {
     relationships.add(
       `${spdxId(cargoKey(id))} DEPENDS_ON ${spdxId(cargoKey(dependencyId))}`,
     );
@@ -207,7 +310,10 @@ function visitCargo(id: string): void {
   }
 }
 
-for (const memberId of cargoMetadata.workspace_members) {
+for (const memberId of stringArray(
+  cargoMetadataObject.workspace_members,
+  "cargo workspace members",
+)) {
   relationships.add(
     `${spdxId(rootKey)} DEPENDS_ON ${spdxId(cargoKey(memberId))}`,
   );
@@ -227,70 +333,82 @@ const dependencyPackages = [...packageByKey.entries()]
   .sort(([left], [right]) => left.localeCompare(right))
   .map(([key, dependency]) => {
     const metadata = licenseByPackage.get(key) ?? {};
+    const name = stringValue(dependency.name, `${key} name`);
+    const version = stringValue(dependency.version, `${key} version`);
     const integrity = npmIntegrityByKey.get(key);
     if (!integrity)
       throw new Error(`pnpm lock omitted package integrity for ${key}`);
     return {
       SPDXID: spdxId(key),
-      name: dependency.name,
-      versionInfo: dependency.version,
+      name,
+      versionInfo: version,
       downloadLocation: "NOASSERTION",
       filesAnalyzed: false,
       licenseConcluded: "NOASSERTION",
-      licenseDeclared: metadata.license || "NOASSERTION",
+      licenseDeclared:
+        typeof metadata.license === "string" ? metadata.license : "NOASSERTION",
       copyrightText: "NOASSERTION",
       primaryPackagePurpose: "LIBRARY",
       checksums: [checksumFromIntegrity(integrity)],
-      ...(metadata.homepage ? { homepage: metadata.homepage } : {}),
+      ...(typeof metadata.homepage === "string"
+        ? { homepage: metadata.homepage }
+        : {}),
       externalRefs: [
         {
           referenceCategory: "PACKAGE-MANAGER",
           referenceType: "purl",
-          referenceLocator: `pkg:npm/${purlName(dependency.name)}@${encodeURIComponent(dependency.version)}`,
+          referenceLocator: `pkg:npm/${purlName(name)}@${encodeURIComponent(version)}`,
         },
       ],
     };
   });
 
 const cargoPackages = [...cargoReachable].sort().map((id) => {
-  const dependency = cargoPackageById.get(String(id));
+  const dependency = cargoPackageById.get(id);
   if (!dependency) throw new Error(`cargo metadata omitted package ${id}`);
-  if (!dependency.license)
+  const name = stringValue(dependency.name, `cargo package ${id} name`);
+  const version = stringValue(
+    dependency.version,
+    `cargo package ${id} version`,
+  );
+  const license =
+    typeof dependency.license === "string" ? dependency.license : undefined;
+  if (!license)
     throw new Error(
-      `cargo package omitted license metadata: ${dependency.name}@${dependency.version}`,
+      `cargo package omitted license metadata: ${name}@${version}`,
     );
-  const packageKey = `${dependency.name}@${dependency.version}`;
+  const packageKey = `${name}@${version}`;
   const registryChecksum = cargoChecksums.get(packageKey);
-  const runtimeBinary = (buildManifest.files as Json[]).find(
-    (entry: Json) => entry.path === "bin/sumi-runtime-supervisor",
+  const runtimeBinary = buildManifestFiles.find(
+    (entry) => entry.path === "bin/sumi-runtime-supervisor",
   );
   const checksum =
     registryChecksum ??
-    (dependency.name === "sumi-runtime-supervisor"
-      ? runtimeBinary?.sha256
-      : undefined);
+    (name === "sumi-runtime-supervisor" ? runtimeBinary?.sha256 : undefined);
   if (!checksum)
     throw new Error(
       `cargo lock/runtime manifest omitted component checksum for ${packageKey}`,
     );
   return {
-    SPDXID: spdxId(cargoKey(String(id))),
-    name: dependency.name,
-    versionInfo: dependency.version,
+    SPDXID: spdxId(cargoKey(id)),
+    name,
+    versionInfo: version,
     downloadLocation: "NOASSERTION",
     filesAnalyzed: false,
     licenseConcluded: "NOASSERTION",
-    licenseDeclared: dependency.license,
+    licenseDeclared: license,
     copyrightText: "NOASSERTION",
     primaryPackagePurpose:
-      dependency.name === "sumi-runtime-supervisor" ? "APPLICATION" : "LIBRARY",
+      name === "sumi-runtime-supervisor" ? "APPLICATION" : "LIBRARY",
     checksums: [{ algorithm: "SHA256", checksumValue: checksum }],
-    ...(dependency.homepage ? { homepage: dependency.homepage } : {}),
+    ...(typeof dependency.homepage === "string"
+      ? { homepage: dependency.homepage }
+      : {}),
     externalRefs: [
       {
         referenceCategory: "PACKAGE-MANAGER",
         referenceType: "purl",
-        referenceLocator: `pkg:cargo/${encodeURIComponent(dependency.name)}@${encodeURIComponent(dependency.version)}`,
+        referenceLocator: `pkg:cargo/${encodeURIComponent(name)}@${encodeURIComponent(version)}`,
       },
     ],
   };
@@ -308,7 +426,7 @@ const generationContext = {
   source_commit: sourceCommit,
   source_tree_state: "clean",
   build_manifest: "dist/BUILD-MANIFEST.json",
-  subject_sha256: buildManifest.content_set_sha256,
+  subject_sha256: buildContentSetSha256,
   dependency_lock_sha256: lockDigest,
 };
 const rootId = spdxId(rootKey);
@@ -316,8 +434,8 @@ const sbom = {
   spdxVersion: "SPDX-2.3",
   dataLicense: "CC0-1.0",
   SPDXID: "SPDXRef-DOCUMENT",
-  name: `${packageJson.name}-${packageJson.version}-runtime`,
-  documentNamespace: `https://github.com/starSumi/sumi-agentic-voice-crm/sbom/${sourceCommit}/${buildManifest.content_set_sha256}`,
+  name: `${packageName}-${packageVersion}-runtime`,
+  documentNamespace: `https://github.com/starSumi/sumi-agentic-voice-crm/sbom/${sourceCommit}/${buildContentSetSha256}`,
   creationInfo: {
     created: sourceCommitDate,
     creators: [
@@ -332,19 +450,19 @@ const sbom = {
   packages: [
     {
       SPDXID: rootId,
-      name: packageJson.name,
-      versionInfo: packageJson.version,
+      name: packageName,
+      versionInfo: packageVersion,
       downloadLocation: "NOASSERTION",
       filesAnalyzed: false,
-      licenseConcluded: packageJson.license || "NOASSERTION",
-      licenseDeclared: packageJson.license || "NOASSERTION",
+      licenseConcluded: packageLicense || "NOASSERTION",
+      licenseDeclared: packageLicense || "NOASSERTION",
       copyrightText: "NOASSERTION",
       supplier: "Organization: starSumi",
       primaryPackagePurpose: "APPLICATION",
       checksums: [
         {
           algorithm: "SHA256",
-          checksumValue: buildManifest.content_set_sha256,
+          checksumValue: buildContentSetSha256,
         },
       ],
       comment:

@@ -10,6 +10,7 @@
     "eslint/no-control-regex": "off",
     "eslint/no-unmodified-loop-condition": "off",
     "oxc/no-map-spread": "off",
+    "typescript/no-explicit-any": "error",
     "unicorn/consistent-function-scoping": "off",
     "unicorn/no-array-sort": "off"
   },

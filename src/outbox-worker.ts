@@ -1,23 +1,39 @@
 import { fileURLToPath } from "node:url";
-import { createControlEngine, DEFAULT_TEARDOWN_TIMEOUT_MS, type ControlEngine } from "./control/index.ts";
+import {
+  createControlEngine,
+  DEFAULT_TEARDOWN_TIMEOUT_MS,
+  type ControlEngine,
+} from "./control/index.ts";
 import { createPostgresStore } from "./postgres-store.ts";
-import { OutboxRelay, outboxConfig } from "./outbox-relay.ts";
+import {
+  OutboxRelay,
+  outboxConfig,
+  type OutboxRelayNotification,
+  type OutboxRelayResult,
+} from "./outbox-relay.ts";
 import { validateProductionConfig } from "./production-config.ts";
 
-type AnyRecord = Record<string, any>;
 type WorkerTask = { result: Promise<void> };
-type WorkerStore = AnyRecord;
+type WorkerStore = { close(): unknown | PromiseLike<unknown> };
+type WorkerRelay = {
+  runOnce(options?: { signal?: AbortSignal }): Promise<OutboxRelayResult>;
+};
 type WorkerConfig = ReturnType<typeof outboxConfig>;
 
 function teardownTimeout(env: NodeJS.ProcessEnv): number {
   const value = Number(env.RUNTIME_TEARDOWN_MS || DEFAULT_TEARDOWN_TIMEOUT_MS);
   if (!Number.isSafeInteger(value) || value <= 0 || value > 30_000) {
-    throw new Error("RUNTIME_TEARDOWN_MS must be a positive integer no greater than 30000");
+    throw new Error(
+      "RUNTIME_TEARDOWN_MS must be a positive integer no greater than 30000",
+    );
   }
   return value;
 }
 
-async function waitForPoll(signal: AbortSignal, delayMs: number): Promise<void> {
+async function waitForPoll(
+  signal: AbortSignal,
+  delayMs: number,
+): Promise<void> {
   signal.throwIfAborted();
   await new Promise((resolve, reject) => {
     const finish = () => {
@@ -35,8 +51,21 @@ async function waitForPoll(signal: AbortSignal, delayMs: number): Promise<void> 
   });
 }
 
-export function createOutboxWorker({ store, relay, control, config }: { store?: WorkerStore; relay?: OutboxRelay; control?: ControlEngine; config?: WorkerConfig } = {}) {
-  if (!store || !relay || !control || !config) throw new TypeError("outbox worker requires store, relay, control and config");
+export function createOutboxWorker({
+  store,
+  relay,
+  control,
+  config,
+}: {
+  store?: WorkerStore;
+  relay?: WorkerRelay;
+  control?: ControlEngine;
+  config?: WorkerConfig;
+} = {}) {
+  if (!store || !relay || !control || !config)
+    throw new TypeError(
+      "outbox worker requires store, relay, control and config",
+    );
   const durableStore = store;
   const durableRelay = relay;
   const runtimeControl = control;
@@ -47,7 +76,8 @@ export function createOutboxWorker({ store, relay, control, config }: { store?: 
   async function loop(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
       const result = await durableRelay.runOnce({ signal });
-      if (result.claimed === 0) await waitForPoll(signal, workerConfig.pollIntervalMs);
+      if (result.claimed === 0)
+        await waitForPoll(signal, workerConfig.pollIntervalMs);
     }
   }
 
@@ -61,9 +91,18 @@ export function createOutboxWorker({ store, relay, control, config }: { store?: 
   function close(reason?: unknown): Promise<void> {
     closePromise ??= (async () => {
       const errors = [];
-      try { await runtimeControl.close({ reason }); } catch (error: unknown) { errors.push(error); }
-      try { await durableStore.close(); } catch (error: unknown) { errors.push(error); }
-      if (errors.length) throw new AggregateError(errors, "outbox worker shutdown failed");
+      try {
+        await runtimeControl.close({ reason });
+      } catch (error: unknown) {
+        errors.push(error);
+      }
+      try {
+        await durableStore.close();
+      } catch (error: unknown) {
+        errors.push(error);
+      }
+      if (errors.length)
+        throw new AggregateError(errors, "outbox worker shutdown failed");
     })();
     return closePromise;
   }
@@ -71,25 +110,40 @@ export function createOutboxWorker({ store, relay, control, config }: { store?: 
   return Object.freeze({
     start,
     close,
-    get task() { return task; },
+    get task() {
+      return task;
+    },
   });
 }
 
-export function createConfiguredOutboxWorker({ env = process.env, onResult }: { env?: NodeJS.ProcessEnv; onResult?: (result: AnyRecord) => void } = {}) {
+export function createConfiguredOutboxWorker({
+  env = process.env,
+  onResult,
+}: {
+  env?: NodeJS.ProcessEnv;
+  onResult?: (result: OutboxRelayNotification) => void;
+} = {}) {
   validateProductionConfig(env, { component: "outbox" });
   const store = createPostgresStore({ env });
   const config = outboxConfig(env);
-  const control = createControlEngine({ teardownTimeoutMs: teardownTimeout(env) });
+  const control = createControlEngine({
+    teardownTimeoutMs: teardownTimeout(env),
+  });
   const relay = new OutboxRelay({
     store,
     config,
     control,
-    onResult: onResult ?? ((result: AnyRecord) => console.log(JSON.stringify({
-      level: result.status === "published" ? "info" : "warn",
-      component: "outbox-relay",
-      ...result,
-      time: new Date().toISOString(),
-    }))),
+    onResult:
+      onResult ??
+      ((result: OutboxRelayNotification) =>
+        console.log(
+          JSON.stringify({
+            level: result.status === "published" ? "info" : "warn",
+            component: "outbox-relay",
+            ...result,
+            time: new Date().toISOString(),
+          }),
+        )),
   });
   return createOutboxWorker({ store, relay, control, config });
 }
@@ -101,13 +155,17 @@ async function main() {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
       closing = true;
-      void worker.close(Object.assign(new Error(`${signal} received`), {
-        name: "AbortError",
-        breakerEligible: false,
-      })).catch((error: unknown) => {
-        console.error(error);
-        process.exitCode = 1;
-      });
+      void worker
+        .close(
+          Object.assign(new Error(`${signal} received`), {
+            name: "AbortError",
+            breakerEligible: false,
+          }),
+        )
+        .catch((error: unknown) => {
+          console.error(error);
+          process.exitCode = 1;
+        });
     });
   }
   try {
@@ -119,4 +177,5 @@ async function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1])
+  await main();

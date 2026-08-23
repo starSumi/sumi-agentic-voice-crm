@@ -13,6 +13,33 @@ import { understanding } from "../src/contracts.ts";
 import { validateProtocol } from "../src/protocol-validation.ts";
 
 const REQUEST_ID = "req_0123456789abcdef01234567";
+type BeginInteractionCall = {
+  readonly input_payload: { readonly conversation_id?: string };
+  readonly request_fingerprint: string;
+};
+type CompleteInteractionCall = { readonly outcome: string };
+type FailedInteractionCall = { readonly error_code: string };
+type ReviewDecisionCall = {
+  readonly correction: {
+    readonly entities: { readonly stage: { readonly value: string } };
+  };
+  readonly decision: string;
+  readonly review_id: string;
+};
+
+function isObjectValue(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function objectValue(value: unknown): Readonly<Record<string, unknown>> {
+  if (!isObjectValue(value)) {
+    throw new TypeError("expected object value");
+  }
+  return value;
+}
+
 const allowAuthorization = async () => ({
   effect: "allow",
   policy_version: "test-policy",
@@ -41,7 +68,7 @@ function readUnderstanding(transcript = "find acme") {
   });
 }
 
-function asset(overrides = {}) {
+function asset(overrides: Readonly<Record<string, unknown>> = {}) {
   return {
     asset_id: "ast_0123456789abcdef0123",
     url: "/v1/assets/ast_0123456789abcdef0123",
@@ -53,47 +80,48 @@ function asset(overrides = {}) {
   };
 }
 
-function askFixture(overrides = {}) {
+function askFixture(overrides: Readonly<Record<string, unknown>> = {}) {
   const calls = {
-    begin: [],
-    checkpoint: [],
-    complete: [],
-    failed: [],
-    abandoned: [],
-    reviews: [],
-    crm: [],
+    begin: [] as BeginInteractionCall[],
+    checkpoint: [] as unknown[],
+    complete: [] as CompleteInteractionCall[],
+    failed: [] as FailedInteractionCall[],
+    abandoned: [] as unknown[],
+    reviews: [] as unknown[],
+    crm: [] as unknown[],
   };
   const ports = {
     authorize: allowAuthorization,
-    beginInteraction: async (args) => {
+    beginInteraction: async (args: BeginInteractionCall) => {
       calls.begin.push(args);
       return { replay: false };
     },
-    checkpointInteraction: async (args) => {
+    checkpointInteraction: async (args: unknown) => {
       calls.checkpoint.push(args);
     },
-    completeInteraction: async (args) => {
+    completeInteraction: async (args: CompleteInteractionCall) => {
       calls.complete.push(args);
     },
-    failInteraction: async (args) => {
+    failInteraction: async (args: FailedInteractionCall) => {
       calls.failed.push(args);
     },
-    abandonInteraction: async (args) => {
+    abandonInteraction: async (args: unknown) => {
       calls.abandoned.push(args);
     },
-    createReview: async (args) => {
+    createReview: async (args: unknown) => {
       calls.reviews.push(args);
       return {
         id: "rev_abcd",
         expires_at: "2030-01-01T00:00:00.000Z",
       };
     },
-    executeCrm: async (args) => {
+    executeCrm: async (args: unknown) => {
       calls.crm.push(args);
       return { action: "read_only", resource: null, aggregate_version: 0 };
     },
     recordInputAsset: async () => {},
-    recordTts: async (_key, _fingerprint, persisted) => persisted,
+    recordTts: async (_key: string, _fingerprint: string, persisted: unknown) =>
+      persisted,
     transcribe: async () => ({
       text: "find acme",
       language: "zh",
@@ -102,7 +130,7 @@ function askFixture(overrides = {}) {
       model: "asr-test-1",
       duration_ms: 1,
     }),
-    understand: async (transcript) => readUnderstanding(transcript),
+    understand: async (transcript: string) => readUnderstanding(transcript),
     synthesize: async () =>
       asset({ data_base64: Buffer.from("audio").toString("base64") }),
     ttsDefaultFormat: () => "mp3",
@@ -112,7 +140,7 @@ function askFixture(overrides = {}) {
       byte_length: 10,
       sha256: "a".repeat(64),
     }),
-    persistAudioAsset: async (generated) => ({ asset: generated }),
+    persistAudioAsset: async (generated: unknown) => ({ asset: generated }),
     validateResponse: validateProtocol,
     intentProviderName: "test",
     now: () => 100,
@@ -121,7 +149,7 @@ function askFixture(overrides = {}) {
   return { service: new AskService(ports), calls };
 }
 
-function textCommand(overrides = {}) {
+function textCommand(overrides: Readonly<Record<string, unknown>> = {}) {
   return normalizeAskCommand({
     idempotency_key: "ask-key-001",
     input: { type: "text", text: " find acme " },
@@ -144,16 +172,16 @@ test("AskService completes a read-only command without HTTP and binds conversati
   );
 
   assert.equal(first.kind, "ask.completed");
-  assert.equal(first.response.status, "completed");
+  assert.equal(objectValue(first.response).status, "completed");
   assert.equal(second.kind, "ask.completed");
   assert.equal(calls.crm.length, 2);
   assert.equal(calls.reviews.length, 0);
-  assert.equal(calls.complete[0].outcome, "completed");
-  assert.equal(calls.begin[0].input_payload.conversation_id, "conversation-a");
-  assert.equal(calls.begin[1].input_payload.conversation_id, "conversation-b");
+  assert.equal(calls.complete[0]?.outcome, "completed");
+  assert.equal(calls.begin[0]?.input_payload.conversation_id, "conversation-a");
+  assert.equal(calls.begin[1]?.input_payload.conversation_id, "conversation-b");
   assert.notEqual(
-    calls.begin[0].request_fingerprint,
-    calls.begin[1].request_fingerprint,
+    calls.begin[0]?.request_fingerprint,
+    calls.begin[1]?.request_fingerprint,
   );
 });
 
@@ -183,9 +211,12 @@ test("AskService forces every mutating understanding through review", async () =
   );
 
   assert.equal(outcome.kind, "ask.review_required");
-  assert.equal(outcome.response.understanding.needs_confirmation, true);
+  assert.equal(
+    objectValue(objectValue(outcome.response).understanding).needs_confirmation,
+    true,
+  );
   assert.equal(calls.reviews.length, 1);
-  assert.equal(calls.complete[0].outcome, "review_required");
+  assert.equal(calls.complete[0]?.outcome, "review_required");
 });
 
 test("AskService replays a completed interaction without invoking providers or CRM", async () => {
@@ -198,7 +229,7 @@ test("AskService replays a completed interaction without invoking providers or C
     crm: { action: "read_only", resource: null, aggregate_version: 0 },
   };
   const { service, calls } = askFixture({
-    beginInteraction: async (args) => {
+    beginInteraction: async (args: BeginInteractionCall) => {
       calls.begin.push(args);
       return { replay: true, response, http_status: 200 };
     },
@@ -219,15 +250,20 @@ test("AskService replays a completed interaction without invoking providers or C
 });
 
 test("TtsService and ReviewService delegate normalized commands to runtime ports", async () => {
-  const calls = { synthesize: [], persist: [], record: [], decide: [] };
+  const calls = {
+    synthesize: [] as unknown[][],
+    persist: [] as unknown[][],
+    record: [] as unknown[][],
+    decide: [] as ReviewDecisionCall[],
+  };
   const tts = new TtsService({
     authorize: allowAuthorization,
     replayTts: async () => undefined,
-    synthesize: async (...args) => {
+    synthesize: async (...args: unknown[]) => {
       calls.synthesize.push(args);
       return asset({ data_base64: Buffer.from("tts").toString("base64") });
     },
-    persistAudioAsset: async (...args) => {
+    persistAudioAsset: async (...args: unknown[]) => {
       calls.persist.push(args);
       return {
         asset: asset(),
@@ -236,7 +272,7 @@ test("TtsService and ReviewService delegate normalized commands to runtime ports
         sha256: "b".repeat(64),
       };
     },
-    recordTts: async (...args) => {
+    recordTts: async (...args: unknown[]) => {
       calls.record.push(args);
       return args[2];
     },
@@ -244,7 +280,7 @@ test("TtsService and ReviewService delegate normalized commands to runtime ports
   });
   const review = new ReviewService({
     authorize: allowAuthorization,
-    decideReview: async (args) => {
+    decideReview: async (args: ReviewDecisionCall) => {
       calls.decide.push(args);
       return {
         review_id: args.review_id,
@@ -275,12 +311,12 @@ test("TtsService and ReviewService delegate normalized commands to runtime ports
   );
 
   assert.equal(ttsOutcome.kind, "tts.created");
-  assert.equal(calls.synthesize[0][0], "hello");
+  assert.equal(calls.synthesize[0]?.[0], "hello");
   assert.equal(calls.persist.length, 1);
   assert.equal(calls.record.length, 1);
   assert.equal(reviewOutcome.kind, "review.decided");
-  assert.equal(calls.decide[0].review_id, "rev_abcd");
-  assert.equal(calls.decide[0].correction.entities.stage.value, "Closed Won");
+  assert.equal(calls.decide[0]?.review_id, "rev_abcd");
+  assert.equal(calls.decide[0]?.correction.entities.stage.value, "Closed Won");
 });
 
 test("AskService marks provider and storage failures on the interaction", async (t) => {
@@ -296,7 +332,7 @@ test("AskService marks provider and storage failures on the interaction", async 
 
     await assert.rejects(service.execute(context(), textCommand()), failure);
     assert.equal(calls.failed.length, 1);
-    assert.equal(calls.failed[0].error_code, "UPSTREAM_UNAVAILABLE");
+    assert.equal(calls.failed[0]?.error_code, "UPSTREAM_UNAVAILABLE");
   });
 
   await t.test("input storage failure", async () => {
@@ -325,7 +361,7 @@ test("AskService marks provider and storage failures on the interaction", async 
 
     await assert.rejects(service.execute(context(), command), failure);
     assert.equal(calls.failed.length, 1);
-    assert.equal(calls.failed[0].error_code, "UPSTREAM_UNAVAILABLE");
+    assert.equal(calls.failed[0]?.error_code, "UPSTREAM_UNAVAILABLE");
   });
 });
 

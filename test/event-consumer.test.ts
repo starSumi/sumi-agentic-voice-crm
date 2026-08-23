@@ -3,8 +3,23 @@ import test from "node:test";
 import { consumeEvent } from "../src/event-consumer.ts";
 import { createMemoryMessageJobQueue } from "../src/message-job-queue.ts";
 
-test("event consumer completes one receipt and treats replay as duplicate", async () => {
+function eventStore() {
   const store = createMemoryMessageJobQueue();
+  return {
+    claimEventDelivery: async (
+      input: Parameters<typeof store.claimEventDelivery>[0],
+    ) => store.claimEventDelivery(input),
+    completeEventDelivery: async (
+      input: Parameters<typeof store.completeEventDelivery>[0],
+    ) => store.completeEventDelivery(input),
+    releaseEventDelivery: async (
+      input: Parameters<typeof store.releaseEventDelivery>[0],
+    ) => store.releaseEventDelivery(input),
+  };
+}
+
+test("event consumer completes one receipt and treats replay as duplicate", async () => {
+  const store = eventStore();
   let calls = 0;
   const input = {
     store,
@@ -30,7 +45,7 @@ test("event consumer completes one receipt and treats replay as duplicate", asyn
 });
 
 test("event consumer releases failed handlers for retry", async () => {
-  const store = createMemoryMessageJobQueue();
+  const store = eventStore();
   const input = {
     store,
     tenant_id: "tenant_demo",

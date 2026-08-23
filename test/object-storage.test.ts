@@ -22,14 +22,17 @@ const env = {
 };
 
 test("S3 storage uploads private encrypted audio and returns an OSS-compatible signed download", async () => {
-  const commands = [];
+  const commands: unknown[] = [];
   const client = {
-    send: async (command) => {
+    send: async (command: unknown) => {
       commands.push(command);
       return {};
     },
   };
-  const signed = [];
+  const signed: Array<{
+    command: GetObjectCommand;
+    options: { expiresIn: number };
+  }> = [];
   const storage = new S3ObjectStorage({
     env,
     client,
@@ -49,29 +52,30 @@ test("S3 storage uploads private encrypted audio and returns an OSS-compatible s
     tenantId: "tenant-a",
     kind: "tts",
   });
-  assert.ok(commands[0] instanceof PutObjectCommand);
-  assert.equal(commands[0].input.Bucket, "private-audio");
-  assert.equal(commands[0].input.ServerSideEncryption, "AES256");
-  assert.match(commands[0].input.Key, /^voice-crm\/tenant-a\/tts\/ast_/);
+  const [putCommand] = commands;
+  assert.ok(putCommand instanceof PutObjectCommand);
+  assert.equal(putCommand.input.Bucket, "private-audio");
+  assert.equal(putCommand.input.ServerSideEncryption, "AES256");
+  assert.match(putCommand.input.Key ?? "", /^voice-crm\/tenant-a\/tts\/ast_/);
   assert.equal("data_base64" in persisted.asset, false);
   assert.equal("byte_length" in persisted.asset, false);
   assert.equal("sha256" in persisted.asset, false);
   assert.equal(persisted.byte_length, Buffer.byteLength("private audio bytes"));
   assert.match(persisted.sha256, /^[0-9a-f]{64}$/);
-  assert.equal(persisted.object_key, commands[0].input.Key);
+  assert.equal(persisted.object_key, putCommand.input.Key);
   assert.equal(
-    await storage.downloadUrl(persisted.object_key, {
-      contentType: "audio/mpeg",
-    }),
+    await storage.downloadUrl(persisted.object_key),
     "https://objects.example.test/signed",
   );
-  assert.ok(signed[0].command instanceof GetObjectCommand);
-  assert.deepEqual(signed[0].command.input, {
+  const [signedRequest] = signed;
+  assert.ok(signedRequest);
+  assert.ok(signedRequest.command instanceof GetObjectCommand);
+  assert.deepEqual(signedRequest.command.input, {
     Bucket: "private-audio",
     Key: persisted.object_key,
   });
-  assert.equal("ResponseContentType" in signed[0].command.input, false);
-  assert.deepEqual(signed[0].options, { expiresIn: 45 });
+  assert.equal("ResponseContentType" in signedRequest.command.input, false);
+  assert.deepEqual(signedRequest.options, { expiresIn: 45 });
 });
 
 test("production object storage fails closed without S3 configuration", () => {
@@ -103,11 +107,11 @@ test("production object storage fails closed without S3 configuration", () => {
 });
 
 test("S3 storage health uses a bucket-location probe compatible with Aliyun OSS", async () => {
-  const commands = [];
+  const commands: unknown[] = [];
   const storage = new S3ObjectStorage({
     env,
     client: {
-      send: async (command) => {
+      send: async (command: unknown) => {
         commands.push(command);
         return {};
       },
@@ -118,11 +122,11 @@ test("S3 storage health uses a bucket-location probe compatible with Aliyun OSS"
 });
 
 test("input audio is stored privately without returning its bytes", async () => {
-  const commands = [];
+  const commands: unknown[] = [];
   const storage = new S3ObjectStorage({
     env,
     client: {
-      send: async (command) => {
+      send: async (command: unknown) => {
         commands.push(command);
         return {};
       },
@@ -139,6 +143,9 @@ test("input audio is stored privately without returning its bytes", async () => 
   );
   assert.match(persisted.object_key, /\/input\//);
   assert.equal(persisted.asset.mime_type, "audio/wav");
-  assert.equal(commands[0].input.Body.toString(), "input audio");
+  const [putCommand] = commands;
+  assert.ok(putCommand instanceof PutObjectCommand);
+  assert.ok(putCommand.input.Body instanceof Uint8Array);
+  assert.equal(Buffer.from(putCommand.input.Body).toString(), "input audio");
   assert.equal("data_base64" in persisted.asset, false);
 });

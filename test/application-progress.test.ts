@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ProgressEvent } from "../src/application/progress-event-bus.ts";
 import {
   AskService,
   normalizeAskCommand,
@@ -22,7 +23,7 @@ function context() {
   });
 }
 
-function askCommand(overrides = {}) {
+function askCommand(overrides: Readonly<Record<string, unknown>> = {}) {
   return normalizeAskCommand({
     idempotency_key: "progress-key-001",
     input: { type: "audio", data: AUDIO_BYTES, content_type: "audio/wav" },
@@ -33,7 +34,7 @@ function askCommand(overrides = {}) {
   });
 }
 
-function progressPorts(overrides = {}) {
+function progressPorts(overrides: Readonly<Record<string, unknown>> = {}) {
   return {
     authorize: async () => ({
       effect: "allow",
@@ -100,23 +101,27 @@ function progressPorts(overrides = {}) {
       byte_length: 25,
       sha256: "b".repeat(64),
     }),
-    recordTts: async (_key, _fingerprint, asset) => asset,
+    recordTts: async (_key: string, _fingerprint: string, asset: unknown) =>
+      asset,
     replayTts: async () => undefined,
-    decideReview: async (args) => ({
+    decideReview: async (args: {
+      readonly decision: string;
+      readonly review_id: string;
+    }) => ({
       review_id: args.review_id,
       status: "approved",
       decision: { decision: args.decision },
     }),
-    validateResponse: (_schema, response) => response,
+    validateResponse: (_schema: string, response: unknown) => response,
     ...overrides,
   };
 }
 
 test("AskService emits ordered, flat, redacted progress milestones", async () => {
-  const events = [];
+  const events: ProgressEvent[] = [];
   const service = new AskService(
     progressPorts({
-      progressSink: (event) => events.push(event),
+      progressSink: (event: ProgressEvent) => events.push(event),
     }),
   );
 
@@ -218,10 +223,10 @@ test("AskService emits ordered, flat, redacted progress milestones", async () =>
 
 test("AskService emits review, replay, and failure milestones", async (t) => {
   await t.test("review required", async () => {
-    const events = [];
+    const events: ProgressEvent[] = [];
     const service = new AskService(
       progressPorts({
-        progressSink: (event) => events.push(event),
+        progressSink: (event: ProgressEvent) => events.push(event),
         understand: async () =>
           understanding({
             intent: "crm.deal.update_stage",
@@ -242,15 +247,15 @@ test("AskService emits review, replay, and failure milestones", async (t) => {
       events.slice(-2).map((event) => event.type),
       ["review.required", "interaction.completed"],
     );
-    assert.equal(events.at(-2).review_id, "rev_progress");
+    assert.equal(events.at(-2)?.review_id, "rev_progress");
   });
 
   await t.test("replay", async () => {
-    const events = [];
+    const events: ProgressEvent[] = [];
     const response = { request_id: REQUEST_ID, status: "completed" };
     const service = new AskService(
       progressPorts({
-        progressSink: (event) => events.push(event),
+        progressSink: (event: ProgressEvent) => events.push(event),
         beginInteraction: async () => ({ replay: true, response }),
         transcribe: async () => {
           throw new Error("provider ran during replay");
@@ -266,21 +271,21 @@ test("AskService emits review, replay, and failure milestones", async (t) => {
   });
 
   await t.test("failed", async () => {
-    const events = [];
+    const events: ProgressEvent[] = [];
     const failure = Object.assign(new Error("private prompt and transcript"), {
       code: "UPSTREAM_UNAVAILABLE",
     });
     const service = new AskService(
       progressPorts({
-        progressSink: (event) => events.push(event),
+        progressSink: (event: ProgressEvent) => events.push(event),
         understand: async () => {
           throw failure;
         },
       }),
     );
     await assert.rejects(service.execute(context(), askCommand()), failure);
-    assert.equal(events.at(-1).type, "interaction.failed");
-    assert.equal(events.at(-1).error_code, "UPSTREAM_UNAVAILABLE");
+    assert.equal(events.at(-1)?.type, "interaction.failed");
+    assert.equal(events.at(-1)?.error_code, "UPSTREAM_UNAVAILABLE");
     assert.equal(
       JSON.stringify(events.at(-1)).includes(failure.message),
       false,
@@ -299,9 +304,9 @@ test("sink failures are isolated and TTS/Review services emit milestones", async
   );
   assert.equal(askOutcome.kind, "ask.completed");
 
-  const events = [];
+  const events: ProgressEvent[] = [];
   const ports = progressPorts({
-    eventSink: { emit: (event) => events.push(event) },
+    eventSink: { emit: (event: ProgressEvent) => events.push(event) },
   });
   const tts = new TtsService(ports);
   const review = new ReviewService(ports);

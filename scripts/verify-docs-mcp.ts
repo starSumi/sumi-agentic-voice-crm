@@ -5,8 +5,48 @@ import { access, readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
+import {
+  jsonObject,
+  stringValue,
+  type JsonObject,
+} from "./docs-verify-helpers.ts";
 
-type Json = Record<string, any>;
+type JsonRpcResponse = Readonly<{
+  jsonrpc: "2.0";
+  id: number;
+  result?: unknown;
+  error?: unknown;
+}>;
+type DocsResult = Readonly<{ path: string; url?: string; content?: string }>;
+
+function objectArray(value: unknown, label: string): JsonObject[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
+  return value.map((entry) => jsonObject(entry, label));
+}
+
+function jsonRpcResponse(value: unknown): JsonRpcResponse {
+  const message = jsonObject(value, "JSON-RPC response");
+  if (message.jsonrpc !== "2.0" || typeof message.id !== "number") {
+    throw new TypeError("invalid JSON-RPC response envelope");
+  }
+  return {
+    jsonrpc: "2.0",
+    id: message.id,
+    result: message.result,
+    error: message.error,
+  };
+}
+
+function docsResult(value: unknown, label: string): DocsResult {
+  const entry = jsonObject(value, label);
+  if (typeof entry.path !== "string")
+    throw new TypeError(`${label} path must be a string`);
+  if (entry.url !== undefined && typeof entry.url !== "string")
+    throw new TypeError(`${label} url must be a string`);
+  if (entry.content !== undefined && typeof entry.content !== "string")
+    throw new TypeError(`${label} content must be a string`);
+  return { path: entry.path, url: entry.url, content: entry.content };
+}
 
 const outputRoot = resolve("artifacts", "docs-site");
 const mcpEntry = process.env.SUMI_DOCS_MCP_ENTRY
@@ -65,12 +105,12 @@ const child = spawn(
 );
 const stderr: string[] = [];
 child.stderr.on("data", (chunk) => stderr.push(chunk.toString()));
-const responses = new Map<number, Json>();
+const responses = new Map<number, JsonRpcResponse>();
 const lines = createInterface({ input: child.stdout });
 lines.on("line", (line) => {
   try {
-    const message = JSON.parse(line) as Json;
-    if (typeof message.id === "number") responses.set(message.id, message);
+    const message = jsonRpcResponse(JSON.parse(line));
+    responses.set(message.id, message);
   } catch {
     // Timeout and response assertions report protocol corruption below.
   }
@@ -84,7 +124,7 @@ const meta = {
   },
   "io.modelcontextprotocol/clientCapabilities": {},
 };
-const calls = [
+const calls: Array<readonly [number, string, JsonObject]> = [
   [1, "tools/list", {}],
   [2, "tools/call", { name: "list_docs", arguments: {} }],
   [
@@ -127,7 +167,7 @@ const calls = [
 ];
 
 try {
-  for (const [id, method, params] of calls as Array<[number, string, Json]>) {
+  for (const [id, method, params] of calls) {
     child.stdin.write(
       `${JSON.stringify({ jsonrpc: "2.0", id, method, params: { ...params, _meta: meta } })}\n`,
     );
@@ -142,59 +182,120 @@ try {
     `MCP responses timed out. stderr: ${stderr.join("")}`,
   );
 
-  const toolNames = responses
-    .get(1)
-    ?.result?.tools?.map((tool: Json) => tool.name);
+  const toolsResult = jsonObject(responses.get(1)?.result, "tools/list result");
+  const toolNames = objectArray(toolsResult.tools, "tools/list tools").map(
+    (tool) => {
+      if (typeof tool.name !== "string")
+        throw new TypeError("tool name must be a string");
+      return tool.name;
+    },
+  );
   assert.deepEqual(
     new Set(toolNames),
     new Set(["list_docs", "search_docs", "fetch_doc", "get_openapi_spec"]),
   );
-  const parseToolResult = (id: number): any =>
-    JSON.parse(responses.get(id)?.result?.content?.[0]?.text ?? "null");
-  const listed = parseToolResult(2);
+  const parseToolResult = (id: number): unknown => {
+    const result = jsonObject(
+      responses.get(id)?.result,
+      `tools/call ${id} result`,
+    );
+    const [content] = objectArray(result.content, `tools/call ${id} content`);
+    if (!content || typeof content.text !== "string") {
+      throw new TypeError(`tools/call ${id} text content is missing`);
+    }
+    return JSON.parse(content.text);
+  };
+  const resultDocuments = (id: number): DocsResult[] => {
+    const value = parseToolResult(id);
+    if (!Array.isArray(value))
+      throw new TypeError(`tools/call ${id} result must be an array`);
+    return value.map((entry, index) =>
+      docsResult(entry, `tools/call ${id} result[${index}]`),
+    );
+  };
+  const listed = resultDocuments(2);
   assert.equal(listed.length, 33);
   assert.equal(
-    listed.find(({ path }: Json) => path === "architecture.md")?.url,
+    listed.find(({ path }) => path === "architecture.md")?.url,
     `${baseUrl}architecture`,
   );
   assert.ok(
-    parseToolResult(3).some(({ path }: Json) =>
+    resultDocuments(3).some(({ path }) =>
       ["api.md", "architecture.md", "lifecycle.md"].includes(path),
     ),
     "idempotency search should reach a product contract",
   );
-  assert.match(parseToolResult(4)?.content ?? "", /Ownership rules/);
-  assert.deepEqual(Object.keys(parseToolResult(5)?.paths ?? {}), ["/v1/ask"]);
-  const chineseResults = parseToolResult(6);
-  assert.ok(chineseResults.length > 0);
-  assert.ok(
-    chineseResults.every(({ path }: Json) => path.startsWith("zh-cn/")),
+  assert.match(
+    stringValue(
+      jsonObject(parseToolResult(4), "fetch_doc result").content,
+      "fetch_doc content",
+    ),
+    /Ownership rules/,
   );
-  assert.match(parseToolResult(7)?.content ?? "", /系统分为四个平面/);
+  assert.deepEqual(
+    Object.keys(
+      jsonObject(
+        jsonObject(parseToolResult(5), "OpenAPI tool result").paths,
+        "OpenAPI tool paths",
+      ),
+    ),
+    ["/v1/ask"],
+  );
+  const chineseResults = resultDocuments(6);
+  assert.ok(chineseResults.length > 0);
+  assert.ok(chineseResults.every(({ path }) => path.startsWith("zh-cn/")));
+  assert.match(
+    stringValue(
+      jsonObject(parseToolResult(7), "Chinese fetch_doc result").content,
+      "Chinese document content",
+    ),
+    /系统分为四个平面/,
+  );
   assert.ok(
-    parseToolResult(8).some(({ path }: Json) =>
+    resultDocuments(8).some(({ path }) =>
       ["operations.md", "troubleshooting.md", "zh-cn/operations.md"].includes(
         path,
       ),
     ),
   );
   assert.ok(
-    parseToolResult(9).some(({ path }: Json) =>
+    resultDocuments(9).some(({ path }) =>
       ["architecture.md", "events-audit.md", "operations.md"].includes(path),
     ),
     "outbox search should reach a product operations contract",
   );
-  assert.match(parseToolResult(10)?.content ?? "", /Common incidents/);
-  assert.match(parseToolResult(11)?.content ?? "", /outbox 状态/);
-
-  const routeMap = JSON.parse(
-    await readFile(
-      resolve(outputRoot, "_mcp", "sumi-docs-routes.json"),
-      "utf8",
+  assert.match(
+    stringValue(
+      jsonObject(parseToolResult(10), "English operations result").content,
+      "English operations content",
     ),
+    /Common incidents/,
   );
+  assert.match(
+    stringValue(
+      jsonObject(parseToolResult(11), "Chinese operations result").content,
+      "Chinese operations content",
+    ),
+    /outbox 状态/,
+  );
+
+  const routeMap = jsonObject(
+    JSON.parse(
+      await readFile(
+        resolve(outputRoot, "_mcp", "sumi-docs-routes.json"),
+        "utf8",
+      ),
+    ),
+    "docs route map",
+  );
+  const routes = jsonObject(routeMap.routes, "docs routes");
   for (const document of listed) {
-    const expectedPage = new URL(routeMap.routes[document.path], baseUrl).href;
+    const route = routes[document.path];
+    if (typeof route !== "string")
+      throw new TypeError(`missing route for ${document.path}`);
+    if (typeof document.url !== "string")
+      throw new TypeError(`missing URL for ${document.path}`);
+    const expectedPage = new URL(route, baseUrl).href;
     const normalizedActual = document.url.endsWith("/")
       ? document.url
       : `${document.url}/`;

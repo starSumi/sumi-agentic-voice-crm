@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import {
   createExtensionRegistry,
   validateExtensionManifest,
 } from "../src/extensions/index.ts";
 
-function manifest(id, overrides = {}) {
+function manifest(
+  id: string,
+  overrides: Readonly<Record<string, unknown>> = {},
+) {
   return {
     schema_version: "sumi.extension-manifest.v1",
     id,
@@ -51,7 +55,7 @@ test("extension manifests are closed, exact-versioned capability declarations", 
 });
 
 test("registry enforces trust, permissions, dependency order and reverse shutdown", async () => {
-  const lifecycle = [];
+  const lifecycle: string[] = [];
   const registry = createExtensionRegistry({
     allowedPermissions: ["crm.read"],
     trustedInProcessIds: ["builtin.base", "builtin.consumer"],
@@ -125,23 +129,28 @@ test("process extensions require a supervisor and receive only permission-scoped
       }),
     /trusted launch supervisor/,
   );
-  let received;
+  let received: Readonly<Record<string, unknown>> | undefined;
   registry.register({
     manifest: manifest("third-party.reader", { isolation: "process" }),
     launch: (context) => {
-      received = context;
+      received = context as unknown as Readonly<Record<string, unknown>>;
       return { start() {}, stop() {}, terminate() {} };
     },
   });
   await registry.startAll();
-  assert.deepEqual(Object.keys(received.ports), ["crm.read"]);
-  assert.equal(received.ports["crm.read"], readPort);
+  if (!received) throw new Error("process extension did not start");
+  const ports = received.ports;
+  if (!ports || typeof ports !== "object") {
+    throw new TypeError("process extension did not receive ports");
+  }
+  assert.deepEqual(Object.keys(ports), ["crm.read"]);
+  assert.equal((ports as Record<string, unknown>)["crm.read"], readPort);
   assert.equal(Object.hasOwn(received, "env"), false);
   await registry.stopAll();
 });
 
 test("close during startup aborts and rolls back the partially started process", async () => {
-  const lifecycle = [];
+  const lifecycle: string[] = [];
   const registry = createExtensionRegistry({
     allowedPermissions: ["crm.read"],
     softTimeoutMs: 1_000,
@@ -190,7 +199,10 @@ test("a process extension that ignores cooperative abort reaches the hard termin
     }),
   });
 
-  await assert.rejects(registry.startAll(), (error) => error.phase === "hard");
+  await assert.rejects(
+    registry.startAll(),
+    (error) => testError(error).phase === "hard",
+  );
   assert.equal(registry.state, "failed");
   assert.ok(terminateCalls >= 1);
 });

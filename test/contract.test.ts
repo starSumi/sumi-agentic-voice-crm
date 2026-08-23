@@ -1,34 +1,42 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import type { ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
+import { testRecord } from "./test-types.ts";
 
 const port = 18080 + Math.floor(Math.random() * 500);
-let child;
+let child: ChildProcessByStdio<null, Readable, Readable> | undefined;
 const base = `http://127.0.0.1:${port}`;
 
 test.before(async () => {
-  child = spawn(process.execPath, ["src/server.ts"], {
+  const serverProcess = spawn(process.execPath, ["src/server.ts"], {
     cwd: new URL("..", import.meta.url),
     env: { ...process.env, PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  await new Promise((resolve, reject) => {
+  child = serverProcess;
+  await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error("server startup timeout")),
       5000,
     );
-    child.stdout.on("data", (d) => {
-      if (String(d).includes(`:${port}`)) {
+    serverProcess.stdout.on("data", (data: Buffer) => {
+      if (String(data).includes(`:${port}`)) {
         clearTimeout(timer);
         resolve();
       }
     });
-    child.on("error", reject);
+    serverProcess.on("error", reject);
   });
 });
 test.after(() => child?.kill());
 
-async function ask(body, key = `test-${Math.random()}`, headers = {}) {
+async function ask(
+  body: Readonly<Record<string, unknown>>,
+  key = `test-${Math.random()}`,
+  headers: Readonly<Record<string, string>> = {},
+) {
   const res = await fetch(`${base}/v1/ask`, {
     method: "POST",
     headers: {
@@ -40,13 +48,13 @@ async function ask(body, key = `test-${Math.random()}`, headers = {}) {
     },
     body: JSON.stringify(body),
   });
-  return { status: res.status, body: await res.json() };
+  return { status: res.status, body: testRecord(await res.json()) };
 }
 
 test("health readiness exposes provider contract", async () => {
   const r = await fetch(`${base}/health/ready`);
   assert.equal(r.status, 200);
-  assert.equal((await r.json()).status, "ready");
+  assert.equal(testRecord(await r.json()).status, "ready");
 });
 
 test("read-only text ask returns CRM result and TTS asset", async () => {
@@ -55,11 +63,14 @@ test("read-only text ask returns CRM result and TTS asset", async () => {
     output_mode: "both",
     locale: "en-US",
   });
+  const resultUnderstanding = testRecord(r.body.understanding);
+  const resultCrm = testRecord(r.body.crm);
+  const resultAudio = testRecord(r.body.audio);
   assert.equal(r.status, 200);
-  assert.equal(r.body.understanding.intent, "crm.search");
-  assert.equal(r.body.understanding.needs_confirmation, false);
-  assert.equal(r.body.crm.action, "read_only");
-  assert.equal(r.body.audio.status, "ready");
+  assert.equal(resultUnderstanding.intent, "crm.search");
+  assert.equal(resultUnderstanding.needs_confirmation, false);
+  assert.equal(resultCrm.action, "read_only");
+  assert.equal(resultAudio.status, "ready");
 });
 
 test("audio assets use an authenticated metadata and binary content boundary", async () => {
@@ -72,7 +83,9 @@ test("audio assets use an authenticated metadata and binary content boundary", a
     "asset-boundary-1",
   );
   assert.equal(r.status, 200);
-  const assetId = r.body.audio.asset_id;
+  const assetId = testRecord(r.body.audio).asset_id;
+  assert.equal(typeof assetId, "string");
+  if (typeof assetId !== "string") throw new TypeError("missing asset id");
   const headers = {
     authorization: "Bearer test-actor",
     "x-tenant-id": "tenant_demo",
@@ -87,7 +100,7 @@ test("audio assets use an authenticated metadata and binary content boundary", a
 
   const content = await fetch(`${base}${metadataBody.url}`, { headers });
   assert.equal(content.status, 200);
-  assert.match(content.headers.get("content-type"), /^audio\//);
+  assert.match(content.headers.get("content-type") ?? "", /^audio\//);
   assert.ok((await content.arrayBuffer()).byteLength > 0);
   const denied = await fetch(`${base}${metadataBody.url}`);
   assert.equal(denied.status, 401);
@@ -104,8 +117,8 @@ test("mutating intent is fail-closed even when provider says no confirmation", a
   );
   assert.equal(r.status, 202);
   assert.equal(r.body.status, "needs_review");
-  assert.equal(r.body.understanding.needs_confirmation, true);
-  assert.ok(r.body.review_task.id);
+  assert.equal(testRecord(r.body.understanding).needs_confirmation, true);
+  assert.ok(testRecord(r.body.review_task).id);
   const events = await fetch(`${base}/v1/events`, {
     headers: {
       authorization: "Bearer test-actor",
@@ -113,7 +126,7 @@ test("mutating intent is fail-closed even when provider says no confirmation", a
     },
   });
   const committed = (await events.json()).events.filter(
-    (event) =>
+    (event: Readonly<Record<string, unknown>>) =>
       event.request_id === r.body.request_id &&
       event.type === "crm.command.committed.v1",
   );
@@ -130,7 +143,10 @@ test("same idempotency key returns the same review task", async () => {
   const b = await ask(body, "stable-key-1");
   assert.equal(a.status, 202);
   assert.equal(b.status, 202);
-  assert.equal(a.body.review_task.id, b.body.review_task.id);
+  assert.equal(
+    testRecord(a.body.review_task).id,
+    testRecord(b.body.review_task).id,
+  );
 });
 
 test("low confidence creates review task and does not commit CRM", async () => {
@@ -143,7 +159,7 @@ test("low confidence creates review task and does not commit CRM", async () => {
   );
   assert.equal(r.status, 202);
   assert.equal(r.body.status, "needs_review");
-  assert.ok(r.body.review_task.id);
+  assert.ok(testRecord(r.body.review_task).id);
 });
 
 test("missing audio is a non-retryable boundary error", async () => {
@@ -152,7 +168,7 @@ test("missing audio is a non-retryable boundary error", async () => {
     output_mode: "text",
   });
   assert.equal(r.status, 422);
-  assert.equal(r.body.error.code, "NO_AUDIO_SOURCE");
+  assert.equal(testRecord(r.body.error).code, "NO_AUDIO_SOURCE");
 });
 
 test("mock audio exercises ASR to intent to TTS", async () => {
@@ -171,10 +187,11 @@ test("mock audio exercises ASR to intent to TTS", async () => {
     "audio-key-1",
   );
   assert.equal(r.status, 200);
-  assert.equal(r.body.input.type, "audio");
-  assert.equal(r.body.input.asr.provider, "mock");
-  assert.equal(r.body.understanding.needs_confirmation, false);
-  assert.equal(r.body.audio.mime_type, "audio/mpeg");
+  const resultInput = testRecord(r.body.input);
+  assert.equal(resultInput.type, "audio");
+  assert.equal(testRecord(resultInput.asr).provider, "mock");
+  assert.equal(testRecord(r.body.understanding).needs_confirmation, false);
+  assert.equal(testRecord(r.body.audio).mime_type, "audio/mpeg");
 });
 
 test("unauthenticated requests are rejected", async () => {
@@ -211,7 +228,7 @@ test("idempotency key reuse with a different command is rejected", async () => {
     "conflict-key-1",
   );
   assert.equal(r.status, 409);
-  assert.equal(r.body.error.code, "IDEMPOTENCY_CONFLICT");
+  assert.equal(testRecord(r.body.error).code, "IDEMPOTENCY_CONFLICT");
 });
 
 test("short idempotency keys fail at the boundary", async () => {
@@ -220,7 +237,7 @@ test("short idempotency keys fail at the boundary", async () => {
     "short",
   );
   assert.equal(r.status, 400);
-  assert.equal(r.body.error.code, "INVALID_REQUEST");
+  assert.equal(testRecord(r.body.error).code, "INVALID_REQUEST");
 });
 
 test("JSON ask variants enforce the published oneOf and locale constraints", async () => {
@@ -233,7 +250,7 @@ test("JSON ask variants enforce the published oneOf and locale constraints", asy
     "schema-unknown-1",
   );
   assert.equal(unknown.status, 400);
-  assert.equal(unknown.body.error.code, "INVALID_REQUEST");
+  assert.equal(testRecord(unknown.body.error).code, "INVALID_REQUEST");
   const locale = await ask(
     {
       input: { type: "text", text: "hello" },
@@ -243,7 +260,7 @@ test("JSON ask variants enforce the published oneOf and locale constraints", asy
     "schema-locale-1",
   );
   assert.equal(locale.status, 400);
-  assert.equal(locale.body.error.code, "INVALID_REQUEST");
+  assert.equal(testRecord(locale.body.error).code, "INVALID_REQUEST");
 });
 
 test("events require tenant auth and use the canonical envelope", async () => {
@@ -332,7 +349,9 @@ test("low-confidence review can be approved or rejected through the durable boun
     "review-http-001",
   );
   assert.equal(first.status, 202);
-  const reviewId = first.body.review_task.id;
+  const reviewId = testRecord(first.body.review_task).id;
+  assert.equal(typeof reviewId, "string");
+  if (typeof reviewId !== "string") throw new TypeError("missing review id");
   const decision = await fetch(`${base}/v1/reviews/${reviewId}/decision`, {
     method: "POST",
     headers: {

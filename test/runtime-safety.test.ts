@@ -1,4 +1,5 @@
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import assert from "node:assert/strict";
 import { CrmStore } from "../src/store.ts";
 import { assertTenant } from "../src/contracts.ts";
@@ -45,7 +46,7 @@ test("CRM mutations are tenant-scoped and idempotent", () => {
         entities: { customer: { name: "Other" } },
         request_id: "req_000000000000000000000004",
       }),
-    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+    (error) => testError(error).code === "IDEMPOTENCY_CONFLICT",
   );
 });
 
@@ -58,7 +59,7 @@ test("tenant binding rejects malformed tenant ids and mismatched JWT claims", ()
           "x-tenant-id": "bad tenant",
         }),
       ),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
   const payload = Buffer.from(
     JSON.stringify({ tenant_id: "tenant_other" }),
@@ -71,7 +72,7 @@ test("tenant binding rejects malformed tenant ids and mismatched JWT claims", ()
           "x-tenant-id": "tenant_demo",
         }),
       ),
-    (error) => error.code === "FORBIDDEN",
+    (error) => testError(error).code === "FORBIDDEN",
   );
 });
 
@@ -121,7 +122,7 @@ test("TTS records are tenant-bound and reject fingerprint conflicts", () => {
   assert.equal(store.events()[0].type, "tts.asset.created.v1");
   assert.throws(
     () => store.replayTts("tenant_demo:tts-key", "fingerprint-b"),
-    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+    (error) => testError(error).code === "IDEMPOTENCY_CONFLICT",
   );
 });
 

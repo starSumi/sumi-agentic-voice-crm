@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { testRecord } from "./test-types.ts";
 import { CrmStore } from "../src/store.ts";
 import { understanding } from "../src/contracts.ts";
 import { createApp } from "../src/server.ts";
+import { MemoryObjectStorage } from "../src/object-storage.ts";
+import { createObservability } from "../src/observability.ts";
+import type { AuthorizationDecision } from "../src/authorization/index.ts";
 
 function runtimeFixture() {
   const store = new CrmStore();
@@ -19,12 +24,28 @@ function runtimeFixture() {
       actor_scopes: ["interaction.ask"],
       token_scopes: ["interaction.ask"],
     }),
-    resolvePrincipal: async (identity) => identity,
-    authorize: async () => ({ effect: "allow", obligations: [] }),
+    resolvePrincipal: async (identity: unknown) => identity,
+    authorize: async (): Promise<AuthorizationDecision> => ({
+      effect: "allow",
+      policy_version: "test-policy",
+      reason_codes: ["ALLOW"],
+      obligations: [],
+    }),
     providers: {
-      providerReadiness: () => ({ ready: true, statuses: {} }),
+      providerReadiness: () => ({
+        ready: true,
+        names: { asr: "test", intent: "test", tts: "test" },
+        statuses: {
+          asr: { provider: "test", ready: true, circuit: "closed" },
+          intent: { provider: "test", ready: true, circuit: "closed" },
+          tts: { provider: "test", ready: true, circuit: "closed" },
+        },
+      }),
       ttsDefaultFormat: () => "mp3",
-      understand: async (transcript, { locale }) =>
+      understand: async (
+        transcript: string,
+        { locale }: { readonly locale: string },
+      ) =>
         understanding({
           intent: "crm.search",
           confidence: 0.99,
@@ -47,26 +68,22 @@ function runtimeFixture() {
         throw new Error("tts should not run");
       },
     },
-    objectStorage: {
-      health: async () => ({ ready: true }),
-      close: async () => {},
-    },
-    observability: {
-      begin: () => ({ traceparent: "00-test" }),
-      finish: () => {},
-      authorizeMetrics: () => true,
-      renderMetrics: () => "",
-    },
+    objectStorage: new MemoryObjectStorage(),
+    observability: createObservability({ write: () => {} }),
     close: async () => {},
   };
 }
 
-async function listen(app) {
-  await new Promise((resolve, reject) => {
+async function listen(app: ReturnType<typeof createApp>) {
+  await new Promise<void>((resolve, reject) => {
     app.server.once("error", reject);
     app.listen(0, resolve);
   });
-  return app.server.address().port;
+  const address = app.server.address();
+  if (!address || typeof address === "string") {
+    throw new TypeError("expected TCP server address");
+  }
+  return (address satisfies AddressInfo).port;
 }
 
 test("respond-async persists a job receipt and exposes durable status", async () => {
@@ -87,24 +104,36 @@ test("respond-async persists a job receipt and exposes durable status", async ()
     }),
   });
   assert.equal(response.status, 202);
-  const receipt = await response.json();
-  assert.match(receipt.job_id, /^job_/);
-  assert.ok(["job_queued", "running", "succeeded"].includes(receipt.status));
+  const receipt = testRecord(await response.json());
+  const jobId = receipt.job_id;
+  const receiptStatus = receipt.status;
+  assert.equal(typeof jobId, "string");
+  assert.equal(typeof receiptStatus, "string");
+  if (typeof jobId !== "string" || typeof receiptStatus !== "string") {
+    throw new TypeError("invalid message job receipt");
+  }
+  assert.match(jobId, /^job_/);
+  assert.ok(["job_queued", "running", "succeeded"].includes(receiptStatus));
 
   const statusResponse = await fetch(
-    `http://127.0.0.1:${port}/v1/jobs/${receipt.job_id}`,
+    `http://127.0.0.1:${port}/v1/jobs/${jobId}`,
     {
       headers: { authorization: "Bearer development-token" },
     },
   );
   assert.equal(statusResponse.status, 200);
-  const status = await statusResponse.json();
-  assert.equal(status.job_id, receipt.job_id);
-  assert.ok(["job_queued", "running", "succeeded"].includes(status.status));
+  const status = testRecord(await statusResponse.json());
+  assert.equal(status.job_id, jobId);
+  assert.equal(typeof status.status, "string");
+  assert.ok(
+    typeof status.status === "string" &&
+      ["job_queued", "running", "succeeded"].includes(status.status),
+  );
   const statsResponse = await fetch(`http://127.0.0.1:${port}/v1/jobs/stats`, {
     headers: { authorization: "Bearer development-token" },
   });
   assert.equal(statsResponse.status, 200);
-  assert.equal(typeof (await statsResponse.json()).jobs.job_queued, "number");
+  const stats = testRecord(await statsResponse.json());
+  assert.equal(typeof testRecord(stats.jobs).job_queued, "number");
   await app.close();
 });

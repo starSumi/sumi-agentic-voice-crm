@@ -6,17 +6,34 @@ import {
   verifyOutboxSignature,
 } from "../src/outbox-relay.ts";
 
-function fakeStore(event) {
-  const calls = [];
+type EventFixture = Readonly<{ id: string } & Record<string, unknown>>;
+type StoreCall = [kind: "published" | "failed" | "released", value: unknown];
+type PublishedRequest = {
+  body: string;
+  headers: Record<string, string>;
+};
+
+function fakeStore(event: EventFixture) {
+  const calls: StoreCall[] = [];
   return {
     calls,
     claimOutbox: async () => [{ outbox_id: "out-1", attempts: 0, event }],
-    markOutboxPublished: async (value) => calls.push(["published", value]),
-    markOutboxFailed: async (value) => {
+    markOutboxPublished: async (value: unknown) => {
+      calls.push(["published", value]);
+    },
+    markOutboxFailed: async (
+      value: {
+        max_attempts: number;
+      } & Record<string, unknown>,
+    ) => {
       calls.push(["failed", value]);
       return { dead_lettered: value.max_attempts === 1 };
     },
-    releaseOutboxLeases: async (value) => {
+    releaseOutboxLeases: async (
+      value: {
+        outbox_ids: string[];
+      } & Record<string, unknown>,
+    ) => {
       calls.push(["released", value]);
       return { released: value.outbox_ids.length };
     },
@@ -37,7 +54,7 @@ const event = {
 
 test("relay signs and acknowledges a successfully published CloudEvent", async () => {
   const store = fakeStore(event);
-  let request;
+  let request: PublishedRequest | undefined;
   const config = outboxConfig({
     OUTBOX_TARGET_URL: "https://events.example.test/hook",
     OUTBOX_TENANT_IDS: "tenant-a",
@@ -46,8 +63,14 @@ test("relay signs and acknowledges a successfully published CloudEvent", async (
   const relay = new OutboxRelay({
     store,
     config,
-    fetchImpl: async (_url, options) => {
-      request = options;
+    fetchImpl: async (_url: string, options: RequestInit) => {
+      assert.equal(typeof options.body, "string");
+      if (typeof options.body !== "string")
+        throw new TypeError("expected request body");
+      request = {
+        body: options.body,
+        headers: Object.fromEntries(new Headers(options.headers)),
+      };
       return { ok: true, status: 204 };
     },
     workerId: "worker-a",
@@ -58,6 +81,7 @@ test("relay signs and acknowledges a successfully published CloudEvent", async (
     failed: 0,
     dead_lettered: 0,
   });
+  assert.ok(request);
   assert.equal(
     verifyOutboxSignature(
       request.body,
@@ -67,7 +91,7 @@ test("relay signs and acknowledges a successfully published CloudEvent", async (
     true,
   );
   assert.equal(request.headers["idempotency-key"], event.id);
-  assert.equal(store.calls[0][0], "published");
+  assert.equal(store.calls.at(0)?.[0], "published");
 });
 
 test("relay cancellation releases claimed rows without consuming attempts", async () => {
@@ -80,12 +104,15 @@ test("relay cancellation releases claimed rows without consuming attempts", asyn
   const relay = new OutboxRelay({
     store,
     config,
-    fetchImpl: async (_url, { signal }) =>
-      new Promise((resolve, reject) => {
+    fetchImpl: async (_url: string, options: RequestInit) => {
+      const signal = options.signal;
+      if (!signal) throw new TypeError("expected relay abort signal");
+      return await new Promise<never>((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
-      }),
+      });
+    },
     workerId: "worker-a",
   });
   const pending = relay.runOnce({ signal: controller.signal });
@@ -122,7 +149,7 @@ test("relay schedules failures and moves exhausted events to dead letter", async
 });
 
 test("an open target circuit releases the unattempted batch without consuming retries", async () => {
-  const calls = [];
+  const calls: string[][] = [];
   const rows = Array.from({ length: 5 }, (_, index) => ({
     outbox_id: `out-${index + 1}`,
     attempts: 0,
@@ -133,11 +160,11 @@ test("an open target circuit releases the unattempted batch without consuming re
     markOutboxPublished: async () => {
       throw new Error("publish must fail");
     },
-    markOutboxFailed: async (value) => {
+    markOutboxFailed: async (value: { outbox_id: string }) => {
       calls.push(["failed", value.outbox_id]);
       return { dead_lettered: false };
     },
-    releaseOutboxLeases: async (value) => {
+    releaseOutboxLeases: async (value: { outbox_ids: string[] }) => {
       calls.push(["released", ...value.outbox_ids]);
       return { released: value.outbox_ids.length };
     },

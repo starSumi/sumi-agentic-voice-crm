@@ -10,7 +10,10 @@ const lock = JSON.parse(
   readFileSync(new URL("../flake.lock", import.meta.url), "utf8"),
 );
 
-function meetsMinimumNodeVersion(version, minimum = [24, 19, 0]) {
+function meetsMinimumNodeVersion(
+  version: string,
+  minimum: readonly [number, number, number] = [24, 19, 0],
+): boolean {
   const actual = version.split(".").map(Number);
   return (
     actual[0] > minimum[0] ||

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import { parse as parseYaml } from "yaml";
 import {
   TaskLifecycleTimeoutError,
@@ -82,7 +83,8 @@ test("path-prefix write conflicts serialize", async () => {
   const spec = await loadOrchestrationSpec();
   const conflicted = structuredClone(plan);
   conflicted.tasks.find(
-    ({ task_id }) => task_id === "implement-contract",
+    ({ task_id }: { readonly task_id: string }) =>
+      task_id === "implement-contract",
   ).write_paths = ["src/application/services.ts"];
   const selected = selectRunnableTasks(conflicted, runtime, spec).map(
     ({ task_id }) => task_id,
@@ -97,10 +99,11 @@ test("path-prefix write conflicts serialize", async () => {
 
 test("task runtime transition uses version CAS and declared evidence", () => {
   const task = plan.tasks.find(
-    ({ task_id }) => task_id === "implement-runtime",
+    ({ task_id }: { readonly task_id: string }) =>
+      task_id === "implement-runtime",
   );
   const admitted = runtime.tasks.find(
-    ({ task_id }) => task_id === task.task_id,
+    ({ task_id }: { readonly task_id: string }) => task_id === task.task_id,
   );
   assert.throws(
     () =>
@@ -143,14 +146,14 @@ test("retry jitter is stable and bounded", () => {
 
 test("parent cancellation is retry neutral even when work ignores AbortSignal", async () => {
   const parent = new AbortController();
-  let markStarted;
-  const started = new Promise((resolve) => {
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
     markStarted = resolve;
   });
   const operation = runTaskLifecycle(
     () => {
-      markStarted();
-      return new Promise(() => {});
+      markStarted?.();
+      return new Promise<never>(() => {});
     },
     {
       signal: parent.signal,
@@ -165,7 +168,7 @@ test("parent cancellation is retry neutral even when work ignores AbortSignal", 
     operation,
     (error) =>
       error instanceof TaskLifecycleTimeoutError &&
-      error.phase === "hard" &&
+      testError(error).phase === "hard" &&
       error.retryEligible === false,
   );
 });
@@ -179,7 +182,7 @@ test("soft timeout escalates to a retry-eligible hard timeout", async () => {
     }),
     (error) =>
       error instanceof TaskLifecycleTimeoutError &&
-      error.phase === "hard" &&
+      testError(error).phase === "hard" &&
       error.retryEligible === true,
   );
 });

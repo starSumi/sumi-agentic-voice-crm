@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import { createProviderRuntime } from "../src/providers.ts";
 
 const wav = Buffer.concat([
@@ -10,15 +11,16 @@ const wav = Buffer.concat([
 ]);
 const mp3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00]);
 const ogg = Buffer.concat([Buffer.from("OggS"), Buffer.alloc(12)]);
+type FetchCall = { readonly init: RequestInit; readonly url: string };
 
-function jsonResponse(body, status = 200) {
+function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
 }
 
-function dashscopeEnv(overrides = {}) {
+function dashscopeEnv(overrides: NodeJS.ProcessEnv = {}) {
   return {
     ASR_PROVIDER: "dashscope",
     INTENT_PROVIDER: "dashscope",
@@ -31,7 +33,7 @@ function dashscopeEnv(overrides = {}) {
   };
 }
 
-function validUnderstanding(extra = {}) {
+function validUnderstanding(extra: Readonly<Record<string, unknown>> = {}) {
   return {
     intent: "crm.search",
     confidence: 0.91,
@@ -42,9 +44,24 @@ function validUnderstanding(extra = {}) {
   };
 }
 
+function textBody(call: FetchCall | undefined): string {
+  const body = call?.init.body;
+  if (typeof body !== "string") throw new TypeError("expected text body");
+  return body;
+}
+
+function formBody(call: FetchCall | undefined): FormData {
+  const body = call?.init.body;
+  if (!(body instanceof FormData)) throw new TypeError("expected form body");
+  return body;
+}
+
 test("OpenAI-compatible adapter preserves ASR, Responses JSON schema and bounded TTS", async () => {
-  const calls = [];
-  const fetchImpl = async (input, init) => {
+  const calls: FetchCall[] = [];
+  const fetchImpl = async (
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+  ) => {
     const url = String(input);
     calls.push({ url, init });
     if (url.endsWith("/audio/transcriptions"))
@@ -58,7 +75,7 @@ test("OpenAI-compatible adapter preserves ASR, Responses JSON schema and bounded
         output_text: JSON.stringify(validUnderstanding()),
       });
     if (url.endsWith("/audio/speech")) {
-      const request = JSON.parse(init.body);
+      const request = JSON.parse(textBody({ url, init }));
       const bytes = request.response_format === "opus" ? ogg : mp3;
       return new Response(bytes, {
         headers: {
@@ -105,20 +122,22 @@ test("OpenAI-compatible adapter preserves ASR, Responses JSON schema and bounded
   assert.equal(oggAsset.mime_type, "audio/ogg");
   assert.deepEqual(Buffer.from(oggAsset.data_base64, "base64"), ogg);
   assert.notEqual(asset.asset_id, oggAsset.asset_id);
-  assert.equal(calls[0].init.body.get("model"), "whisper-test");
-  assert.equal(calls[0].init.body.get("file").type, "audio/mpeg");
-  const responseRequest = JSON.parse(calls[1].init.body);
+  assert.equal(formBody(calls[0]).get("model"), "whisper-test");
+  const file = formBody(calls[0]).get("file");
+  assert.ok(file instanceof File);
+  assert.equal(file.type, "audio/mpeg");
+  const responseRequest = JSON.parse(textBody(calls[1]));
   assert.equal(responseRequest.text.format.type, "json_schema");
   assert.equal(responseRequest.text.format.strict, true);
-  assert.equal(JSON.parse(calls[2].init.body).response_format, "mp3");
-  assert.equal(JSON.parse(calls[3].init.body).response_format, "opus");
+  assert.equal(JSON.parse(textBody(calls[2])).response_format, "mp3");
+  assert.equal(JSON.parse(textBody(calls[3])).response_format, "opus");
 });
 
 test("DashScope ASR sends the MIME-aware input_audio Data URL", async () => {
-  const calls = [];
+  const calls: FetchCall[] = [];
   const runtime = createProviderRuntime({
     env: dashscopeEnv(),
-    fetchImpl: async (input, init) => {
+    fetchImpl: async (input: RequestInfo | URL, init: RequestInit = {}) => {
       calls.push({ url: String(input), init });
       return jsonResponse({ choices: [{ message: { content: "查找客户" } }] });
     },
@@ -128,9 +147,9 @@ test("DashScope ASR sends the MIME-aware input_audio Data URL", async () => {
     locale: "zh-CN",
     contentType: "audio/x-wav",
   });
-  const request = JSON.parse(calls[0].init.body);
+  const request = JSON.parse(textBody(calls[0]));
   assert.equal(
-    calls[0].url,
+    calls[0]?.url,
     "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
   );
   assert.equal(request.model, "qwen3-asr-flash");
@@ -169,7 +188,7 @@ test("DashScope ASR enforces the encoded 10 MB boundary without opening its circ
           locale: "en-US",
           contentType: "audio/wav",
         }),
-      (error) => error.code === "INVALID_REQUEST",
+      (error) => testError(error).code === "INVALID_REQUEST",
     );
   }
   assert.equal(calls, 2);
@@ -177,10 +196,10 @@ test("DashScope ASR enforces the encoded 10 MB boundary without opening its circ
 });
 
 test("DashScope intent uses JSON Object mode and validates the CRM schema locally", async () => {
-  const calls = [];
+  const calls: FetchCall[] = [];
   const runtime = createProviderRuntime({
     env: dashscopeEnv(),
-    fetchImpl: async (input, init) => {
+    fetchImpl: async (input: RequestInfo | URL, init: RequestInit = {}) => {
       calls.push({ url: String(input), init });
       return jsonResponse({
         choices: [
@@ -190,7 +209,7 @@ test("DashScope intent uses JSON Object mode and validates the CRM schema locall
     },
   });
   const result = await runtime.understand("find Acme", { locale: "en-US" });
-  const request = JSON.parse(calls[0].init.body);
+  const request = JSON.parse(textBody(calls[0]));
   assert.equal(request.response_format.type, "json_object");
   assert.equal(request.enable_thinking, false);
   assert.equal(result.intent, "crm.search");
@@ -211,8 +230,8 @@ test("DashScope intent uses JSON Object mode and validates the CRM schema locall
   await assert.rejects(
     () => malformed.understand("find Acme", { locale: "en-US" }),
     (error) =>
-      error.code === "UPSTREAM_UNAVAILABLE" &&
-      /Agent CRM contract/.test(error.message),
+      testError(error).code === "UPSTREAM_UNAVAILABLE" &&
+      /Agent CRM contract/.test(testError(error).message),
   );
 });
 
@@ -229,9 +248,9 @@ test("provider 4xx rejections are non-retryable and do not open the circuit", as
     await assert.rejects(
       () => runtime.understand("find Acme", { locale: "en-US" }),
       (error) =>
-        error.code === "PROVIDER_REJECTED" &&
-        error.breakerEligible === false &&
-        /HTTP 400/.test(error.message),
+        testError(error).code === "PROVIDER_REJECTED" &&
+        testError(error).breakerEligible === false &&
+        /HTTP 400/.test(testError(error).message),
     );
   }
   assert.equal(calls, 4);
@@ -239,12 +258,12 @@ test("provider 4xx rejections are non-retryable and do not open the circuit", as
 });
 
 test("DashScope TTS upgrades an official result URL to HTTPS and stores actual WAV bytes", async () => {
-  const calls = [];
+  const calls: FetchCall[] = [];
   const signedUrl =
     "http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav?signature=secret";
   const runtime = createProviderRuntime({
     env: dashscopeEnv(),
-    fetchImpl: async (input, init) => {
+    fetchImpl: async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input);
       calls.push({ url, init });
       if (calls.length === 1)
@@ -264,12 +283,12 @@ test("DashScope TTS upgrades an official result URL to HTTPS and stores actual W
     format: "wav",
   });
   assert.match(
-    calls[0].url,
+    calls[0]?.url,
     /\/api\/v1\/services\/aigc\/multimodal-generation\/generation$/,
   );
-  assert.equal(JSON.parse(calls[0].init.body).input.voice, "Cherry");
-  assert.equal(calls[1].url, signedUrl.replace("http:", "https:"));
-  assert.equal(calls[1].init.redirect, "manual");
+  assert.equal(JSON.parse(textBody(calls[0])).input.voice, "Cherry");
+  assert.equal(calls[1]?.url, signedUrl.replace("http:", "https:"));
+  assert.equal(calls[1]?.init.redirect, "manual");
   assert.equal(result.mime_type, "audio/wav");
   assert.equal(result.url.startsWith("/v1/assets/"), true);
   assert.equal(JSON.stringify(result).includes("signature=secret"), false);
@@ -332,7 +351,7 @@ test("DashScope TTS rejects untrusted result hosts, redirects and oversized audi
     });
     await assert.rejects(
       () => runtime.synthesize("hello", { language: "en-US", format: "wav" }),
-      (error) => error.code === "UPSTREAM_UNAVAILABLE",
+      (error) => testError(error).code === "UPSTREAM_UNAVAILABLE",
     );
     assert.equal(calls, scenario === "host" ? 1 : 2);
   }
@@ -347,7 +366,7 @@ test("provider capability preflights reject unsupported TTS locales, long text a
   });
   await assert.rejects(
     () => dashscope.synthesize("hello", { language: "hi-IN", format: "wav" }),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
   await assert.rejects(
     () =>
@@ -355,7 +374,7 @@ test("provider capability preflights reject unsupported TTS locales, long text a
         language: "zh-CN",
         format: "wav",
       }),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
 
   const openai = createProviderRuntime({
@@ -374,7 +393,7 @@ test("provider capability preflights reject unsupported TTS locales, long text a
   await assert.rejects(
     () =>
       openai.synthesize("x".repeat(4097), { language: "en-US", format: "mp3" }),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
 
   const malformed = createProviderRuntime({
@@ -394,8 +413,8 @@ test("provider capability preflights reject unsupported TTS locales, long text a
   await assert.rejects(
     () => malformed.understand("find", { locale: "en-US" }),
     (error) =>
-      error.code === "UPSTREAM_UNAVAILABLE" &&
-      /1048576-byte limit/.test(error.message),
+      testError(error).code === "UPSTREAM_UNAVAILABLE" &&
+      /1048576-byte limit/.test(testError(error).message),
   );
 
   let calls = 0;
@@ -416,7 +435,7 @@ test("provider capability preflights reject unsupported TTS locales, long text a
   });
   await assert.rejects(
     () => mismatch.synthesize("hello", { language: "en-US", format: "wav" }),
-    (error) => error.code === "UPSTREAM_UNAVAILABLE",
+    (error) => testError(error).code === "UPSTREAM_UNAVAILABLE",
   );
 });
 

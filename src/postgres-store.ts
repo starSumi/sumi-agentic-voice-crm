@@ -1,8 +1,7 @@
 // Persistence adapter migration boundary: SQL rows and driver result shapes
 // are intentionally isolated here; the application and protocol layers are
 // strict-checked independently while this adapter receives its row types.
-// @ts-nocheck
-import pg from "pg";
+import { createRequire } from "node:module";
 import {
   authorizationError,
   unsatisfiedAuthorizationObligation,
@@ -14,9 +13,298 @@ import {
   agentCrmIntentDefinition,
   assertAgentCrmActionProposal,
   assertExecutableAgentCrmEntities,
+  isAgentCrmIntent,
 } from "./agent-crm-contract.ts";
+import type {
+  Action,
+  ActionGrant,
+  AuthorizationRequest,
+  AuthorizationResource,
+  PrincipalKind,
+  Role,
+} from "./authorization/types.ts";
+import type {
+  CrmActionProposal,
+  CrmCommandResult,
+  CrmEntities,
+  CrmUnderstanding,
+  StoredAsset,
+} from "./store.ts";
+import type {
+  MessageJob,
+  MessageJobStatus,
+  MessageJobTransition,
+} from "./message-job-queue.ts";
+import { MESSAGE_JOB_STATES } from "./message-job-queue.ts";
 
-const { Pool } = pg;
+type DataRecord = Record<string, unknown>;
+type SqlJson = DataRecord & {
+  action?: CrmActionProposal;
+  asset_id?: string;
+  correction?: DataRecord;
+  decision?: string;
+  entities?: CrmEntities;
+  status?: string;
+  understanding?: CrmUnderstanding;
+};
+type SqlRow = {
+  actor_id?: string;
+  aggregate_id?: string;
+  aggregate_type?: string;
+  aggregate_version?: number | string;
+  attempts?: number | string;
+  candidates?: CrmEntities;
+  command_id?: string;
+  completed_at?: Date | string;
+  count?: number | string;
+  created_at?: Date | string;
+  decision?: SqlJson;
+  error_code?: string;
+  error_message_ciphertext?: string;
+  event_type?: string;
+  expires_at?: Date | string;
+  external_asset_id?: string;
+  http_status?: number | string;
+  id?: string;
+  idempotency_key?: string;
+  input_payload_ciphertext?: string;
+  intent?: Action;
+  lease_expires_at?: Date | string;
+  lease_owner?: string;
+  next_attempt_at?: Date | string;
+  object_key?: string;
+  payload?: SqlJson;
+  payload_ciphertext?: string;
+  policy_version?: string;
+  reason?: string;
+  recovery_count?: number | string;
+  request_fingerprint?: string;
+  request_id?: string;
+  response_ciphertext?: string;
+  result?: SqlJson;
+  result_ciphertext?: string;
+  revision?: number | string;
+  role?: Role;
+  scopes?: ActionGrant[];
+  sequence?: number | string;
+  state_ciphertext?: string;
+  status?: string;
+  tenant_id?: string;
+  updated_at?: Date | string;
+  transcript_ciphertext?: string;
+  understanding_ciphertext?: string;
+  version?: number | string;
+  worker_id?: string;
+  entry_type?: string;
+};
+type QueryResult = { rowCount: number; rows: SqlRow[] };
+export type PgClientPort = {
+  query(text: string, values?: readonly unknown[]): Promise<QueryResult>;
+  release(): void;
+};
+export type PgPoolPort = {
+  query(text: string, values?: readonly unknown[]): Promise<QueryResult>;
+  connect(): Promise<PgClientPort>;
+  end(): Promise<void>;
+};
+type PoolConstructor = new (options: {
+  connectionString: string;
+  max: number;
+}) => PgPoolPort;
+const require = createRequire(import.meta.url);
+const { Pool }: { Pool: PoolConstructor } = require("pg");
+type CipherPort = Pick<DataCipher, "encrypt" | "decrypt">;
+type AuthorizationDecisionLike = {
+  effect?: string;
+  obligations?: readonly string[];
+  policy_version?: string;
+  reason_codes?: readonly string[];
+};
+type AuthorizePort = (
+  request: AuthorizationRequest,
+) => AuthorizationDecisionLike | PromiseLike<AuthorizationDecisionLike>;
+type StoreIdentity = {
+  tenant_id: string;
+  actor_id?: string;
+  subject_id?: string;
+  kind?: string;
+  principal_kind?: string;
+  token_scopes?: readonly string[];
+  authentication_methods?: readonly string[];
+  network_zone?: "public" | "private" | "service";
+  workload_id?: string;
+};
+type ResolvedPrincipal = StoreIdentity & {
+  subject_id: string;
+  actor_uuid: string;
+  kind: PrincipalKind;
+  status: "active";
+  roles: readonly Role[];
+  actor_scopes: readonly ActionGrant[];
+  token_scopes: readonly ActionGrant[];
+  policy_version: string;
+};
+type TransactionWork<T> = (
+  client: PgClientPort,
+  actorUuid: string | null,
+  principal: ResolvedPrincipal | undefined,
+) => T | PromiseLike<T>;
+type PostgresStoreOptions = {
+  env?: NodeJS.ProcessEnv;
+  connectionString?: string;
+  pool?: PgPoolPort;
+  cipher?: CipherPort;
+  authorize?: AuthorizePort;
+};
+type MessageTransitionInput = {
+  tenant_id: string;
+  job_id: string;
+  status: MessageJobStatus;
+  worker_id?: string;
+  reason?: string;
+};
+type AuditOutboxInput = {
+  tenant_id: string;
+  actorUuid: string | null;
+  request_id?: string;
+  intent: string;
+  result: CrmCommandResult;
+  action?: CrmActionProposal;
+};
+type InteractionWalInput = {
+  tenant_id: string;
+  interaction_id: string;
+  request_id: string;
+  entry_type: string;
+  payload: unknown;
+};
+type EnqueueMessageJobInput = StoreIdentity & {
+  request_id: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  payload?: unknown;
+};
+type ClaimMessageJobsInput = {
+  tenant_id: string;
+  worker_id: string;
+  batch_size?: number;
+  lease_ms?: number;
+};
+type GetMessageJobInput = StoreIdentity & {
+  job_id?: string;
+  idempotency_key?: string;
+};
+type CompleteMessageJobInput = {
+  tenant_id: string;
+  job_id: string;
+  worker_id: string;
+  result?: unknown;
+};
+type FailMessageJobInput = CompleteMessageJobInput & {
+  error_code?: string;
+  error_message?: unknown;
+  max_attempts?: number;
+};
+type ReleaseMessageJobInput = Omit<CompleteMessageJobInput, "result"> & {
+  reason?: string;
+};
+type EventDeliveryInput = {
+  tenant_id: string;
+  consumer_id: string;
+  event_id: string;
+  event_type?: string;
+  worker_id: string;
+  lease_ms?: number;
+};
+type ConversationInput = StoreIdentity & { conversation_id: string };
+type InitializeConversationInput = ConversationInput & { state: unknown };
+type ReplaceConversationInput = InitializeConversationInput & {
+  expected_revision: number;
+};
+type ExecuteInput = StoreIdentity & {
+  request_id: string;
+  idempotency_key: string;
+  request_fingerprint?: string;
+  intent: string;
+  entities: CrmEntities;
+  action?: CrmActionProposal;
+};
+type CreateReviewInput = StoreIdentity & {
+  request_id: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  understanding: CrmUnderstanding;
+  action?: CrmActionProposal;
+};
+type DecideReviewInput = StoreIdentity & {
+  review_id: string;
+  decision: "approve" | "reject";
+  idempotency_key: string;
+  request_id: string;
+  correction?: SqlJson;
+};
+type BeginInteractionInput = StoreIdentity & {
+  request_id: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  input_type: string;
+  input_payload: unknown;
+};
+type CheckpointInteractionInput = StoreIdentity & {
+  request_id: string;
+  transcript?: unknown;
+  understanding?: unknown;
+  provider_invocations?: Array<
+    DataRecord & { operation: string; status: string }
+  >;
+  model_versions?: Record<string, unknown>;
+  latency_ms?: Record<string, unknown>;
+  input_asset_id?: string;
+};
+type CompleteInteractionInput = StoreIdentity & {
+  request_id: string;
+  response: DataRecord;
+  http_status: number;
+};
+type FailInteractionInput = StoreIdentity & {
+  request_id: string;
+  error_code: string;
+  error_message: string;
+  http_status: number;
+};
+type RecordInputAssetInput = StoreIdentity & {
+  request_id: string;
+  asset: StoredAsset & { expires_at?: string };
+  object_key: string;
+  byte_length: number;
+  sha256: string;
+};
+type ClaimOutboxInput = {
+  tenant_id: string;
+  worker_id: string;
+  batch_size?: number;
+  lock_timeout_ms?: number;
+};
+type OutboxIdentity = {
+  tenant_id: string;
+  worker_id: string;
+  outbox_id: string;
+};
+type MarkOutboxFailedInput = OutboxIdentity & {
+  error: unknown;
+  max_attempts?: number;
+};
+type ReleaseOutboxInput = Omit<OutboxIdentity, "outbox_id"> & {
+  outbox_ids: string[];
+};
+type TtsRecordContext = {
+  tenant_id?: string;
+  actor_id?: string;
+  request_id?: string;
+  object_key?: string;
+  byte_length?: number;
+  sha256?: string;
+};
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -31,29 +319,39 @@ function idempotencyConflict() {
   );
 }
 
-function messageJobUuid(value) {
+function messageJobUuid(value: unknown): string {
   let raw =
     typeof value === "string" && value.startsWith("job_")
       ? value.slice(4)
       : value;
   if (typeof raw === "string" && /^[0-9a-f]{32}$/i.test(raw)) {
-    raw = raw.replace(
-      /^(.{8})(.{4})(.{4})(.{4})(.{12})$/i,
-      "$1-$2-$3-$4-$5",
-    );
+    raw = raw.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/i, "$1-$2-$3-$4-$5");
   }
-  if (!UUID.test(raw)) throw conflict("message job id is invalid");
+  if (typeof raw !== "string" || !UUID.test(raw))
+    throw conflict("message job id is invalid");
   return raw;
 }
 
-function crmResource(action, { tenant_id, request_id, entities = {} }) {
+function crmResource(
+  action: Action,
+  {
+    tenant_id,
+    request_id,
+    entities = {},
+  }: { tenant_id: string; request_id: string; entities?: CrmEntities },
+): AuthorizationResource {
   if (action === "crm.deal.update_stage") {
     return { type: "deal", id: entities.deal?.value ?? request_id, tenant_id };
   }
   return { type: "customer", id: request_id, tenant_id };
 }
 
-function positiveInteger(value, fallback, name, max) {
+function positiveInteger(
+  value: unknown,
+  fallback: number,
+  name: string,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
   const parsed = Number(value ?? fallback);
   if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > max) {
     throw new Error(
@@ -63,12 +361,96 @@ function positiveInteger(value, fallback, name, max) {
   return parsed;
 }
 
-function requiredString(value, name, max = 256) {
+function requiredString(value: unknown, name: string, max = 256): string {
   if (typeof value !== "string" || value.length === 0 || value.length > max)
     throw new TypeError(
       `${name} must be a non-empty string no longer than ${max} characters`,
     );
   return value;
+}
+
+function requiredDate(value: Date | string | undefined, name: string): Date {
+  if (value === undefined) throw new Error(`${name} is required`);
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`${name} is invalid`);
+  return parsed;
+}
+
+function isDataRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function errorDetails(error: unknown): {
+  code?: string;
+  details?: unknown;
+  message?: string;
+} {
+  if (!isDataRecord(error)) return {};
+  const candidate = error;
+  return {
+    code: typeof candidate.code === "string" ? candidate.code : undefined,
+    details: candidate.details,
+    message:
+      typeof candidate.message === "string" ? candidate.message : undefined,
+  };
+}
+
+function messageJobStatus(value: unknown): MessageJobStatus {
+  if (typeof value === "string") {
+    for (const status of MESSAGE_JOB_STATES) {
+      if (value === status) return status;
+    }
+  }
+  throw new Error("database returned an invalid message job status");
+}
+
+function principalKind(value: string | undefined): PrincipalKind {
+  if (value === "human" || value === "agent" || value === "workload")
+    return value;
+  throw authorizationError();
+}
+
+function actionGrants(values: readonly string[] | undefined): ActionGrant[] {
+  if (!values) return [];
+  const grants: ActionGrant[] = [];
+  for (const value of values) {
+    if (
+      value === "crm.*" ||
+      value === "media.*" ||
+      value === "interaction.ask" ||
+      value === "crm.search" ||
+      value === "crm.customer.create" ||
+      value === "crm.deal.update_stage" ||
+      value === "review.decide" ||
+      value === "media.tts.create" ||
+      value === "media.asset.read" ||
+      value === "events.read" ||
+      value === "progress.subscribe" ||
+      value === "outbox.relay"
+    ) {
+      grants.push(value);
+    } else {
+      throw authorizationError();
+    }
+  }
+  return grants;
+}
+
+function parseStoredAsset(value: SqlJson | undefined): StoredAsset {
+  if (
+    !value ||
+    typeof value.asset_id !== "string" ||
+    typeof value.mime_type !== "string" ||
+    typeof value.status !== "string"
+  ) {
+    throw conflict("database returned an invalid stored asset");
+  }
+  return {
+    ...value,
+    asset_id: value.asset_id,
+    mime_type: value.mime_type,
+    status: value.status,
+  };
 }
 
 /**
@@ -77,20 +459,28 @@ function requiredString(value, name, max = 256) {
  * state, audit and outbox records together.
  */
 export class PostgresCrmStore {
+  readonly pool: PgPoolPort;
+  readonly cipher: CipherPort;
+  readonly authorize: AuthorizePort | undefined;
+  readonly interactionLeaseMs: number;
   constructor({
     connectionString,
     pool,
     cipher,
     authorize,
     env = process.env,
-  } = {}) {
+  }: PostgresStoreOptions = {}) {
     const resolvedConnectionString = connectionString ?? env.DATABASE_URL;
     if (!pool && !resolvedConnectionString)
       throw new Error("DATABASE_URL is required when STORE_PROVIDER=postgres");
     this.pool =
       pool ??
       new Pool({
-        connectionString: resolvedConnectionString,
+        connectionString: requiredString(
+          resolvedConnectionString,
+          "DATABASE_URL",
+          8192,
+        ),
         max: Number(env.DATABASE_POOL_MAX || 10),
       });
     this.cipher =
@@ -112,10 +502,11 @@ export class PostgresCrmStore {
       await this.pool.query("select 1");
       return { ready: true, provider: "postgres" };
     } catch (error) {
+      const failure = errorDetails(error);
       return {
         ready: false,
         provider: "postgres",
-        reason: error?.code ?? "database_unavailable",
+        reason: failure.code ?? "database_unavailable",
       };
     }
   }
@@ -127,7 +518,7 @@ export class PostgresCrmStore {
     idempotency_key,
     request_fingerprint,
     payload,
-  }) {
+  }: EnqueueMessageJobInput) {
     return await this.#transaction(
       { tenant_id, actor_id },
       async (client, actorUuid) => {
@@ -152,7 +543,7 @@ export class PostgresCrmStore {
           const row = inserted.rows[0];
           await this.#appendMessageTransition(client, {
             tenant_id,
-            job_id: row.id,
+            job_id: requiredString(row.id, "message_jobs.id"),
             status: "inbound",
           });
           await client.query(
@@ -162,7 +553,7 @@ export class PostgresCrmStore {
           );
           await this.#appendMessageTransition(client, {
             tenant_id,
-            job_id: row.id,
+            job_id: requiredString(row.id, "message_jobs.id"),
             status: "job_queued",
           });
           return {
@@ -188,7 +579,7 @@ export class PostgresCrmStore {
     worker_id,
     batch_size = 10,
     lease_ms = this.interactionLeaseMs,
-  }) {
+  }: ClaimMessageJobsInput) {
     requiredString(worker_id, "worker_id");
     const batchSize = positiveInteger(batch_size, 10, "batch_size", 1000);
     const leaseMs = positiveInteger(
@@ -224,7 +615,7 @@ export class PostgresCrmStore {
           const claimedRow = updated.rows[0];
           await this.#appendMessageTransition(client, {
             tenant_id,
-            job_id: row.id,
+            job_id: requiredString(row.id, "message_jobs.id"),
             status: "running",
             worker_id,
             reason: row.status === "running" ? "lease_reclaimed" : "claimed",
@@ -237,7 +628,12 @@ export class PostgresCrmStore {
     );
   }
 
-  async getMessageJob({ tenant_id, actor_id, job_id, idempotency_key }) {
+  async getMessageJob({
+    tenant_id,
+    actor_id,
+    job_id,
+    idempotency_key,
+  }: GetMessageJobInput) {
     const databaseJobId = job_id ? messageJobUuid(job_id) : undefined;
     return await this.#transaction(
       { tenant_id, actor_id },
@@ -256,7 +652,11 @@ export class PostgresCrmStore {
     );
   }
 
-  async messageJobTransitions({ tenant_id, actor_id, job_id }) {
+  async messageJobTransitions({
+    tenant_id,
+    actor_id,
+    job_id,
+  }: GetMessageJobInput) {
     const databaseJobId = messageJobUuid(job_id);
     return await this.#transaction(
       { tenant_id, actor_id },
@@ -267,19 +667,30 @@ export class PostgresCrmStore {
             where tenant_id=$1 and job_id=$2 order by sequence`,
           [tenant_id, databaseJobId],
         );
-        return rows.rows.map((row) => ({
-          sequence: Number(row.sequence),
-          status: row.status,
-          worker_id: row.worker_id ?? undefined,
-          reason: row.reason ?? undefined,
-          created_at: new Date(row.created_at).toISOString(),
-        }));
+        return rows.rows.map(
+          (row) =>
+            ({
+              sequence: Number(row.sequence),
+              status: messageJobStatus(row.status),
+              worker_id: row.worker_id ?? undefined,
+              reason: row.reason ?? undefined,
+              created_at: requiredDate(
+                row.created_at,
+                "message_job_transitions.created_at",
+              ).toISOString(),
+            }) satisfies MessageJobTransition,
+        );
       },
       { requireActor: actor_id !== undefined },
     );
   }
 
-  async completeMessageJob({ tenant_id, job_id, worker_id, result }) {
+  async completeMessageJob({
+    tenant_id,
+    job_id,
+    worker_id,
+    result,
+  }: CompleteMessageJobInput) {
     const databaseJobId = messageJobUuid(job_id);
     return await this.#transaction(
       { tenant_id },
@@ -320,7 +731,7 @@ export class PostgresCrmStore {
     error_code = "UPSTREAM_UNAVAILABLE",
     error_message,
     max_attempts = 8,
-  }) {
+  }: FailMessageJobInput) {
     const databaseJobId = messageJobUuid(job_id);
     const maxAttempts = positiveInteger(max_attempts, 8, "max_attempts", 1000);
     return await this.#transaction(
@@ -379,7 +790,7 @@ export class PostgresCrmStore {
     job_id,
     worker_id,
     reason = "cancelled",
-  }) {
+  }: ReleaseMessageJobInput) {
     const databaseJobId = messageJobUuid(job_id);
     return await this.#transaction(
       { tenant_id },
@@ -409,7 +820,7 @@ export class PostgresCrmStore {
     );
   }
 
-  async messageJobStats({ tenant_id }) {
+  async messageJobStats({ tenant_id }: { tenant_id: string }) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -417,18 +828,17 @@ export class PostgresCrmStore {
           "select status,count(*)::integer as count from message_jobs where tenant_id=$1 group by status",
           [tenant_id],
         );
-        const stats = Object.fromEntries(
-          [
-            "inbound",
-            "job_queued",
-            "running",
-            "succeeded",
-            "retry_wait",
-            "dead_letter",
-            "cancelled",
-          ].map((status) => [status, 0]),
-        );
-        for (const row of rows.rows) stats[row.status] = Number(row.count);
+        const stats: Record<MessageJobStatus, number> = {
+          inbound: 0,
+          job_queued: 0,
+          running: 0,
+          succeeded: 0,
+          retry_wait: 0,
+          dead_letter: 0,
+          cancelled: 0,
+        };
+        for (const row of rows.rows)
+          stats[messageJobStatus(row.status)] = Number(row.count);
         return stats;
       },
       { requireActor: false },
@@ -442,7 +852,7 @@ export class PostgresCrmStore {
     event_type,
     worker_id,
     lease_ms = this.interactionLeaseMs,
-  }) {
+  }: EventDeliveryInput) {
     requiredString(consumer_id, "consumer_id");
     requiredString(event_id, "event_id");
     requiredString(worker_id, "worker_id");
@@ -466,7 +876,8 @@ export class PostgresCrmStore {
           return { duplicate: true, status: "completed" };
         if (
           existing?.status === "claimed" &&
-          existing.lease_expires_at > new Date() &&
+          existing.lease_expires_at !== undefined &&
+          new Date(existing.lease_expires_at).getTime() > Date.now() &&
           existing.lease_owner !== worker_id
         ) {
           return { duplicate: false, claimed: false, status: "claimed" };
@@ -507,7 +918,12 @@ export class PostgresCrmStore {
     );
   }
 
-  async completeEventDelivery({ tenant_id, consumer_id, event_id, worker_id }) {
+  async completeEventDelivery({
+    tenant_id,
+    consumer_id,
+    event_id,
+    worker_id,
+  }: EventDeliveryInput) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -525,7 +941,12 @@ export class PostgresCrmStore {
     );
   }
 
-  async releaseEventDelivery({ tenant_id, consumer_id, event_id, worker_id }) {
+  async releaseEventDelivery({
+    tenant_id,
+    consumer_id,
+    event_id,
+    worker_id,
+  }: EventDeliveryInput) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -540,48 +961,53 @@ export class PostgresCrmStore {
     );
   }
 
-  async principalFor(identity) {
+  async principalFor(identity: StoreIdentity) {
     return await this.#transaction(
       identity,
-      async (_client, _actorUuid, principal) => principal,
+      async (_client, _actorUuid, principal) => {
+        if (!principal) throw authorizationError();
+        return principal;
+      },
     );
   }
 
-  async #authorize(principal, action, resource, requestId) {
+  async #authorize(
+    principal: ResolvedPrincipal | undefined,
+    action: Action,
+    resource: AuthorizationResource,
+    requestId?: string,
+  ) {
     const policyVersion =
       typeof principal?.policy_version === "string"
         ? principal.policy_version
         : "unknown";
     if (typeof this.authorize !== "function")
       throw authorizationError(undefined, policyVersion);
-    const requestPrincipal = {
+    if (!principal) throw authorizationError(undefined, policyVersion);
+    const requestPrincipal: AuthorizationRequest["principal"] = {
       subject_id: principal.subject_id,
       kind: principal.kind,
       tenant_id: principal.tenant_id,
       status: principal.status,
       roles: [...principal.roles],
       actor_scopes: [...principal.actor_scopes],
-    };
-    if (
-      typeof principal.workload_id === "string" &&
+      ...(typeof principal.workload_id === "string" &&
       principal.workload_id.length > 0
-    ) {
-      requestPrincipal.workload_id = principal.workload_id;
-    }
-    const context = {
+        ? { workload_id: principal.workload_id }
+        : {}),
+    };
+    const context: AuthorizationRequest["context"] = {
       token_scopes: [...principal.token_scopes],
       request_id: requestId,
-    };
-    if (Array.isArray(principal.authentication_methods)) {
-      context.authentication_methods = [...principal.authentication_methods];
-    }
-    if (
-      typeof principal.network_zone === "string" &&
+      ...(Array.isArray(principal.authentication_methods)
+        ? { authentication_methods: [...principal.authentication_methods] }
+        : {}),
+      ...(typeof principal.network_zone === "string" &&
       principal.network_zone.length > 0
-    ) {
-      context.network_zone = principal.network_zone;
-    }
-    let decision;
+        ? { network_zone: principal.network_zone }
+        : {}),
+    };
+    let decision: AuthorizationDecisionLike;
     try {
       decision = await this.authorize(
         Object.freeze({
@@ -592,8 +1018,9 @@ export class PostgresCrmStore {
         }),
       );
     } catch (error) {
-      if (error?.code === "FORBIDDEN")
-        throw authorizationError(error.details, policyVersion);
+      const failure = errorDetails(error);
+      if (failure.code === "FORBIDDEN")
+        throw authorizationError(failure.details, policyVersion);
       throw error;
     }
     if (decision?.effect !== "allow")
@@ -606,7 +1033,7 @@ export class PostgresCrmStore {
     actor_id,
     conversation_id,
     state,
-  }) {
+  }: InitializeConversationInput) {
     return await this.#transaction(
       { tenant_id, actor_id },
       async (client, actorUuid) => {
@@ -644,7 +1071,11 @@ export class PostgresCrmStore {
     );
   }
 
-  async conversationState({ tenant_id, actor_id, conversation_id }) {
+  async conversationState({
+    tenant_id,
+    actor_id,
+    conversation_id,
+  }: ConversationInput) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const row = (
         await client.query(
@@ -671,7 +1102,7 @@ export class PostgresCrmStore {
     conversation_id,
     expected_revision,
     state,
-  }) {
+  }: ReplaceConversationInput) {
     return await this.#transaction(
       { tenant_id, actor_id },
       async (client, actorUuid) => {
@@ -700,7 +1131,11 @@ export class PostgresCrmStore {
     );
   }
 
-  async #transaction(identity, work, { requireActor = true } = {}) {
+  async #transaction<T>(
+    identity: StoreIdentity,
+    work: TransactionWork<T>,
+    { requireActor = true }: { requireActor?: boolean } = {},
+  ): Promise<T> {
     if (!UUID.test(identity.tenant_id)) throw authorizationError();
     const client = await this.pool.connect();
     try {
@@ -713,35 +1148,37 @@ export class PostgresCrmStore {
         [identity.tenant_id],
       );
       if (tenant.rowCount !== 1) throw authorizationError();
-      let actorUuid = null;
-      let principal;
+      let actorUuid: string | null = null;
+      let principal: ResolvedPrincipal | undefined;
       if (requireActor) {
         const actor = await client.query(
           "select id,role,scopes,status from actors where tenant_id = $1 and subject = $2",
           [identity.tenant_id, identity.actor_id],
         );
-        if (actor.rowCount !== 1 || actor.rows[0].status !== "active") {
+        const actorRow = actor.rows[0];
+        if (actor.rowCount !== 1 || actorRow?.status !== "active") {
           throw authorizationError(undefined, tenant.rows[0].policy_version);
         }
-        actorUuid = actor.rows[0].id;
-        principal = Object.freeze({
+        if (!actorRow.role)
+          throw authorizationError(undefined, tenant.rows[0].policy_version);
+        actorUuid = requiredString(actorRow.id, "actors.id");
+        principal = Object.freeze<ResolvedPrincipal>({
           ...identity,
-          subject_id: identity.actor_id,
+          subject_id: requiredString(identity.actor_id, "actor_id"),
           actor_uuid: actorUuid,
-          kind: identity.kind ?? identity.principal_kind ?? "human",
-          status: actor.rows[0].status,
-          roles: Object.freeze([actor.rows[0].role]),
+          kind: principalKind(
+            identity.kind ?? identity.principal_kind ?? "human",
+          ),
+          status: "active",
+          roles: Object.freeze([actorRow.role]),
           actor_scopes: Object.freeze(
-            Array.isArray(actor.rows[0].scopes)
-              ? [...actor.rows[0].scopes]
-              : [],
+            Array.isArray(actorRow.scopes) ? [...actorRow.scopes] : [],
           ),
-          token_scopes: Object.freeze(
-            Array.isArray(identity.token_scopes)
-              ? [...identity.token_scopes]
-              : [],
+          token_scopes: Object.freeze(actionGrants(identity.token_scopes)),
+          policy_version: requiredString(
+            tenant.rows[0].policy_version,
+            "tenants.policy_version",
           ),
-          policy_version: tenant.rows[0].policy_version,
         });
       }
       const result = await work(client, actorUuid, principal);
@@ -757,7 +1194,7 @@ export class PostgresCrmStore {
     }
   }
 
-  async execute(input) {
+  async execute(input: ExecuteInput) {
     const {
       tenant_id,
       idempotency_key,
@@ -768,12 +1205,19 @@ export class PostgresCrmStore {
       action,
     } = input;
     const intentDefinition = agentCrmIntentDefinition(intent);
+    if (!isAgentCrmIntent(intent))
+      throw Object.assign(new Error("CRM intent is not implemented"), {
+        code: "INVALID_REQUEST",
+      });
     if (intentDefinition.effect === "write")
       assertExecutableAgentCrmEntities(intent, entities);
     if (action !== undefined) {
       assertAgentCrmActionProposal(action);
       if (action.intent !== intent)
-        throw Object.assign(new Error("CRM action intent does not match command intent"), { code: "INVALID_REQUEST" });
+        throw Object.assign(
+          new Error("CRM action intent does not match command intent"),
+          { code: "INVALID_REQUEST" },
+        );
     }
     const fingerprint =
       request_fingerprint ?? sha256(JSON.stringify({ intent, entities }));
@@ -815,7 +1259,7 @@ export class PostgresCrmStore {
           return previous.rows[0].result;
         }
 
-        let result;
+        let result: CrmCommandResult;
         if (intent === "crm.deal.update_stage") {
           const dealId = entities.deal?.value;
           if (!UUID.test(dealId ?? ""))
@@ -831,7 +1275,10 @@ export class PostgresCrmStore {
             throw conflict("deal was not found or its version changed");
           result = {
             action: "updated",
-            resource: { type: "deal", id: updated.rows[0].id },
+            resource: {
+              type: "deal",
+              id: requiredString(updated.rows[0].id, "deals.id"),
+            },
             aggregate_version: Number(updated.rows[0].version),
           };
         } else if (intent === "crm.customer.create") {
@@ -845,7 +1292,10 @@ export class PostgresCrmStore {
           );
           result = {
             action: "created",
-            resource: { type: "customer", id: created.rows[0].id },
+            resource: {
+              type: "customer",
+              id: requiredString(created.rows[0].id, "customers.id"),
+            },
             aggregate_version: Number(created.rows[0].version),
           };
         } else if (intent === "crm.search") {
@@ -854,7 +1304,11 @@ export class PostgresCrmStore {
             resource: null,
             aggregate_version: 0,
           };
-        } else throw Object.assign(new Error("CRM intent has no execution handler"), { code: "INVALID_REQUEST" });
+        } else
+          throw Object.assign(
+            new Error("CRM intent has no execution handler"),
+            { code: "INVALID_REQUEST" },
+          );
 
         await client.query(
           "update crm_commands set status='committed', result=$3::jsonb, committed_at=now() where tenant_id=$1 and id=$2",
@@ -873,7 +1327,7 @@ export class PostgresCrmStore {
     );
   }
 
-  async createReview(input) {
+  async createReview(input: CreateReviewInput) {
     const {
       tenant_id,
       request_id,
@@ -882,19 +1336,27 @@ export class PostgresCrmStore {
       understanding,
       action,
     } = input;
-    agentCrmIntentDefinition(understanding.intent);
+    const reviewIntent = understanding.intent;
+    agentCrmIntentDefinition(reviewIntent);
+    if (!isAgentCrmIntent(reviewIntent))
+      throw Object.assign(new Error("CRM intent is not implemented"), {
+        code: "INVALID_REQUEST",
+      });
     if (action !== undefined) {
       assertAgentCrmActionProposal(action);
       if (action.intent !== understanding.intent)
-        throw Object.assign(new Error("CRM action intent does not match review intent"), { code: "INVALID_REQUEST" });
+        throw Object.assign(
+          new Error("CRM action intent does not match review intent"),
+          { code: "INVALID_REQUEST" },
+        );
     }
     return await this.#transaction(
       input,
       async (client, actorUuid, principal) => {
         await this.#authorize(
           principal,
-          understanding.intent,
-          crmResource(understanding.intent, {
+          reviewIntent,
+          crmResource(reviewIntent, {
             tenant_id,
             request_id,
             entities: understanding.entities,
@@ -958,7 +1420,7 @@ export class PostgresCrmStore {
     );
   }
 
-  async decideReview(input) {
+  async decideReview(input: DecideReviewInput) {
     const {
       tenant_id,
       review_id,
@@ -1080,38 +1542,43 @@ export class PostgresCrmStore {
           );
           return result;
         }
-        const understanding = row.payload?.understanding ?? {};
-        const entities = correction?.entities ?? understanding.entities ?? {};
+        const understanding = row.payload?.understanding;
+        const entities = correction?.entities ?? understanding?.entities ?? {};
         const action = row.payload?.action;
-        agentCrmIntentDefinition(row.intent);
-        assertExecutableAgentCrmEntities(row.intent, entities);
+        const reviewIntent = row.intent;
+        agentCrmIntentDefinition(reviewIntent);
+        assertExecutableAgentCrmEntities(reviewIntent, entities);
+        if (!reviewIntent) throw conflict("review command intent is missing");
         await this.#authorize(
           principal,
-          row.intent,
-          crmResource(row.intent, { tenant_id, request_id, entities }),
+          reviewIntent,
+          crmResource(reviewIntent, { tenant_id, request_id, entities }),
           request_id,
         );
-        let result = {
+        let result: CrmCommandResult = {
           action: "approved",
           resource: { type: "review", id: publicReviewId },
           aggregate_version: 2,
         };
-        if (row.intent === "crm.customer.create") {
+        if (reviewIntent === "crm.customer.create") {
           const created = await client.query(
             "insert into customers (tenant_id,name,preferred_language) values ($1,$2,$3) returning id,version",
             [
               tenant_id,
-              entities.customer.name,
+              requiredString(entities.customer?.name, "customer.name"),
               entities.customer?.preferred_language ?? "en-US",
             ],
           );
           result = {
             action: "created",
-            resource: { type: "customer", id: created.rows[0].id },
+            resource: {
+              type: "customer",
+              id: requiredString(created.rows[0].id, "customers.id"),
+            },
             aggregate_version: Number(created.rows[0].version),
           };
-        } else if (row.intent === "crm.deal.update_stage") {
-          const dealId = entities.deal.value;
+        } else if (reviewIntent === "crm.deal.update_stage") {
+          const dealId = requiredString(entities.deal?.value, "deal.value");
           if (!UUID.test(dealId))
             throw conflict("deal id must be a UUID in PostgreSQL mode");
           const updated = await client.query(
@@ -1121,15 +1588,18 @@ export class PostgresCrmStore {
             [
               tenant_id,
               dealId,
-              entities.stage.value,
-              entities.deal.expected_version ?? null,
+              requiredString(entities.stage?.value, "stage.value"),
+              entities.deal?.expected_version ?? null,
             ],
           );
           if (updated.rowCount !== 1)
             throw conflict("deal was not found or its version changed");
           result = {
             action: "updated",
-            resource: { type: "deal", id: updated.rows[0].id },
+            resource: {
+              type: "deal",
+              id: requiredString(updated.rows[0].id, "deals.id"),
+            },
             aggregate_version: Number(updated.rows[0].version),
           };
         }
@@ -1186,7 +1656,7 @@ export class PostgresCrmStore {
     request_fingerprint,
     input_type,
     input_payload,
-  }) {
+  }: BeginInteractionInput) {
     return await this.#transaction(
       { tenant_id, actor_id },
       async (client, actorUuid) => {
@@ -1213,7 +1683,10 @@ export class PostgresCrmStore {
         if (inserted.rowCount === 1) {
           await this.#appendInteractionWal(client, {
             tenant_id,
-            interaction_id: inserted.rows[0].id,
+            interaction_id: requiredString(
+              inserted.rows[0].id,
+              "voice_interactions.id",
+            ),
             request_id,
             entry_type: "started",
             payload: {
@@ -1243,7 +1716,7 @@ export class PostgresCrmStore {
           };
         }
         if (row.status === "failed") {
-          const detail = this.cipher.decrypt(
+          const detail = this.cipher.decrypt<{ message?: string }>(
             row.error_message_ciphertext,
             `${tenant_id}:error`,
           );
@@ -1276,11 +1749,16 @@ export class PostgresCrmStore {
           if (recovered.rowCount === 1) {
             await this.#appendInteractionWal(client, {
               tenant_id,
-              interaction_id: row.id,
+              interaction_id: requiredString(row.id, "voice_interactions.id"),
               request_id,
               entry_type: "recovered",
               payload: {
-                previous_request_id_hash: sha256(row.request_id),
+                previous_request_id_hash: sha256(
+                  requiredString(
+                    row.request_id,
+                    "voice_interactions.request_id",
+                  ),
+                ),
                 recovery_count: recovered.rows[0].recovery_count,
               },
             });
@@ -1304,7 +1782,7 @@ export class PostgresCrmStore {
     model_versions = {},
     latency_ms = {},
     input_asset_id,
-  }) {
+  }: CheckpointInteractionInput) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const transcriptCiphertext =
         transcript === undefined
@@ -1342,7 +1820,10 @@ export class PostgresCrmStore {
         throw conflict("interaction checkpoint target is not processing");
       await this.#appendInteractionWal(client, {
         tenant_id,
-        interaction_id: updated.rows[0].id,
+        interaction_id: requiredString(
+          updated.rows[0].id,
+          "voice_interactions.id",
+        ),
         request_id,
         entry_type: "checkpointed",
         payload: {
@@ -1363,7 +1844,7 @@ export class PostgresCrmStore {
     request_id,
     response,
     http_status,
-  }) {
+  }: CompleteInteractionInput) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const ciphertext = this.cipher.encrypt(response, `${tenant_id}:response`);
       const status =
@@ -1380,7 +1861,10 @@ export class PostgresCrmStore {
         throw conflict("interaction completion target is not processing");
       await this.#appendInteractionWal(client, {
         tenant_id,
-        interaction_id: updated.rows[0].id,
+        interaction_id: requiredString(
+          updated.rows[0].id,
+          "voice_interactions.id",
+        ),
         request_id,
         entry_type: "completed",
         payload: { status, http_status },
@@ -1395,7 +1879,7 @@ export class PostgresCrmStore {
     error_code,
     error_message,
     http_status,
-  }) {
+  }: FailInteractionInput) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const ciphertext = this.cipher.encrypt(
         { message: error_message },
@@ -1412,7 +1896,10 @@ export class PostgresCrmStore {
       if (updated.rowCount === 1) {
         await this.#appendInteractionWal(client, {
           tenant_id,
-          interaction_id: updated.rows[0].id,
+          interaction_id: requiredString(
+            updated.rows[0].id,
+            "voice_interactions.id",
+          ),
           request_id,
           entry_type: "failed",
           payload: { error_code, http_status },
@@ -1421,7 +1908,11 @@ export class PostgresCrmStore {
     });
   }
 
-  async abandonInteraction({ tenant_id, actor_id, request_id }) {
+  async abandonInteraction({
+    tenant_id,
+    actor_id,
+    request_id,
+  }: StoreIdentity & { request_id: string }) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const released = await client.query(
         `update voice_interactions set lease_expires_at=now(),updated_at=now()
@@ -1433,7 +1924,10 @@ export class PostgresCrmStore {
       if (released.rowCount === 1) {
         await this.#appendInteractionWal(client, {
           tenant_id,
-          interaction_id: released.rows[0].id,
+          interaction_id: requiredString(
+            released.rows[0].id,
+            "voice_interactions.id",
+          ),
           request_id,
           entry_type: "abandoned",
           payload: { reason: "request_cancelled" },
@@ -1451,7 +1945,7 @@ export class PostgresCrmStore {
     object_key,
     byte_length,
     sha256: assetSha256,
-  }) {
+  }: RecordInputAssetInput) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const inserted = await client.query(
         `insert into media_assets (tenant_id,request_id,kind,object_key,external_asset_id,content_type,byte_length,sha256,status,expires_at)
@@ -1492,7 +1986,7 @@ export class PostgresCrmStore {
     worker_id,
     batch_size = 25,
     lock_timeout_ms = 60_000,
-  }) {
+  }: ClaimOutboxInput) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -1519,7 +2013,11 @@ export class PostgresCrmStore {
     );
   }
 
-  async markOutboxPublished({ tenant_id, worker_id, outbox_id }) {
+  async markOutboxPublished({
+    tenant_id,
+    worker_id,
+    outbox_id,
+  }: OutboxIdentity) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -1543,7 +2041,7 @@ export class PostgresCrmStore {
     outbox_id,
     error,
     max_attempts = 8,
-  }) {
+  }: MarkOutboxFailedInput) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -1583,7 +2081,11 @@ export class PostgresCrmStore {
     );
   }
 
-  async releaseOutboxLeases({ tenant_id, worker_id, outbox_ids }) {
+  async releaseOutboxLeases({
+    tenant_id,
+    worker_id,
+    outbox_ids,
+  }: ReleaseOutboxInput) {
     if (!Array.isArray(outbox_ids) || outbox_ids.length === 0)
       return { released: 0 };
     return await this.#transaction(
@@ -1601,7 +2103,7 @@ export class PostgresCrmStore {
     );
   }
 
-  async events(tenant_id, actor_id) {
+  async events(tenant_id: string, actor_id?: string) {
     return await this.#transaction({ tenant_id, actor_id }, async (client) => {
       const rows = await client.query(
         "select id,event_type,aggregate_type,aggregate_id,aggregate_version,request_id,payload,created_at from outbox_events where tenant_id=$1 order by created_at,id limit 100",
@@ -1611,16 +2113,27 @@ export class PostgresCrmStore {
     });
   }
 
-  #messageJob(row, tenant_id) {
+  #messageJob(row: SqlRow, tenant_id: string): MessageJob;
+  #messageJob(row: undefined, tenant_id: string): undefined;
+  #messageJob(
+    row: SqlRow | undefined,
+    tenant_id: string,
+  ): MessageJob | undefined {
     if (!row) return undefined;
     return {
-      id: `job_${String(row.id).replaceAll("-", "")}`,
+      id: `job_${requiredString(row.id, "message_jobs.id").replaceAll("-", "")}`,
       tenant_id: row.tenant_id ?? tenant_id,
       actor_id: row.actor_id,
-      request_id: row.request_id,
-      idempotency_key: row.idempotency_key,
-      request_fingerprint: row.request_fingerprint,
-      status: row.status,
+      request_id: requiredString(row.request_id, "message_jobs.request_id"),
+      idempotency_key: requiredString(
+        row.idempotency_key,
+        "message_jobs.idempotency_key",
+      ),
+      request_fingerprint: requiredString(
+        row.request_fingerprint,
+        "message_jobs.request_fingerprint",
+      ),
+      status: messageJobStatus(row.status),
       payload: row.payload_ciphertext
         ? this.cipher.decrypt(
             row.payload_ciphertext,
@@ -1642,29 +2155,38 @@ export class PostgresCrmStore {
       next_attempt_at: row.next_attempt_at
         ? new Date(row.next_attempt_at).toISOString()
         : undefined,
-      created_at: new Date(row.created_at).toISOString(),
-      updated_at: new Date(row.updated_at).toISOString(),
+      created_at: requiredDate(
+        row.created_at,
+        "message_jobs.created_at",
+      ).toISOString(),
+      updated_at: requiredDate(
+        row.updated_at,
+        "message_jobs.updated_at",
+      ).toISOString(),
       completed_at: row.completed_at
         ? new Date(row.completed_at).toISOString()
         : undefined,
     };
   }
 
-  #assertMessageJobLease(row, workerId) {
+  #assertMessageJobLease(row: SqlRow | undefined, workerId: string): void {
     if (
       !row ||
       row.status !== "running" ||
       row.worker_id !== workerId ||
       !row.lease_expires_at ||
-      row.lease_expires_at <= new Date()
+      requiredDate(
+        row.lease_expires_at,
+        "message_jobs.lease_expires_at",
+      ).getTime() <= Date.now()
     ) {
       throw conflict("message job lease was lost");
     }
   }
 
   async #appendMessageTransition(
-    client,
-    { tenant_id, job_id, status, worker_id, reason },
+    client: PgClientPort,
+    { tenant_id, job_id, status, worker_id, reason }: MessageTransitionInput,
   ) {
     await client.query(
       `insert into message_job_transitions
@@ -1675,23 +2197,33 @@ export class PostgresCrmStore {
     );
   }
 
-  #reviewResult(row) {
+  #reviewResult(row: SqlRow) {
     return {
-      id: this.#reviewId(row.id),
+      id: this.#reviewId(requiredString(row.id, "review_tasks.id")),
       reason: row.reason,
       status: row.status,
       candidates: row.candidates,
-      expires_at: new Date(row.expires_at).toISOString(),
+      expires_at: requiredDate(
+        row.expires_at,
+        "review_tasks.expires_at",
+      ).toISOString(),
     };
   }
 
-  #reviewId(id) {
+  #reviewId(id: string) {
     return `rev_${String(id).replaceAll("-", "")}`;
   }
 
   async #writeAuditAndOutbox(
-    client,
-    { tenant_id, actorUuid, request_id, intent, result, action },
+    client: PgClientPort,
+    {
+      tenant_id,
+      actorUuid,
+      request_id,
+      intent,
+      result,
+      action,
+    }: AuditOutboxInput,
   ) {
     await client.query(
       `insert into audit_records (tenant_id,actor_id,request_id,action,resource_type,resource_id,decision,after_hash)
@@ -1732,8 +2264,14 @@ export class PostgresCrmStore {
   }
 
   async #appendInteractionWal(
-    client,
-    { tenant_id, interaction_id, request_id, entry_type, payload },
+    client: PgClientPort,
+    {
+      tenant_id,
+      interaction_id,
+      request_id,
+      entry_type,
+      payload,
+    }: InteractionWalInput,
   ) {
     const ciphertext = this.cipher.encrypt(
       payload,
@@ -1747,22 +2285,27 @@ export class PostgresCrmStore {
     );
   }
 
-  #event(row, tenant_id) {
-    return validateEvent({
+  #event(row: SqlRow, tenant_id: string): DataRecord {
+    const event = {
       specversion: "1.0",
       id: `evt_${row.id}`,
       type: row.event_type,
       source: "urn:sumi:voice-crm/crm",
       subject: `${row.aggregate_type}/${row.aggregate_id}`,
-      time: new Date(row.created_at).toISOString(),
+      time: requiredDate(
+        row.created_at,
+        "outbox_events.created_at",
+      ).toISOString(),
       datacontenttype: "application/json",
       tenant_id,
       request_id: row.request_id,
       data: row.payload,
-    });
+    };
+    validateEvent(event);
+    return event;
   }
 
-  #ttsKey(key) {
+  #ttsKey(key: string) {
     const separator = String(key).indexOf(":");
     const tenant_id = separator < 0 ? "" : String(key).slice(0, separator);
     const idempotency_key =
@@ -1777,7 +2320,7 @@ export class PostgresCrmStore {
     return { tenant_id, idempotency_key };
   }
 
-  async replayTts(key, fingerprint) {
+  async replayTts(key: string, fingerprint: string) {
     const identity = this.#ttsKey(key);
     return await this.#transaction(
       identity,
@@ -1796,9 +2339,9 @@ export class PostgresCrmStore {
   }
 
   async recordTts(
-    key,
-    fingerprint,
-    result,
+    key: string,
+    fingerprint: string,
+    result: StoredAsset,
     {
       tenant_id,
       actor_id,
@@ -1806,7 +2349,7 @@ export class PostgresCrmStore {
       object_key,
       byte_length,
       sha256: assetSha256,
-    } = {},
+    }: TtsRecordContext = {},
   ) {
     const fromKey = this.#ttsKey(key);
     if (tenant_id !== fromKey.tenant_id)
@@ -1886,7 +2429,7 @@ export class PostgresCrmStore {
             throw idempotencyConflict();
           return race.rows[0]?.result;
         }
-        const persisted = inserted.rows[0].result;
+        const persisted = parseStoredAsset(inserted.rows[0]?.result);
         if (assetCreated) {
           await this.#writeAuditAndOutbox(client, {
             tenant_id,
@@ -1905,7 +2448,7 @@ export class PostgresCrmStore {
     );
   }
 
-  async assetFor(tenant_id, asset_id) {
+  async assetFor(tenant_id: string, asset_id: string) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -1919,7 +2462,7 @@ export class PostgresCrmStore {
     );
   }
 
-  async objectKeyFor(tenant_id, asset_id) {
+  async objectKeyFor(tenant_id: string, asset_id: string) {
     return await this.#transaction(
       { tenant_id },
       async (client) => {
@@ -1934,6 +2477,6 @@ export class PostgresCrmStore {
   }
 }
 
-export function createPostgresStore(options) {
+export function createPostgresStore(options: PostgresStoreOptions = {}) {
   return new PostgresCrmStore(options);
 }

@@ -2,17 +2,83 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { jsonObject, stringValue } from "./docs-verify-helpers.ts";
 
-type Json = Record<string, any>;
+type DocsManifest = Readonly<{
+  version: number;
+  documents: string[];
+  openapi: string;
+}>;
+type DocsRouteMap = Readonly<{
+  version: number;
+  routes: Record<string, string>;
+}>;
+type DocumentVariant = Readonly<{
+  document: string;
+  docId: string;
+  locale: string;
+  audience: string;
+  contentVersion: string;
+}>;
+
+function stringArray(value: unknown, label: string): string[] {
+  if (
+    !Array.isArray(value) ||
+    !value.every((entry) => typeof entry === "string")
+  ) {
+    throw new TypeError(`${label} must be a string array`);
+  }
+  return value;
+}
+
+function parseManifest(value: unknown): DocsManifest {
+  const input = jsonObject(value, "docs manifest");
+  return {
+    version: typeof input.version === "number" ? input.version : Number.NaN,
+    documents: stringArray(input.documents, "docs manifest documents"),
+    openapi: stringValue(input.openapi, "docs manifest openapi"),
+  };
+}
+
+function parseRouteMap(value: unknown): DocsRouteMap {
+  const input = jsonObject(value, "docs route map");
+  const routes = jsonObject(input.routes, "docs route map routes");
+  const normalizedRoutes: Record<string, string> = {};
+  for (const [document, route] of Object.entries(routes)) {
+    normalizedRoutes[document] = stringValue(route, `route for ${document}`);
+  }
+  return {
+    version: typeof input.version === "number" ? input.version : Number.NaN,
+    routes: normalizedRoutes,
+  };
+}
+
+function parseFrontmatter(value: unknown, document: string): DocumentVariant {
+  const input = jsonObject(value, `${document} frontmatter`);
+  return {
+    document,
+    docId: stringValue(input.docId, `${document} docId`),
+    locale: stringValue(input.locale, `${document} locale`),
+    audience: stringValue(input.audience, `${document} audience`),
+    contentVersion: stringValue(
+      input.contentVersion,
+      `${document} contentVersion`,
+    ),
+  };
+}
 
 const outputRoot = resolve("artifacts", "docs-site");
 const machineRoot = resolve(outputRoot, "_mcp");
-const manifest = JSON.parse(
-  await readFile(resolve(machineRoot, "sumi-docs-manifest.json"), "utf8"),
-) as Json;
-const routeMap = JSON.parse(
-  await readFile(resolve(machineRoot, "sumi-docs-routes.json"), "utf8"),
-) as Json;
+const manifest = parseManifest(
+  JSON.parse(
+    await readFile(resolve(machineRoot, "sumi-docs-manifest.json"), "utf8"),
+  ),
+);
+const routeMap = parseRouteMap(
+  JSON.parse(
+    await readFile(resolve(machineRoot, "sumi-docs-routes.json"), "utf8"),
+  ),
+);
 
 assert.deepEqual(Object.keys(manifest).sort(), [
   "documents",
@@ -30,7 +96,7 @@ assert.deepEqual(
 
 const pageFile = (page: string) =>
   page === "/" ? "index.html" : `${page.slice(1)}index.html`;
-const variantsById = new Map<string, Json[]>();
+const variantsById = new Map<string, DocumentVariant[]>();
 
 for (const document of manifest.documents) {
   assert.match(document, /^[a-z0-9_/-]+\.md$/);
@@ -40,7 +106,10 @@ for (const document of manifest.documents) {
   );
   const frontmatterMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(raw);
   assert.ok(frontmatterMatch, `${document} is missing YAML frontmatter`);
-  const frontmatter = parseYaml(frontmatterMatch?.[1] ?? "") as Json;
+  const frontmatter = parseFrontmatter(
+    parseYaml(frontmatterMatch?.[1] ?? ""),
+    document,
+  );
   assert.match(frontmatter.docId, /^crm\.[a-z0-9.-]+$/);
   assert.ok(["en", "zh-CN"].includes(frontmatter.locale));
   assert.ok(["human", "agent", "both"].includes(frontmatter.audience));
@@ -51,7 +120,7 @@ for (const document of manifest.documents) {
   );
 
   const variants = variantsById.get(frontmatter.docId) ?? [];
-  variants.push({ document, ...frontmatter });
+  variants.push(frontmatter);
   variantsById.set(frontmatter.docId, variants);
 
   const page = routeMap.routes[document];
@@ -59,7 +128,7 @@ for (const document of manifest.documents) {
   await access(resolve(outputRoot, ...pageFile(page).split("/")));
 }
 
-const chineseDocuments = manifest.documents.filter((document: string) =>
+const chineseDocuments = manifest.documents.filter((document) =>
   document.startsWith("zh-cn/"),
 );
 assert.equal(chineseDocuments.length, 14);
@@ -70,7 +139,7 @@ for (const document of chineseDocuments) {
   );
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
   assert.ok(match, `${document} is missing YAML frontmatter`);
-  const frontmatter = parseYaml(match?.[1] ?? "") as Json;
+  const frontmatter = parseFrontmatter(parseYaml(match?.[1] ?? ""), document);
   const variants = variantsById.get(frontmatter.docId);
   assert.ok(variants, `${frontmatter.docId} has no English variant`);
   assert.equal(
@@ -79,21 +148,26 @@ for (const document of chineseDocuments) {
     `${frontmatter.docId} must have two locales`,
   );
   assert.deepEqual(
-    new Set(variants.map(({ locale }: Json) => locale)),
+    new Set(variants.map(({ locale }) => locale)),
     new Set(["en", "zh-CN"]),
   );
   assert.equal(
-    new Set(variants.map(({ contentVersion }: Json) => contentVersion)).size,
+    new Set(variants.map(({ contentVersion }) => contentVersion)).size,
     1,
   );
 }
 
-const openapi = JSON.parse(
-  await readFile(resolve(machineRoot, manifest.openapi), "utf8"),
+const openapi = jsonObject(
+  JSON.parse(await readFile(resolve(machineRoot, manifest.openapi), "utf8")),
+  "OpenAPI document",
 );
 assert.equal(openapi.openapi, "3.1.0");
-assert.ok(openapi.paths["/v1/ask"]?.post);
-assert.ok(openapi.paths["/v1/tts/synthesize"]?.post);
+const openapiPaths = jsonObject(openapi.paths, "OpenAPI paths");
+assert.ok(jsonObject(openapiPaths["/v1/ask"], "OpenAPI /v1/ask").post);
+assert.ok(
+  jsonObject(openapiPaths["/v1/tts/synthesize"], "OpenAPI /v1/tts/synthesize")
+    .post,
+);
 
 const englishHome = await readFile(resolve(outputRoot, "index.html"), "utf8");
 const chineseHome = await readFile(

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProductionConfig } from "../src/production-config.ts";
 
-const production = {
+const production: NodeJS.ProcessEnv = {
   APP_ENV: "production",
   STORE_PROVIDER: "postgres",
   DATABASE_URL: "postgresql://db/app",
@@ -55,7 +55,7 @@ test("production API configuration rejects every development fallback", () => {
 });
 
 test("production API configuration accepts fail-closed single-tenant static authentication", () => {
-  const staticAuth = {
+  const staticAuth: NodeJS.ProcessEnv = {
     ...production,
     AUTH_MODE: "static",
     AUTH_STATIC_BEARER_TOKEN: "s".repeat(48),
@@ -90,7 +90,7 @@ test("production API configuration accepts fail-closed single-tenant static auth
 });
 
 test("production API configuration supports mixed providers and DashScope aliases", () => {
-  const mixed = {
+  const mixed: NodeJS.ProcessEnv = {
     ...production,
     ASR_PROVIDER: "dashscope",
     INTENT_PROVIDER: "openai-compatible",
@@ -100,13 +100,16 @@ test("production API configuration supports mixed providers and DashScope aliase
   };
   assert.doesNotThrow(() => validateProductionConfig(mixed));
 
-  const dashscopeOnly = { ...mixed, INTENT_PROVIDER: "dashscope" };
+  const dashscopeOnly: NodeJS.ProcessEnv = {
+    ...mixed,
+    INTENT_PROVIDER: "dashscope",
+  };
   delete dashscopeOnly.OPENAI_API_KEY;
   delete dashscopeOnly.OPENAI_BASE_URL;
   delete dashscopeOnly.OPENAI_MODEL;
   assert.doesNotThrow(() => validateProductionConfig(dashscopeOnly));
 
-  const aliyunAliases = {
+  const aliyunAliases: NodeJS.ProcessEnv = {
     ...dashscopeOnly,
     ALIYUN_BASE_APIKEY: "alias-test-only",
     ALIYUN_BASE_URL: mixed.DASHSCOPE_BASE_URL,

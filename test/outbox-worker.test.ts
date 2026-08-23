@@ -1,39 +1,60 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createControlEngine } from "../src/control/index.ts";
+import {
+  createControlEngine,
+  createManagedTaskRegistry,
+} from "../src/control/index.ts";
+import { outboxConfig, type OutboxRelay } from "../src/outbox-relay.ts";
 import { createOutboxWorker } from "../src/outbox-worker.ts";
 
+type RelayPort = Pick<OutboxRelay, "runOnce">;
+
+const config = () =>
+  outboxConfig({
+    OUTBOX_TARGET_URL: "https://events.example.test/hook",
+    OUTBOX_TENANT_IDS: "tenant-a",
+    OUTBOX_POLL_INTERVAL_MS: "1",
+  });
+
 test("outbox polling is a managed task and cooperative shutdown closes the store", async () => {
-  const lifecycle = [];
-  const store = { close: async () => lifecycle.push("store:close") };
-  let firstRun;
-  const ran = new Promise((resolve) => {
+  const lifecycle: string[] = [];
+  const store = {
+    close: async () => {
+      lifecycle.push("store:close");
+    },
+  };
+  let firstRun: () => void = () => {};
+  const ran = new Promise<void>((resolve) => {
     firstRun = resolve;
   });
-  const relay = {
-    runOnce: async ({ signal }) => {
+  const relay: RelayPort = {
+    runOnce: async ({
+      signal,
+    }: { signal?: AbortSignal } = {}): Promise<never> => {
+      assert.ok(signal);
       firstRun();
-      await new Promise((resolve, reject) =>
+      return await new Promise<never>((_resolve, reject) =>
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         }),
       );
     },
   };
-  const control = createControlEngine({ teardownTimeoutMs: 50 });
+  const tasks = createManagedTaskRegistry({ teardownTimeoutMs: 50 });
+  const control = createControlEngine({ tasks });
   const worker = createOutboxWorker({
     store,
     relay,
     control,
-    config: { pollIntervalMs: 1 },
+    config: config(),
   });
   const task = await worker.start();
   await ran;
-  assert.equal(control.taskSnapshot().tasks[0].name, "outbox.poll");
+  assert.equal(tasks.snapshot().tasks.at(0)?.name, "outbox.poll");
   await Promise.all([worker.close(new Error("test shutdown")), worker.close()]);
   await assert.rejects(task.result, /test shutdown/);
   assert.deepEqual(lifecycle, ["store:close"]);
-  assert.equal(control.taskSnapshot().state, "closed");
+  assert.equal(tasks.snapshot().state, "closed");
 });
 
 test("outbox worker surfaces task failure and still closes resources", async () => {
@@ -43,8 +64,8 @@ test("outbox worker surfaces task failure and still closes resources", async () 
       store.closed += 1;
     },
   };
-  const relay = {
-    runOnce: async () => {
+  const relay: RelayPort = {
+    runOnce: async (): Promise<never> => {
       throw new Error("relay failed");
     },
   };
@@ -53,7 +74,7 @@ test("outbox worker surfaces task failure and still closes resources", async () 
     store,
     relay,
     control,
-    config: { pollIntervalMs: 1 },
+    config: config(),
   });
   const task = await worker.start();
   await assert.rejects(task.result, /relay failed/);

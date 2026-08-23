@@ -15,7 +15,9 @@ test("standard Guardian policy interrupts after three consecutive denials", () =
   });
   assert.equal(governor.recordDenial("turn-1").newly_triggered, false);
   assert.equal(governor.recordNonDenial("turn-1").kind, "interrupt_turn");
-  assert.equal(governor.snapshot("turn-1").consecutive_denials, 0);
+  const snapshot = governor.snapshot("turn-1");
+  assert.ok(snapshot);
+  assert.equal(snapshot.consecutive_denials, 0);
 });
 
 test("non-denial resets consecutive count while the recent window remains bounded", () => {
@@ -25,7 +27,9 @@ test("non-denial resets consecutive count while the recent window remains bounde
   assert.equal(governor.recordDenial("turn-reset").consecutive_denials, 1);
   for (let index = 0; index < 60; index += 1)
     governor.recordNonDenial("turn-reset");
-  assert.equal(governor.snapshot("turn-reset").review_count, 50);
+  const snapshot = governor.snapshot("turn-reset");
+  assert.ok(snapshot);
+  assert.equal(snapshot.review_count, 50);
 });
 
 test("standard Guardian policy interrupts at ten non-consecutive denials in the recent window", () => {
@@ -66,8 +70,11 @@ test("Guardian state is bounded and evicts idle turns", () => {
   governor.recordNonDenial("turn-d");
   assert.equal(governor.snapshot("turn-b"), undefined);
   assert.equal(governor.snapshot("turn-c"), undefined);
+  const invalidPolicy = "unknown" as unknown as Parameters<
+    typeof governor.recordDenial
+  >[1];
   assert.throws(
-    () => governor.recordDenial("turn-invalid", "unknown"),
+    () => governor.recordDenial("turn-invalid", invalidPolicy),
     /unknown Guardian/,
   );
 });

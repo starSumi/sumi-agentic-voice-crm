@@ -6,7 +6,12 @@ import {
   requiresReview,
 } from "../src/mutation-policy.ts";
 
-const understanding = (intent, needs_confirmation) => ({
+type ProviderUnderstanding = Parameters<typeof normalizeUnderstanding>[0];
+
+const understanding = (
+  intent: string,
+  needs_confirmation: boolean,
+): ProviderUnderstanding => ({
   intent,
   confidence: 0.99,
   entities: {},

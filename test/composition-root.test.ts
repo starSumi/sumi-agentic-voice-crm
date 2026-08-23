@@ -4,9 +4,21 @@ import {
   createRequestContext,
   createRuntime,
 } from "../src/composition-root.ts";
+import { MemoryObjectStorage } from "../src/object-storage.ts";
+import { CrmStore } from "../src/store.ts";
 
 test("composition root creates process resources through injectable ports", async () => {
-  const closed = [];
+  const closed: string[] = [];
+  class ClosingStore extends CrmStore {
+    async close(): Promise<void> {
+      closed.push("store");
+    }
+  }
+  class ClosingObjectStorage extends MemoryObjectStorage {
+    async close(): Promise<void> {
+      closed.push("objects");
+    }
+  }
   const runtime = createRuntime({
     env: {
       APP_ENV: "test",
@@ -18,16 +30,8 @@ test("composition root creates process resources through injectable ports", asyn
         tenant_id: "tenant_demo",
         actor_id: "test-actor",
       }),
-      store: { close: async () => closed.push("store") },
-      objectStorage: { close: async () => closed.push("objects") },
-      providers: {
-        providerReadiness: () => ({ ready: true }),
-        transcribe: async () => ({}),
-        understand: async () => ({}),
-        synthesize: async () => ({}),
-        ttsDefaultFormat: () => "mp3",
-      },
-      observability: { begin: () => ({}), finish: () => {} },
+      store: new ClosingStore(),
+      objectStorage: new ClosingObjectStorage(),
     },
   });
   assert.equal(Object.isFrozen(runtime), true);
@@ -37,7 +41,7 @@ test("composition root creates process resources through injectable ports", asyn
 });
 
 test("composition root registers extensions before the control engine starts", async () => {
-  const lifecycle = [];
+  const lifecycle: string[] = [];
   const runtime = createRuntime({
     env: {
       APP_ENV: "test",
@@ -70,11 +74,6 @@ test("composition root registers extensions before the control engine starts", a
         tenant_id: "tenant_demo",
         actor_id: "test-actor",
       }),
-      objectStorage: {},
-      observability: { begin: () => ({}), finish: () => {} },
-      providers: {},
-      store: {},
-      tracer: {},
     },
   });
 

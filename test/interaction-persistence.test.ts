@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import { CrmStore } from "../src/store.ts";
 
 const base = {
@@ -30,7 +31,7 @@ test("the complete interaction can be replayed without re-running providers", ()
   });
   assert.equal(
     store.interactionFor(base.tenant_id, base.idempotency_key)
-      .provider_invocations.length,
+      ?.provider_invocations.length,
     1,
   );
 });
@@ -51,7 +52,7 @@ test("interaction idempotency rejects a different payload and replays failures",
   });
   assert.throws(
     () => store.beginInteraction(base),
-    (error) => error.code === "UPSTREAM_UNAVAILABLE",
+    (error) => testError(error).code === "UPSTREAM_UNAVAILABLE",
   );
 });
 
@@ -65,7 +66,7 @@ test("an expired interaction lease is recovered through an ordered WAL", () => {
         ...base,
         request_id: "req_active_retry_0000000001",
       }),
-    (error) => error.code === "CRM_CONFLICT",
+    (error) => testError(error).code === "CRM_CONFLICT",
   );
   clock += 101;
   const recovered = { ...base, request_id: "req_recovered_00000000001" };
@@ -94,7 +95,7 @@ test("an expired interaction lease is recovered through an ordered WAL", () => {
     ],
   );
   assert.equal(
-    store.interactionFor(base.tenant_id, base.idempotency_key).recovery_count,
+    store.interactionFor(base.tenant_id, base.idempotency_key)?.recovery_count,
     1,
   );
 });
@@ -120,7 +121,7 @@ test("an expired owner cannot complete or fail before CAS recovery", () => {
         response: { status: "completed" },
         http_status: 200,
       }),
-    (error) => error.code === "CRM_CONFLICT",
+    (error) => testError(error).code === "CRM_CONFLICT",
   );
   store.failInteraction({
     ...expired,
@@ -129,7 +130,7 @@ test("an expired owner cannot complete or fail before CAS recovery", () => {
     http_status: 503,
   });
   assert.equal(
-    store.interactionFor(expired.tenant_id, expired.idempotency_key).status,
+    store.interactionFor(expired.tenant_id, expired.idempotency_key)?.status,
     "processing",
   );
   assert.deepEqual(

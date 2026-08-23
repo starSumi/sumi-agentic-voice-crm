@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import Ajv2020 from "ajv/dist/2020.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { loadAgentCrmContract } from "./generate-agent-crm-contract.ts";
 
-type JsonRecord = Record<string, any>;
+type JsonRecord = Record<string, unknown>;
 type DatasetDefinition = { required_entity_paths: string[] };
 type DatasetExample = {
   example_id: string;

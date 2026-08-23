@@ -1,12 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import Ajv2020 from "ajv/dist/2020.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { format } from "prettier";
 
 const SOURCE_REGISTRY = "contracts/agent-crm-intents.json";
 const SOURCE_SCHEMA = "contracts/agent-crm-intents.schema.json";
 
-type JsonSchema = Record<string, any>;
+type JsonSchema = Record<string, unknown> & { oneOf?: JsonSchema[] };
 type IntentDefinition = {
   id: string;
   handler: string;
@@ -18,14 +18,14 @@ type IntentDefinition = {
   required_entity_paths: string[];
   required_evidence: string[];
   resource_types: string[];
-  [key: string]: any;
+  [key: string]: unknown;
 };
 type IntentRegistry = {
   intents: IntentDefinition[];
   intent_schema_version: string;
   action_schema_version: string;
   training_example_schema_version: string;
-  [key: string]: any;
+  [key: string]: unknown;
 };
 type ContractLoadOptions = { repositoryRoot?: string };
 type GeneratedContract = {

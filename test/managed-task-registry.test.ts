@@ -7,13 +7,13 @@ import {
 
 test("managed tasks receive cooperative cancellation and close idempotently", async () => {
   const registry = createManagedTaskRegistry({ teardownTimeoutMs: 50 });
-  let started;
-  const ready = new Promise((resolve) => {
+  let started: (() => void) | undefined;
+  const ready = new Promise<void>((resolve) => {
     started = resolve;
   });
   const handle = registry.start("worker.poll", async (signal) => {
-    started();
-    await new Promise((resolve, reject) => {
+    started?.();
+    await new Promise<never>((_resolve, reject) => {
       signal.addEventListener("abort", () => reject(signal.reason), {
         once: true,
       });
@@ -40,7 +40,7 @@ test("a parent AbortSignal stops a managed task without an unhandled failure", a
   const handle = registry.start(
     "request.child",
     async (signal) => {
-      await new Promise((resolve, reject) => {
+      await new Promise<never>((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
@@ -55,20 +55,22 @@ test("a parent AbortSignal stops a managed task without an unhandled failure", a
 });
 
 test("teardown calls terminate only for an explicitly supervised stuck task", async () => {
-  const terminations = [];
+  const terminations: string[] = [];
   const registry = createManagedTaskRegistry({ teardownTimeoutMs: 10 });
-  let started;
-  const ready = new Promise((resolve) => {
+  let started: (() => void) | undefined;
+  const ready = new Promise<void>((resolve) => {
     started = resolve;
   });
   registry.start(
     "process.extension",
     async () => {
-      started();
-      return await new Promise(() => {});
+      started?.();
+      return await new Promise<never>(() => {});
     },
     {
-      terminate: () => terminations.push("terminated"),
+      terminate: () => {
+        terminations.push("terminated");
+      },
     },
   );
   await ready;
@@ -87,7 +89,7 @@ test("duplicate active task names fail closed", async () => {
   registry.start(
     "unique",
     async (signal) =>
-      await new Promise((resolve, reject) => {
+      await new Promise<never>((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });

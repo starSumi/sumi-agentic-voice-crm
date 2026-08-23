@@ -43,7 +43,7 @@ test("transport selection prefers browser capabilities and keeps HTTP as fallbac
 });
 
 test("transport fallback retries availability failures but preserves application errors", async () => {
-  const calls = [];
+  const calls: string[] = [];
   const result = await sendWithFallback({ request_id: "req_1" }, [
     {
       kind: "webtransport",

@@ -214,9 +214,9 @@ test("Nx models the pnpm, Rust, protocol, data, docs and orchestration boundarie
   );
 });
 
-async function listInstructionFiles(directory = ".") {
+async function listInstructionFiles(directory = "."): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
-  const files = [];
+  const files: string[] = [];
   for (const entry of entries) {
     const path = directory === "." ? entry.name : `${directory}/${entry.name}`;
     if (entry.isDirectory()) {

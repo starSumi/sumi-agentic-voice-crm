@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import {
   runWithStagedTimeout,
   StagedTimeoutError,
@@ -61,9 +62,9 @@ test("a parent AbortSignal is propagated without waiting for the soft deadline",
   await assert.rejects(
     pending,
     (error) =>
-      error.name === "AbortError" &&
-      error.breakerEligible === false &&
-      error.cause === reason,
+      testError(error).name === "AbortError" &&
+      testError(error).breakerEligible === false &&
+      testError(error).cause === reason,
   );
 });
 

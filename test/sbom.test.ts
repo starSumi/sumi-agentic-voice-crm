@@ -103,7 +103,9 @@ test("SPDX verifier binds generation context, component hashes and immutable pur
 
 test("SPDX verifier fails closed on a missing component hash", () => {
   const { sbom, buildManifest } = fixture();
-  delete sbom.packages[1].checksums;
+  const dependencyPackage = sbom.packages[1];
+  assert.ok(dependencyPackage);
+  Reflect.deleteProperty(dependencyPackage, "checksums");
   assert.throws(
     () => verifySbomDocument(sbom, buildManifest),
     /ajv checksum is missing/,

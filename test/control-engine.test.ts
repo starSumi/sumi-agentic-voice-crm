@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError, testErrorCause } from "./test-types.ts";
 import {
   CasCircuitBreaker,
   createControlEngine,
@@ -39,7 +40,7 @@ test("CAS half-open state admits one probe and ignores stale completions", async
     }),
   );
   clock = 11;
-  let release;
+  let release: ((value: string) => void) | undefined;
   const probe = breaker.run(
     () =>
       new Promise((resolve) => {
@@ -50,6 +51,7 @@ test("CAS half-open state admits one probe and ignores stale completions", async
     breaker.run(async () => "second"),
     /circuit is open/,
   );
+  if (!release) throw new Error("probe was not started");
   release("recovered");
   assert.equal(await probe, "recovered");
   assert.equal(breaker.snapshot().state, "closed");
@@ -62,7 +64,7 @@ test("CAS ignores a closed permit from an older recovery epoch", async () => {
     cooldownMs: 10,
     now: () => clock,
   });
-  let rejectStale;
+  let rejectStale: ((reason?: unknown) => void) | undefined;
   const stale = breaker.run(
     () =>
       new Promise((_, reject) => {
@@ -76,6 +78,7 @@ test("CAS ignores a closed permit from an older recovery epoch", async () => {
   );
   clock = 11;
   assert.equal(await breaker.run(async () => "recovered"), "recovered");
+  if (!rejectStale) throw new Error("stale operation was not started");
   rejectStale(eligible());
   await assert.rejects(stale);
   assert.equal(breaker.snapshot().state, "closed");
@@ -121,22 +124,25 @@ test("parent cancellation is neutral to the control circuit", async () => {
     { signal: parent.signal, softTimeoutMs: 100, hardGraceMs: 10 },
   );
   parent.abort(new Error("client disconnected"));
-  await assert.rejects(pending, (error) => error.breakerEligible === false);
+  await assert.rejects(
+    pending,
+    (error) => testError(error).breakerEligible === false,
+  );
   assert.equal(engine.snapshot()["provider.intent.cancelled"].failures, 0);
 });
 
 test("parent cancellation stays neutral when the operation ignores cooperative abort", async () => {
   const engine = createControlEngine();
   const parent = new AbortController();
-  let started;
-  const operationStarted = new Promise((resolve) => {
+  let started: (() => void) | undefined;
+  const operationStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
   const pending = engine.run(
     "provider.intent.stuck-cancel",
     () => {
-      started();
-      return new Promise(() => {});
+      started?.();
+      return new Promise<never>(() => {});
     },
     {
       signal: parent.signal,
@@ -150,9 +156,9 @@ test("parent cancellation stays neutral when the operation ignores cooperative a
   await assert.rejects(
     pending,
     (error) =>
-      error.phase === "hard" &&
-      error.breakerEligible === false &&
-      error.cause?.name === "AbortError",
+      testError(error).phase === "hard" &&
+      testError(error).breakerEligible === false &&
+      testErrorCause(error)?.name === "AbortError",
   );
   assert.deepEqual(engine.snapshot()["provider.intent.stuck-cancel"], {
     state: "closed",
@@ -168,26 +174,32 @@ test("control engine applies staged timeout through the keyed circuit", async ()
       softTimeoutMs: 5,
       hardGraceMs: 5,
     }),
-    (error) => error.phase === "hard" && error.code === "UPSTREAM_UNAVAILABLE",
+    (error) =>
+      testError(error).phase === "hard" &&
+      testError(error).code === "UPSTREAM_UNAVAILABLE",
   );
   assert.equal(engine.snapshot()["provider.intent.test"].failures, 1);
 });
 
 test("control engine owns managed tasks and closes them before extensions", async () => {
-  const lifecycle = [];
+  const lifecycle: string[] = [];
   const extensions = {
-    startAll: async () => lifecycle.push("extensions:start"),
-    close: async () => lifecycle.push("extensions:close"),
+    startAll: async () => {
+      lifecycle.push("extensions:start");
+    },
+    close: async () => {
+      lifecycle.push("extensions:close");
+    },
   };
   const engine = createControlEngine({ extensions, teardownTimeoutMs: 50 });
   await engine.start();
-  let started;
-  const ready = new Promise((resolve) => {
+  let started: (() => void) | undefined;
+  const ready = new Promise<void>((resolve) => {
     started = resolve;
   });
   engine.tasks.start("worker", async (signal) => {
-    started();
-    await new Promise((resolve, reject) =>
+    started?.();
+    await new Promise<never>((_resolve, reject) =>
       signal.addEventListener(
         "abort",
         () => {

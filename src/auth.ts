@@ -1,5 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+  type JWTPayload,
+  type JWTVerifyGetKey,
+  type JWTVerifyOptions,
+  type JWTVerifyResult,
+} from "jose";
 
 const SAFE_TENANT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$/;
@@ -17,8 +24,21 @@ export type AuthIdentity = Readonly<Record<string, unknown>>;
 type AuthHeaders = Pick<Headers, "get">;
 type AuthEnvironment = NodeJS.ProcessEnv;
 type Authenticator = (headers: AuthHeaders) => Promise<AuthIdentity>;
+type VerifyJwt = (
+  token: string,
+  keySet: JWTVerifyGetKey,
+  options: JWTVerifyOptions,
+) => Promise<JWTVerifyResult>;
 
-function authError(message: string, code = "UNAUTHORIZED", cause?: unknown): Error & { code: string } {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function authError(
+  message: string,
+  code = "UNAUTHORIZED",
+  cause?: unknown,
+): Error & { code: string } {
   return Object.assign(new Error(message, cause ? { cause } : undefined), {
     code,
   });
@@ -42,7 +62,13 @@ function requestedTenant(headers: AuthHeaders): string {
   return tenantId;
 }
 
-function configuredStaticIdentity(env: AuthEnvironment): { token: string; tenantId: string; subject: string; role: string; grantedScopes: string[] } {
+function configuredStaticIdentity(env: AuthEnvironment): {
+  token: string;
+  tenantId: string;
+  subject: string;
+  role: string;
+  grantedScopes: string[];
+} {
   const token = env.AUTH_STATIC_BEARER_TOKEN?.trim();
   const tenantId = env.AUTH_STATIC_TENANT_ID?.trim();
   const subject = env.AUTH_STATIC_SUBJECT?.trim();
@@ -75,7 +101,7 @@ function tokenDigest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
 }
 
-function tenantClaim(payload: Record<string, any>, claimName: string): unknown {
+function tenantClaim(payload: JWTPayload, claimName: string): unknown {
   return (
     payload[claimName] ??
     payload.tenant_id ??
@@ -103,7 +129,7 @@ function stringList(value: unknown): string[] {
   return normalized;
 }
 
-function scopes(payload: Record<string, any>): string[] {
+function scopes(payload: JWTPayload): string[] {
   return stringList(payload.scope ?? payload.scp);
 }
 
@@ -111,7 +137,11 @@ export function createAuthenticator({
   env = process.env,
   remoteJwks,
   verify = jwtVerify,
-}: { env?: AuthEnvironment; remoteJwks?: any; verify?: (...args: any[]) => Promise<any> } = {}): Authenticator {
+}: {
+  env?: AuthEnvironment;
+  remoteJwks?: JWTVerifyGetKey;
+  verify?: VerifyJwt;
+} = {}): Authenticator {
   const mode =
     env.AUTH_MODE || (env.APP_ENV === "production" ? "oidc" : "development");
   if (mode === "development") {
@@ -225,9 +255,8 @@ export function createAuthenticator({
         algorithm: protectedHeader.alg,
       };
     } catch (error: unknown) {
-      const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
-      if (code === "FORBIDDEN" || code === "INVALID_REQUEST")
-        throw error;
+      const code = isRecord(error) ? error.code : undefined;
+      if (code === "FORBIDDEN" || code === "INVALID_REQUEST") throw error;
       throw authError(
         "bearer token verification failed",
         "UNAUTHORIZED",

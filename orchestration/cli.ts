@@ -1,11 +1,13 @@
 import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import Ajv2020, {
+import {
+  Ajv2020,
   type ErrorObject,
   type ValidateFunction,
 } from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
+import type { FormatsPlugin } from "ajv-formats";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
 import {
@@ -17,6 +19,9 @@ import {
 import type { OrchestrationSpec, RuntimeState, TaskPlan } from "./src/types.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const addFormats = createRequire(import.meta.url)(
+  "ajv-formats",
+) as FormatsPlugin;
 const schemaPaths = {
   orchestration: "orchestration/orchestration.schema.json",
   plan: "orchestration/plan.schema.json",

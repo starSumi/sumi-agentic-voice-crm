@@ -35,6 +35,7 @@
     "intent:check": "node scripts/check-agent-crm-intents.ts",
     "dataset:validate": "node scripts/validate-agent-crm-dataset.ts",
     "typecheck:runtime": "tsc -p tsconfig.runtime.json",
+    "typecheck:test": "tsc -p tsconfig.test.json",
     "protocol:typecheck": "tsc -p packages/api-client/tsconfig.json",
     "orchestration:generate": "node orchestration/cli.ts generate",
     "orchestration:check": "node orchestration/cli.ts check",
@@ -58,7 +59,7 @@
     "verify:mcp": "node scripts/verify-docs-mcp.ts",
     "verify": "NX_DAEMON=false nx run-many -t ci --all --exclude=sumi-postgres --parallel=3",
     "verify:ci": "NX_DAEMON=false nx run-many -t ci --all --parallel=3",
-    "verify:platform": "pnpm run lint && pnpm run duplication && pnpm run typecheck:runtime && pnpm run intent:check && pnpm run transport:check && pnpm run authorization:check && pnpm run control-plane:check && pnpm run contract:consumer-check && pnpm run test:node && pnpm run check && pnpm run smoke:dist && pnpm run check:dist",
+    "verify:platform": "pnpm run lint && pnpm run duplication && pnpm run typecheck:runtime && pnpm run typecheck:test && pnpm run intent:check && pnpm run transport:check && pnpm run authorization:check && pnpm run control-plane:check && pnpm run contract:consumer-check && pnpm run test:node && pnpm run check && pnpm run smoke:dist && pnpm run check:dist",
     "verify:legacy": "pnpm run lint && pnpm run duplication && pnpm run rust:check && pnpm run typecheck:runtime && pnpm run protocol:check && pnpm run protocol:typecheck && pnpm run transport:check && pnpm run authorization:check && pnpm run control-plane:check && pnpm run contract:consumer-check && pnpm test && pnpm run test:postgres && pnpm run check && pnpm run smoke:dist && pnpm run check:dist && pnpm run docs:build && pnpm run orchestration:check && pnpm run typecheck:orchestration",
     "workspace:projects": "NX_DAEMON=false nx show projects",
     "workspace:graph": "NX_DAEMON=false nx graph --file=artifacts/nx-project-graph.json",
@@ -129,7 +130,7 @@
         "cache": false
       },
       "typecheck": {
-        "command": "pnpm run typecheck:runtime"
+        "command": "pnpm run typecheck:runtime && pnpm run typecheck:test"
       },
       "test": {
         "command": "pnpm run test:node"

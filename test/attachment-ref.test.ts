@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import { createAttachmentRef } from "../src/application/index.ts";
 import {
   MemoryObjectStorage,
@@ -58,7 +59,7 @@ test("AttachmentRef rejects malformed identifiers, MIME, hashes and signed URLs"
   ]) {
     assert.throws(
       () => createAttachmentRef(candidate),
-      (error) => error.code === "INVALID_REQUEST",
+      (error) => testError(error).code === "INVALID_REQUEST",
     );
   }
 });
@@ -79,8 +80,8 @@ test("audio persistence returns a safe AttachmentRef without changing the legacy
     tenantId: "tenant-a",
   });
 
-  assert.equal(persisted.asset.kind, undefined);
-  assert.equal(persisted.asset.byte_length, undefined);
+  assert.equal("kind" in persisted.asset, false);
+  assert.equal("byte_length" in persisted.asset, false);
   assert.equal("authorization" in persisted.asset, false);
   assert.equal("object_key" in persisted.asset, false);
   assert.equal(persisted.attachment_ref.kind, "audio");
@@ -114,6 +115,7 @@ test("audio persistence rejects a provider URL containing signed query material"
       { tenantId: "tenant-a" },
     ),
     (error) =>
-      error.code === "INVALID_REQUEST" && !error.message.includes("private"),
+      testError(error).code === "INVALID_REQUEST" &&
+      !testError(error).message.includes("private"),
   );
 });

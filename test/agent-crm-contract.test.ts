@@ -9,6 +9,7 @@ import {
 } from "../src/agent-crm-contract.ts";
 import { AGENT_CRM_INTENTS } from "../src/generated/agent-crm-contract.ts";
 import { CrmStore } from "../src/store.ts";
+import { testError } from "./test-types.ts";
 
 const requestContext = Object.freeze({
   request_id: "req_0123456789abcdef01234567",
@@ -44,7 +45,7 @@ test("intent registry exposes only implemented CRM labels", () => {
   );
   assert.throws(
     () => agentCrmIntentDefinition("crm.future"),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
 });
 
@@ -76,7 +77,7 @@ test("provider output is intent-specific and fail-closed", () => {
         missing: [],
         needs_confirmation: true,
       }),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
   assert.throws(
     () =>
@@ -87,7 +88,7 @@ test("provider output is intent-specific and fail-closed", () => {
         missing: [],
         needs_confirmation: false,
       }),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
 });
 
@@ -110,7 +111,7 @@ test("business action binds evidence and idempotency without raw input", () => {
 test("mutation execution requires complete entities and unknown storage intents fail", () => {
   assert.throws(
     () => assertExecutableAgentCrmEntities("crm.customer.create", {}),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
   assert.doesNotThrow(() =>
     assertExecutableAgentCrmEntities("crm.deal.update_stage", {
@@ -128,6 +129,6 @@ test("mutation execution requires complete entities and unknown storage intents 
         entities: {},
         request_id: requestContext.request_id,
       }),
-    (error) => error.code === "INVALID_REQUEST",
+    (error) => testError(error).code === "INVALID_REQUEST",
   );
 });

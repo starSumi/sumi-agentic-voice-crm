@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import {
   createMemoryMessageJobQueue,
   MESSAGE_JOB_STATES,
@@ -35,7 +36,7 @@ test("message jobs persist inbound and job_queued transitions and deduplicate by
   assert.throws(
     () =>
       queue.enqueueMessageJob({ ...base, request_fingerprint: "b".repeat(64) }),
-    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+    (error) => testError(error).code === "IDEMPOTENCY_CONFLICT",
   );
 });
 
@@ -130,7 +131,7 @@ test("event consumer receipts suppress completed duplicates but allow expired le
 test("managed message worker completes queued jobs and releases on close", async () => {
   const queue = createMemoryMessageJobQueue({ leaseMs: 100 });
   queue.enqueueMessageJob({ ...base, idempotency_key: "job-key-worker" });
-  const results = [];
+  const results: Readonly<Record<string, unknown>>[] = [];
   const worker = createMessageJobWorker({
     queue,
     workerId: "worker-managed",
@@ -156,7 +157,7 @@ test("managed message worker completes queued jobs and releases on close", async
       job_id: queue.getMessageJob({
         tenant_id: base.tenant_id,
         idempotency_key: "job-key-worker",
-      }).id,
+      })?.id,
       tenant_id: base.tenant_id,
     },
   ]);

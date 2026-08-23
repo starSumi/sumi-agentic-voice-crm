@@ -8,19 +8,44 @@ const CHECKSUM_LENGTHS = new Map([
   ["SHA384", 96],
   ["SHA512", 128],
 ]);
-type Json = Record<string, any>;
+type JsonObject = Record<string, unknown>;
 
 function invariant(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`SPDX verification failed: ${message}`);
 }
 
-function parseGenerationContext(comment: unknown): Json {
+function isJsonObject(value: unknown): value is JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function jsonObject(value: unknown, message: string): JsonObject {
+  invariant(isJsonObject(value), message);
+  return value;
+}
+
+function objectArray(value: unknown, message: string): JsonObject[] {
+  invariant(Array.isArray(value), message);
+  return value.map((entry) => jsonObject(entry, message));
+}
+
+function stringArray(value: unknown, message: string): string[] {
+  invariant(
+    Array.isArray(value) && value.every((entry) => typeof entry === "string"),
+    message,
+  );
+  return value;
+}
+
+function parseGenerationContext(comment: unknown): JsonObject {
   invariant(
     typeof comment === "string" && comment.startsWith(CONTEXT_PREFIX),
     "generation context is missing",
   );
   try {
-    return JSON.parse(comment.slice(CONTEXT_PREFIX.length));
+    return jsonObject(
+      JSON.parse(comment.slice(CONTEXT_PREFIX.length)),
+      "generation context is not a JSON object",
+    );
   } catch (error) {
     throw new Error(
       "SPDX verification failed: generation context is not valid JSON",
@@ -29,31 +54,46 @@ function parseGenerationContext(comment: unknown): Json {
   }
 }
 
-export function verifySbomDocument(sbom: Json, buildManifest: Json) {
-  invariant(sbom?.spdxVersion === "SPDX-2.3", "SPDX 2.3 is required");
+export function verifySbomDocument(sbom: unknown, buildManifest: unknown) {
+  const document = jsonObject(sbom, "document must be a JSON object");
+  const manifest = jsonObject(
+    buildManifest,
+    "build manifest must be a JSON object",
+  );
+  invariant(document.spdxVersion === "SPDX-2.3", "SPDX 2.3 is required");
   invariant(
-    sbom.dataLicense === "CC0-1.0",
+    document.dataLicense === "CC0-1.0",
     "SPDX data license must be CC0-1.0",
   );
   invariant(
-    Array.isArray(sbom.packages) && sbom.packages.length > 1,
+    Array.isArray(document.packages) && document.packages.length > 1,
     "runtime packages are missing",
   );
   invariant(
-    Array.isArray(sbom.relationships) && sbom.relationships.length > 0,
+    Array.isArray(document.relationships) && document.relationships.length > 0,
     "dependency relationships are missing",
   );
   invariant(
-    Array.isArray(sbom.documentDescribes) &&
-      sbom.documentDescribes.length === 1,
+    Array.isArray(document.documentDescribes) &&
+      document.documentDescribes.length === 1 &&
+      typeof document.documentDescribes[0] === "string",
     "one root package is required",
   );
   invariant(
-    !Number.isNaN(Date.parse(sbom.creationInfo?.created)),
+    isJsonObject(document.creationInfo) &&
+      typeof document.creationInfo.created === "string" &&
+      !Number.isNaN(Date.parse(document.creationInfo.created)),
     "creation timestamp is invalid",
   );
 
-  const creators = sbom.creationInfo?.creators ?? [];
+  const creationInfo = jsonObject(
+    document.creationInfo,
+    "creation information is missing",
+  );
+  const creators = stringArray(
+    creationInfo.creators,
+    "creator list is invalid",
+  );
   invariant(
     creators.includes("Organization: starSumi"),
     "SBOM author is missing",
@@ -71,7 +111,7 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
     "generator tool name is missing",
   );
 
-  const context = parseGenerationContext(sbom.creationInfo?.comment);
+  const context = parseGenerationContext(creationInfo.comment);
   invariant(
     context.lifecycle_phase === "after-build",
     "generation context must be after-build",
@@ -81,7 +121,8 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
     "runtime build subject is not bound",
   );
   invariant(
-    /^[a-f0-9]{40}$/.test(context.source_commit),
+    typeof context.source_commit === "string" &&
+      /^[a-f0-9]{40}$/.test(context.source_commit),
     "source commit is not immutable",
   );
   invariant(context.source_tree_state === "clean", "source tree is not clean");
@@ -90,25 +131,36 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
     "build manifest path drifted",
   );
   invariant(
-    /^[a-f0-9]{64}$/.test(context.dependency_lock_sha256),
+    typeof context.dependency_lock_sha256 === "string" &&
+      /^[a-f0-9]{64}$/.test(context.dependency_lock_sha256),
     "dependency lock digest is invalid",
   );
   invariant(
-    context.subject_sha256 === buildManifest?.content_set_sha256,
+    context.subject_sha256 === manifest.content_set_sha256,
     "generation context does not match the runtime manifest",
   );
   invariant(
-    sbom.documentNamespace.includes(context.source_commit),
+    typeof document.documentNamespace === "string" &&
+      typeof context.source_commit === "string" &&
+      document.documentNamespace.includes(context.source_commit),
     "document namespace does not bind the commit",
   );
   invariant(
-    sbom.documentNamespace.includes(context.subject_sha256),
+    typeof document.documentNamespace === "string" &&
+      typeof context.subject_sha256 === "string" &&
+      document.documentNamespace.includes(context.subject_sha256),
     "document namespace does not bind the subject",
   );
 
-  const root = sbom.packages.find(
-    (entry: Json) => entry.SPDXID === sbom.documentDescribes[0],
+  const packages = objectArray(
+    document.packages,
+    "runtime package entry is invalid",
   );
+  const documentDescribes = stringArray(
+    document.documentDescribes,
+    "described package identifier is invalid",
+  );
+  const root = packages.find((entry) => entry.SPDXID === documentDescribes[0]);
   invariant(root, "described root package is missing");
   invariant(
     root.primaryPackagePurpose === "APPLICATION",
@@ -119,8 +171,8 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
     "software producer is missing",
   );
   invariant(
-    root.externalRefs?.some(
-      (entry: Json) =>
+    objectArray(root.externalRefs, "root package references are invalid").some(
+      (entry) =>
         entry.referenceType === "purl" &&
         entry.referenceLocator ===
           `pkg:github/starSumi/sumi-agentic-voice-crm@${context.source_commit}`,
@@ -129,7 +181,7 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
   );
 
   const purls: string[] = [];
-  for (const component of sbom.packages) {
+  for (const component of packages) {
     invariant(
       typeof component.name === "string" && component.name.length > 0,
       "component name is missing",
@@ -143,23 +195,39 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
       Array.isArray(component.checksums) && component.checksums.length > 0,
       `${component.name} checksum is missing`,
     );
-    for (const checksum of component.checksums) {
+    for (const checksum of objectArray(
+      component.checksums,
+      `${component.name} checksum is malformed`,
+    )) {
+      invariant(
+        typeof checksum.algorithm === "string",
+        `${component.name} checksum algorithm is unsupported`,
+      );
       const length = CHECKSUM_LENGTHS.get(checksum.algorithm);
       invariant(length, `${component.name} checksum algorithm is unsupported`);
       invariant(
-        new RegExp(`^[a-f0-9]{${length}}$`).test(checksum.checksumValue),
+        typeof checksum.checksumValue === "string" &&
+          new RegExp(`^[a-f0-9]{${length}}$`).test(checksum.checksumValue),
         `${component.name} checksum is malformed`,
       );
     }
-    for (const reference of component.externalRefs ?? []) {
-      if (reference.referenceType === "purl")
+    for (const reference of objectArray(
+      component.externalRefs ?? [],
+      `${component.name} references are invalid`,
+    )) {
+      if (reference.referenceType === "purl") {
+        invariant(
+          typeof reference.referenceLocator === "string",
+          `${component.name} purl is malformed`,
+        );
         purls.push(reference.referenceLocator);
+      }
     }
   }
 
   invariant(
-    root.checksums.some(
-      (entry: Json) =>
+    objectArray(root.checksums, "root checksum is malformed").some(
+      (entry) =>
         entry.algorithm === "SHA256" &&
         entry.checksumValue === context.subject_sha256,
     ),
@@ -178,19 +246,23 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
     "duplicate component purls are not allowed",
   );
 
-  const supervisor = sbom.packages.find(
-    (entry: Json) => entry.name === "sumi-runtime-supervisor",
+  const supervisor = packages.find(
+    (entry) => entry.name === "sumi-runtime-supervisor",
   );
-  const supervisorManifest = buildManifest.files?.find(
-    (entry: Json) => entry.path === "bin/sumi-runtime-supervisor",
-  );
+  const supervisorManifest = objectArray(
+    manifest.files,
+    "build manifest files are invalid",
+  ).find((entry) => entry.path === "bin/sumi-runtime-supervisor");
   invariant(
     supervisor && supervisorManifest,
     "runtime supervisor evidence is missing",
   );
   invariant(
-    supervisor.checksums.some(
-      (entry: Json) =>
+    objectArray(
+      supervisor.checksums,
+      "runtime supervisor checksums are invalid",
+    ).some(
+      (entry) =>
         entry.algorithm === "SHA256" &&
         entry.checksumValue === supervisorManifest.sha256,
     ),
@@ -199,7 +271,7 @@ export function verifySbomDocument(sbom: Json, buildManifest: Json) {
 
   return {
     context,
-    component_count: sbom.packages.length,
+    component_count: packages.length,
     purl_count: purls.length,
   };
 }

@@ -23,7 +23,9 @@ test("publisher rejects traversal and unknown mapping fields", () => {
   );
 
   const unknown = valid();
-  unknown.documents[0].locale = "en";
+  const [unknownDocument] = unknown.documents;
+  assert.ok(unknownDocument);
+  Object.assign(unknownDocument, { locale: "en" });
   assert.throws(() => normalizePublisherOptions(unknown), /unknown field/);
 });
 

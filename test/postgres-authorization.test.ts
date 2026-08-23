@@ -1,19 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PostgresCrmStore } from "../src/postgres-store.ts";
+import { testError, testErrorDetails } from "./test-types.ts";
+import { DataCipher } from "../src/data-cipher.ts";
+import {
+  PostgresCrmStore,
+  type PgClientPort,
+  type PgPoolPort,
+} from "../src/postgres-store.ts";
+import type {
+  ActionGrant,
+  AuthorizationRequest,
+} from "../src/authorization/types.ts";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000001";
 const ACTOR_UUID = "10000000-0000-4000-8000-000000000001";
 const REVIEW_UUID = "40000000-0000-4000-8000-000000000001";
+const cipher = new DataCipher({ key: Buffer.alloc(32, 1) });
+type ReviewRow = {
+  readonly command_id: string;
+  readonly id: string;
+  readonly intent: "crm.customer.create";
+  readonly payload: {
+    readonly understanding: {
+      readonly intent: "crm.customer.create";
+      readonly entities: { readonly customer: { readonly name: string } };
+    };
+  };
+  readonly status: string;
+};
+type TestIdentity = {
+  readonly actor_id: string;
+  readonly authentication_methods: readonly string[];
+  readonly principal_kind: string;
+  readonly subject_id?: string;
+  readonly tenant_id: string;
+  readonly token_scopes: readonly string[];
+};
 
 function poolFixture({
   role = "agent",
   scopes = ["crm.customer.create"],
   review,
-} = {}) {
-  const queries = [];
-  const client = {
-    async query(text) {
+}: {
+  readonly review?: ReviewRow;
+  readonly role?: "agent" | "reviewer";
+  readonly scopes?: readonly ActionGrant[];
+} = {}): { readonly pool: PgPoolPort; readonly queries: string[] } {
+  const queries: string[] = [];
+  const client: PgClientPort = {
+    async query(text: string) {
       queries.push(text);
       if (text === "begin" || text === "commit" || text === "rollback")
         return { rowCount: 0, rows: [] };
@@ -28,7 +63,9 @@ function poolFixture({
       if (text.startsWith("select id,role,scopes,status from actors")) {
         return {
           rowCount: 1,
-          rows: [{ id: ACTOR_UUID, role, scopes, status: "active" }],
+          rows: [
+            { id: ACTOR_UUID, role, scopes: [...scopes], status: "active" },
+          ],
         };
       }
       if (
@@ -39,6 +76,7 @@ function poolFixture({
         return { rowCount: 0, rows: [] };
       }
       if (text.startsWith("select r.*, c.id as command_id")) {
+        if (!review) throw new Error("missing review row fixture");
         return { rowCount: 1, rows: [review] };
       }
       throw new Error(`unexpected database effect: ${text}`);
@@ -48,6 +86,7 @@ function poolFixture({
   return {
     queries,
     pool: {
+      query: client.query.bind(client),
       async connect() {
         return client;
       },
@@ -56,7 +95,7 @@ function poolFixture({
   };
 }
 
-function identity(overrides = {}) {
+function identity(overrides: Partial<TestIdentity> = {}): TestIdentity {
   return {
     tenant_id: TENANT_ID,
     actor_id: "actor-a",
@@ -76,7 +115,7 @@ function allow() {
   };
 }
 
-function deny(reason) {
+function deny(reason: string) {
   return {
     effect: "deny",
     policy_version: "policy.v1",
@@ -87,7 +126,7 @@ function deny(reason) {
 
 test("principalFor returns fresh actor facts while preserving token facts", async () => {
   const fixture = poolFixture();
-  const store = new PostgresCrmStore({ pool: fixture.pool, cipher: {} });
+  const store = new PostgresCrmStore({ pool: fixture.pool, cipher });
   const principal = await store.principalFor(
     identity({ subject_id: "untrusted-alias" }),
   );
@@ -102,7 +141,7 @@ test("principalFor returns fresh actor facts while preserving token facts", asyn
 
 test("PostgreSQL mutations default-deny before their first write", async () => {
   const fixture = poolFixture();
-  const store = new PostgresCrmStore({ pool: fixture.pool, cipher: {} });
+  const store = new PostgresCrmStore({ pool: fixture.pool, cipher });
   await assert.rejects(
     store.execute({
       ...identity(),
@@ -112,8 +151,8 @@ test("PostgreSQL mutations default-deny before their first write", async () => {
       entities: { customer: { name: "Denied" } },
     }),
     (error) => {
-      assert.equal(error.code, "FORBIDDEN");
-      assert.deepEqual(error.details, {
+      assert.equal(testError(error).code, "FORBIDDEN");
+      assert.deepEqual(testErrorDetails(error), {
         policy_version: "tenant-policy.v1",
         reason_codes: ["DEFAULT_DENY"],
       });
@@ -132,7 +171,7 @@ test("PostgreSQL direct mutations cannot bypass a human-review obligation", asyn
   const fixture = poolFixture();
   const store = new PostgresCrmStore({
     pool: fixture.pool,
-    cipher: {},
+    cipher,
     authorize: async () => ({
       ...allow(),
       obligations: ["human_review"],
@@ -147,8 +186,8 @@ test("PostgreSQL direct mutations cannot bypass a human-review obligation", asyn
       entities: { customer: { name: "Denied" } },
     }),
     (error) =>
-      error.code === "FORBIDDEN" &&
-      error.details.reason_codes[0] === "OBLIGATION_UNSATISFIED",
+      testError(error).code === "FORBIDDEN" &&
+      testErrorDetails(error).reason_codes[0] === "OBLIGATION_UNSATISFIED",
   );
   assert.ok(fixture.queries.includes("rollback"));
   assert.ok(
@@ -160,10 +199,10 @@ test("PostgreSQL direct mutations cannot bypass a human-review obligation", asyn
 
 test("review creation rechecks the original CRM action before persistence", async () => {
   const fixture = poolFixture();
-  let observed;
+  let observed: AuthorizationRequest | undefined;
   const store = new PostgresCrmStore({
     pool: fixture.pool,
-    cipher: {},
+    cipher,
     authorize: async (request) => {
       observed = request;
       return deny("ACTOR_SCOPE_DENY");
@@ -181,11 +220,11 @@ test("review creation rechecks the original CRM action before persistence", asyn
       },
     }),
     (error) =>
-      error.code === "FORBIDDEN" &&
-      error.details.reason_codes[0] === "ACTOR_SCOPE_DENY",
+      testError(error).code === "FORBIDDEN" &&
+      testErrorDetails(error).reason_codes[0] === "ACTOR_SCOPE_DENY",
   );
-  assert.equal(observed.action, "crm.customer.create");
-  assert.equal(observed.resource.type, "customer");
+  assert.equal(observed?.action, "crm.customer.create");
+  assert.equal(observed?.resource.type, "customer");
   assert.ok(
     !fixture.queries.some((query) =>
       query.startsWith("insert into crm_commands"),
@@ -207,15 +246,18 @@ test("review approval cannot elevate permission to the stored mutation", async (
       command_id: "30000000-0000-4000-8000-000000000001",
       intent: "crm.customer.create",
       payload: {
-        understanding: { entities: { customer: { name: "Denied approval" } } },
+        understanding: {
+          intent: "crm.customer.create",
+          entities: { customer: { name: "Denied approval" } },
+        },
       },
       status: "open",
     },
   });
-  const actions = [];
+  const actions: AuthorizationRequest[] = [];
   const store = new PostgresCrmStore({
     pool: fixture.pool,
-    cipher: {},
+    cipher,
     authorize: async (request) => {
       actions.push(request);
       return request.action === "review.decide"
@@ -232,14 +274,14 @@ test("review approval cannot elevate permission to the stored mutation", async (
       request_id: "req_pg_review_0001",
     }),
     (error) =>
-      error.code === "FORBIDDEN" &&
-      error.details.reason_codes[0] === "TOKEN_SCOPE_DENY",
+      testError(error).code === "FORBIDDEN" &&
+      testErrorDetails(error).reason_codes[0] === "TOKEN_SCOPE_DENY",
   );
   assert.deepEqual(
     actions.map(({ action }) => action),
     ["review.decide", "crm.customer.create"],
   );
-  assert.equal(actions[1].resource.type, "customer");
+  assert.equal(actions[1]?.resource.type, "customer");
   assert.ok(fixture.queries.includes("rollback"));
   assert.ok(
     !fixture.queries.some((query) => query.startsWith("insert into customers")),

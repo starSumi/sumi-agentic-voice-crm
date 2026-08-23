@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import type { Server } from "node:http";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createAuthenticator } from "../src/auth.ts";
 
 const issuer = "https://issuer.example.test";
 const audience = "sumi-voice-crm";
-let jwksServer;
-let jwksUri;
-let privateKey;
+type SigningKey = Parameters<SignJWT["sign"]>[0];
+
+let jwksServer: Server | undefined;
+let jwksUri: string | undefined;
+let privateKey: SigningKey | undefined;
 
 test.before(async () => {
   const pair = await generateKeyPair("RS256");
@@ -22,13 +26,24 @@ test.before(async () => {
       }),
     );
   });
-  await new Promise((resolve) => jwksServer.listen(0, "127.0.0.1", resolve));
-  jwksUri = `http://127.0.0.1:${jwksServer.address().port}/jwks.json`;
+  await new Promise<void>((resolve) =>
+    jwksServer?.listen(0, "127.0.0.1", resolve),
+  );
+  const address = jwksServer.address();
+  if (!address || typeof address === "string") {
+    throw new TypeError("expected JWKS TCP address");
+  }
+  jwksUri = `http://127.0.0.1:${address.port}/jwks.json`;
 });
 
 test.after(() => jwksServer?.close());
 
-async function token(overrides = {}, signingKey = privateKey) {
+async function token(
+  overrides: Readonly<Record<string, unknown>> = {},
+  signingKey?: SigningKey,
+) {
+  const key = signingKey ?? privateKey;
+  if (!key) throw new TypeError("missing signing key");
   return await new SignJWT({
     tenant_id: "tenant-a",
     scope: "voice-crm.write",
@@ -40,10 +55,10 @@ async function token(overrides = {}, signingKey = privateKey) {
     .setAudience(audience)
     .setIssuedAt()
     .setExpirationTime("5m")
-    .sign(signingKey);
+    .sign(key);
 }
 
-function authenticator(overrides = {}) {
+function authenticator(overrides: NodeJS.ProcessEnv = {}) {
   return createAuthenticator({
     env: {
       APP_ENV: "test",
@@ -87,7 +102,7 @@ test("OIDC authentication rejects forged, mismatched and underscoped tokens", as
         "x-tenant-id": "tenant-a",
       }),
     ),
-    (error) => error.code === "UNAUTHORIZED",
+    (error) => testError(error).code === "UNAUTHORIZED",
   );
   await assert.rejects(
     authenticate(
@@ -96,7 +111,7 @@ test("OIDC authentication rejects forged, mismatched and underscoped tokens", as
         "x-tenant-id": "tenant-b",
       }),
     ),
-    (error) => error.code === "FORBIDDEN",
+    (error) => testError(error).code === "FORBIDDEN",
   );
   await assert.rejects(
     authenticate(
@@ -105,7 +120,7 @@ test("OIDC authentication rejects forged, mismatched and underscoped tokens", as
         "x-tenant-id": "tenant-a",
       }),
     ),
-    (error) => error.code === "FORBIDDEN",
+    (error) => testError(error).code === "FORBIDDEN",
   );
   await assert.rejects(
     authenticate(
@@ -114,7 +129,7 @@ test("OIDC authentication rejects forged, mismatched and underscoped tokens", as
         "x-tenant-id": "tenant-a",
       }),
     ),
-    (error) => error.code === "UNAUTHORIZED",
+    (error) => testError(error).code === "UNAUTHORIZED",
   );
 });
 
@@ -170,7 +185,7 @@ test("static authentication binds one bearer token to configured tenant and subj
   );
   await assert.rejects(
     authenticate(new Headers({ authorization: `Bearer ${"b".repeat(48)}` })),
-    (error) => error.code === "UNAUTHORIZED",
+    (error) => testError(error).code === "UNAUTHORIZED",
   );
   await assert.rejects(
     authenticate(
@@ -179,7 +194,7 @@ test("static authentication binds one bearer token to configured tenant and subj
         "x-tenant-id": "tenant-other",
       }),
     ),
-    (error) => error.code === "FORBIDDEN",
+    (error) => testError(error).code === "FORBIDDEN",
   );
 });
 

@@ -5,20 +5,27 @@ import {
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { createRuntime } from "../src/composition-root.ts";
+import { MemoryObjectStorage } from "../src/object-storage.ts";
+import { CrmStore } from "../src/store.ts";
 import {
   createConfiguredTracer,
   createOtelTracer,
   createTracer,
   parseTraceparent,
 } from "../src/observability.ts";
+import type { IdGenerator, SpanEvent } from "../src/observability.ts";
 
 const VALID_PARENT = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
 
-function ids() {
+function ids(): IdGenerator {
   const spanIds = ["1111111111111111", "2222222222222222", "3333333333333333"];
   return {
     generateTraceId: () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    generateSpanId: () => spanIds.shift(),
+    generateSpanId: () => {
+      const spanId = spanIds.shift();
+      if (!spanId) throw new Error("test span identifier pool exhausted");
+      return spanId;
+    },
   };
 }
 
@@ -55,10 +62,12 @@ test("traceparent parser accepts version 00 and rejects invalid or all-zero iden
 });
 
 test("tracer preserves parentage and emits JSON-safe bounded events", async () => {
-  const events = [];
+  const events: SpanEvent[] = [];
   let now = 1_700_000_000_000;
   const tracer = createTracer({
-    sink: (event) => events.push(event),
+    sink: (event) => {
+      events.push(event);
+    },
     idGenerator: ids(),
     now: () => now++,
   });
@@ -85,21 +94,23 @@ test("tracer preserves parentage and emits JSON-safe bounded events", async () =
   assert.equal(child.context.trace_id, root.context.trace_id);
   assert.equal(child.context.parent_span_id, root.context.span_id);
   assert.equal(root.context.parent_span_id, "0123456789abcdef");
-  assert.equal(events[0].name, "provider.asr");
-  assert.equal(events[0].parent_span_id, root.context.span_id);
-  assert.deepEqual(events[1].attributes, {
+  assert.equal(events[0]?.name, "provider.asr");
+  assert.equal(events[0]?.parent_span_id, root.context.span_id);
+  assert.deepEqual(events[1]?.attributes, {
     "app.operation": "ask",
     "input.type": "audio",
   });
   const serialized = JSON.stringify(events);
   assert.doesNotMatch(serialized, /secret|signed|select|transcript|token/i);
-  assert.equal(Object.hasOwn(events[1].attributes, "audio"), false);
+  assert.equal(Object.hasOwn(events[1]?.attributes ?? {}, "audio"), false);
 });
 
 test("runSpan records errors and aborts without exposing error messages", async () => {
-  const events = [];
+  const events: SpanEvent[] = [];
   const tracer = createTracer({
-    sink: (event) => events.push(event),
+    sink: (event) => {
+      events.push(event);
+    },
     idGenerator: ids(),
   });
   const failure = Object.assign(new Error("provider leaked a secret token"), {
@@ -124,9 +135,9 @@ test("runSpan records errors and aborts without exposing error messages", async 
   assert.equal(result, "business-result");
   await tracer.close();
 
-  assert.equal(events[0].status, "error");
-  assert.equal(events[0].attributes["error.code"], "UPSTREAM_UNAVAILABLE");
-  assert.equal(events[1].status, "aborted");
+  assert.equal(events[0]?.status, "error");
+  assert.equal(events[0]?.attributes["error.code"], "UPSTREAM_UNAVAILABLE");
+  assert.equal(events[1]?.status, "aborted");
   assert.doesNotMatch(
     JSON.stringify(events),
     /leaked|secret token|private reason/,
@@ -134,9 +145,11 @@ test("runSpan records errors and aborts without exposing error messages", async 
 });
 
 test("unknown names and attribute values collapse to low-cardinality fallbacks", async () => {
-  const events = [];
+  const events: SpanEvent[] = [];
   const tracer = createTracer({
-    sink: (event) => events.push(event),
+    sink: (event) => {
+      events.push(event);
+    },
     idGenerator: ids(),
   });
   tracer
@@ -150,8 +163,8 @@ test("unknown names and attribute values collapse to low-cardinality fallbacks",
     })
     .end();
   await tracer.close();
-  assert.equal(events[0].name, "application.unknown");
-  assert.deepEqual(events[0].attributes, {
+  assert.equal(events[0]?.name, "application.unknown");
+  assert.deepEqual(events[0]?.attributes, {
     "app.operation": "unknown",
     "http.method": "OTHER",
     "http.route": "OTHER:unmatched",
@@ -162,7 +175,17 @@ test("unknown names and attribute values collapse to low-cardinality fallbacks",
 
 test("sink failure is observational and runtime closes every resource once", async () => {
   let sinkCloses = 0;
-  const closed = [];
+  const closed: string[] = [];
+  class ClosingStore extends CrmStore {
+    async close(): Promise<void> {
+      closed.push("store");
+    }
+  }
+  class ClosingObjectStorage extends MemoryObjectStorage {
+    async close(): Promise<void> {
+      closed.push("objects");
+    }
+  }
   const tracer = createTracer({
     sink: {
       emit: async () => {
@@ -190,10 +213,8 @@ test("sink failure is observational and runtime closes every resource once", asy
         tenant_id: "tenant_demo",
         actor_id: "test-actor",
       }),
-      store: { close: async () => closed.push("store") },
-      objectStorage: { close: async () => closed.push("objects") },
-      providers: {},
-      observability: {},
+      store: new ClosingStore(),
+      objectStorage: new ClosingObjectStorage(),
     },
   });
   await runtime.close();
@@ -237,8 +258,10 @@ test("configured OpenTelemetry mode exports only explicit redacted spans", async
   assert.equal(spans.length, 2);
   const application = spans.find((span) => span.name === "application.ask");
   const provider = spans.find((span) => span.name === "provider.intent");
+  assert.ok(application);
+  assert.ok(provider);
   assert.equal(
-    provider.parentSpanContext.spanId,
+    provider.parentSpanContext?.spanId,
     application.spanContext().spanId,
   );
   assert.deepEqual(application.attributes, {

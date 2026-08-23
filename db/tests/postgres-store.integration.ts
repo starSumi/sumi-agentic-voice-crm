@@ -1,9 +1,41 @@
 import assert from "node:assert/strict";
+import { testError, testErrorDetails } from "../../test/test-types.ts";
 import policy from "../../contracts/authorization-policy.json" with { type: "json" };
 import { evaluateAuthorization } from "../../src/authorization/policy.ts";
-import { PostgresCrmStore } from "../../src/postgres-store.ts";
+import {
+  PostgresCrmStore,
+  type PgClientPort,
+} from "../../src/postgres-store.ts";
+import type {
+  AuthorizationPolicy,
+  AuthorizationRequest,
+} from "../../src/authorization/types.ts";
 
-const authorize = (request) => evaluateAuthorization(policy, request);
+type QueryResult = Awaited<ReturnType<PgClientPort["query"]>>;
+type DecideReviewInput = Parameters<PostgresCrmStore["decideReview"]>[0];
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${name} must be a string`);
+  }
+  return value;
+}
+
+function firstRow<T>(rows: readonly T[]): T {
+  const row = rows.at(0);
+  assert.ok(row, "expected at least one database row");
+  return row;
+}
+
+function record(value: unknown, name: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${name} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+const authorize = (request: AuthorizationRequest) =>
+  evaluateAuthorization(policy as unknown as AuthorizationPolicy, request);
 const store = new PostgresCrmStore({
   connectionString: process.env.DATABASE_URL,
   authorize,
@@ -41,17 +73,20 @@ const reviewerIdentity = {
   authentication_methods: ["integration_token"],
 };
 
-function assertPolicyDenial(error, reason) {
-  assert.equal(error.code, "FORBIDDEN");
-  assert.deepEqual(Object.keys(error.details).sort(), [
+function assertPolicyDenial(error: unknown, reason: string): true {
+  assert.equal(testError(error).code, "FORBIDDEN");
+  assert.deepEqual(Object.keys(testErrorDetails(error)).sort(), [
     "policy_version",
     "reason_codes",
   ]);
-  assert.ok(error.details.reason_codes.includes(reason));
+  assert.ok(testErrorDetails(error).reason_codes.includes(reason));
   return true;
 }
 
-async function tenantQuery(text, values = []) {
+async function tenantQuery(
+  text: string,
+  values: readonly unknown[] = [],
+): Promise<QueryResult> {
   const client = await store.pool.connect();
   try {
     await client.query("begin");
@@ -61,7 +96,7 @@ async function tenantQuery(text, values = []) {
     const result = await client.query(text, values);
     await client.query("commit");
     return result;
-  } catch (error) {
+  } catch (error: unknown) {
     try {
       await client.query("rollback");
     } catch {}
@@ -218,7 +253,7 @@ try {
     entities: { query: { value: "Runtime Customer" } },
   };
   const first = await store.execute(command);
-  assert.equal(first.action, "read_only");
+  assert.equal(record(first, "command result").action, "read_only");
   const replay = await store.execute({
     ...command,
     request_id: "req_runtime_postgres_0002",
@@ -230,7 +265,7 @@ try {
       request_id: "req_runtime_postgres_0003",
       request_fingerprint: "4".repeat(64),
     }),
-    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+    (error) => testError(error).code === "IDEMPOTENCY_CONFLICT",
   );
 
   const conversation = await store.initializeConversationState({
@@ -292,15 +327,21 @@ try {
       "select set_config('app.tenant_id', $1, true)",
       [identity.tenant_id],
     );
-    const rawState = (
-      await conversationInspection.query(
-        "select state_ciphertext,revision from conversation_states where tenant_id=$1 and conversation_id=$2",
-        [identity.tenant_id, conversation.conversation_id],
-      )
-    ).rows[0];
+    const rawState = firstRow(
+      (
+        await conversationInspection.query(
+          "select state_ciphertext,revision from conversation_states where tenant_id=$1 and conversation_id=$2",
+          [identity.tenant_id, conversation.conversation_id],
+        )
+      ).rows,
+    );
     assert.equal(Number(rawState.revision), 1);
-    assert.match(rawState.state_ciphertext, /^v1\./);
-    assert.doesNotMatch(rawState.state_ciphertext, /active_customer_id/);
+    const stateCiphertext = requiredString(
+      rawState.state_ciphertext,
+      "conversation_states.state_ciphertext",
+    );
+    assert.match(stateCiphertext, /^v1\./);
+    assert.doesNotMatch(stateCiphertext, /active_customer_id/);
     await conversationInspection.query("rollback");
   } finally {
     conversationInspection.release();
@@ -351,7 +392,7 @@ try {
   assert.deepEqual(await store.replayTts(ttsKey, "6".repeat(64)), storedTts);
   await assert.rejects(
     store.replayTts(ttsKey, "7".repeat(64)),
-    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+    (error) => testError(error).code === "IDEMPOTENCY_CONFLICT",
   );
   assert.deepEqual(
     await store.assetFor(identity.tenant_id, ttsAsset.asset_id),
@@ -445,7 +486,10 @@ try {
     );
     assert.ok(
       journal.rows.every(({ payload_ciphertext }) =>
-        payload_ciphertext.startsWith("v1."),
+        requiredString(
+          payload_ciphertext,
+          "interaction_wal.payload_ciphertext",
+        ).startsWith("v1."),
       ),
     );
     await inspection.query("savepoint wal_immutability");
@@ -454,7 +498,9 @@ try {
         "update interaction_wal set entry_type='failed' where tenant_id=$1 and interaction_id=$2",
         [identity.tenant_id, raw.id],
       ),
-      (error) => error.code === "55000" && /append-only/.test(error.message),
+      (error) =>
+        testError(error).code === "55000" &&
+        /append-only/.test(testError(error).message),
     );
     await inspection.query("rollback to savepoint wal_immutability");
     await inspection.query("rollback");
@@ -542,7 +588,7 @@ try {
       response: { status: "completed", request_id: stale.request_id },
       http_status: 200,
     }),
-    (error) => error.code === "CRM_CONFLICT",
+    (error) => testError(error).code === "CRM_CONFLICT",
   );
   await store.failInteraction({
     ...stale,
@@ -594,7 +640,7 @@ try {
     idempotency_key: "runtime-review-decision-0001",
     request_id: "req_runtime_postgres_0007",
   });
-  assert.equal(decision.status, "rejected");
+  assert.equal(record(decision, "review decision").status, "rejected");
   const rawReviewId = review.id
     .slice(4)
     .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
@@ -614,7 +660,7 @@ try {
       idempotency_key: "runtime-review-decision-0001",
       request_id: "req_runtime_postgres_0009",
     }),
-    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+    (error) => testError(error).code === "IDEMPOTENCY_CONFLICT",
   );
 
   const approvalReview = await store.createReview({
@@ -627,7 +673,7 @@ try {
       entities: { customer: { name: "Permission Rechecked" } },
     },
   });
-  const approvalInput = {
+  const approvalInput: DecideReviewInput = {
     ...reviewerIdentity,
     review_id: approvalReview.id,
     decision: "approve",
@@ -645,10 +691,18 @@ try {
     "select status from review_tasks where tenant_id=$1 and id=$2",
     [identity.tenant_id, approvalReviewUuid],
   );
-  assert.equal(stillOpen.rows[0].status, "open");
+  assert.equal(firstRow(stillOpen.rows).status, "open");
   const approved = await store.decideReview(approvalInput);
-  assert.equal(approved.status, "approved");
-  assert.equal(approved.decision.result.action, "created");
+  const approvedRecord = record(approved, "approved review");
+  assert.equal(approvedRecord.status, "approved");
+  const approvedDecision = record(
+    approvedRecord.decision,
+    "approved review decision",
+  );
+  assert.equal(
+    record(approvedDecision.result, "approved command result").action,
+    "created",
+  );
 
   const dealId = "20000000-0000-4000-8000-000000000001";
   await tenantQuery(
@@ -677,8 +731,16 @@ try {
     idempotency_key: "runtime-deal-review-decision-0001",
     request_id: "req_runtime_deal_review_0002",
   });
-  assert.equal(approvedDeal.status, "approved");
-  assert.equal(approvedDeal.decision.result.action, "updated");
+  const approvedDealRecord = record(approvedDeal, "approved deal review");
+  assert.equal(approvedDealRecord.status, "approved");
+  const approvedDealDecision = record(
+    approvedDealRecord.decision,
+    "approved deal decision",
+  );
+  assert.equal(
+    record(approvedDealDecision.result, "approved deal result").action,
+    "updated",
+  );
   const persistedDeal = await tenantQuery(
     "select stage,version from deals where tenant_id=$1 and id=$2",
     [identity.tenant_id, dealId],
@@ -729,7 +791,7 @@ try {
       ...messageJobInput,
       request_fingerprint: "b".repeat(64),
     }),
-    (error) => error.code === "IDEMPOTENCY_CONFLICT",
+    (error) => testError(error).code === "IDEMPOTENCY_CONFLICT",
   );
   const claimedJob = (
     await store.claimMessageJobs({
@@ -794,10 +856,11 @@ try {
     batch_size: 100,
   });
   assert.ok(claimed.length >= 3);
+  const firstClaimed = firstRow(claimed);
   await store.markOutboxFailed({
     tenant_id: identity.tenant_id,
     worker_id: "integration-worker",
-    outbox_id: claimed[0].outbox_id,
+    outbox_id: requiredString(firstClaimed.outbox_id, "outbox.id"),
     error: "fixture failure",
     max_attempts: 1,
   });
@@ -806,7 +869,9 @@ try {
     await store.releaseOutboxLeases({
       tenant_id: identity.tenant_id,
       worker_id: "integration-worker",
-      outbox_ids: releasable.map(({ outbox_id }) => outbox_id),
+      outbox_ids: releasable.map(({ outbox_id }) =>
+        requiredString(outbox_id, "outbox.id"),
+      ),
     }),
     { released: releasable.length },
   );
@@ -824,7 +889,7 @@ try {
     await store.markOutboxPublished({
       tenant_id: identity.tenant_id,
       worker_id: "integration-worker-2",
-      outbox_id: row.outbox_id,
+      outbox_id: requiredString(row.outbox_id, "outbox.id"),
     });
   console.log(
     "postgres runtime adapter passed: encrypted interaction replay, durable CRM/TTS, tenant assets, reviews and outbox leases verified",

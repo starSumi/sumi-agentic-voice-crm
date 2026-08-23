@@ -2,13 +2,33 @@ import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { loadAgentCrmContract } from "./generate-agent-crm-contract.ts";
 
+type OpenApiProjection = {
+  components?: {
+    schemas?: {
+      AgentCrmIntent?: { enum?: unknown };
+      Understanding?: {
+        properties?: {
+          schema_version?: { const?: unknown };
+          source?: { required?: string[] };
+        };
+        required?: string[];
+      };
+    };
+  };
+};
+type AuthorizationProjection = {
+  actions: string[];
+  action_resources: Record<string, string[]>;
+  allow_obligations: Record<string, string[]>;
+};
+
 const { registry } = await loadAgentCrmContract();
 const [openapi, authorization] = await Promise.all([
   readFile("contracts/openapi.yaml", "utf8").then(
-    (raw) => parse(raw) as Record<string, any>,
+    (raw) => parse(raw) as OpenApiProjection,
   ),
   readFile("contracts/authorization-policy.json", "utf8").then(
-    (raw) => JSON.parse(raw) as Record<string, any>,
+    (raw) => JSON.parse(raw) as AuthorizationProjection,
   ),
 ]);
 

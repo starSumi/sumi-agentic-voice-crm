@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { testError } from "./test-types.ts";
 import { ConversationStateService } from "../src/application/index.ts";
 import { CrmStore } from "../src/store.ts";
 
@@ -7,8 +8,22 @@ const context = Object.freeze({
   identity: Object.freeze({ tenant_id: "tenant-a", actor_id: "actor-a" }),
 });
 
+function conversationStore(store = new CrmStore()) {
+  return {
+    initializeConversationState: async (
+      input: Parameters<CrmStore["initializeConversationState"]>[0],
+    ) => store.initializeConversationState(input),
+    conversationState: async (
+      input: Parameters<CrmStore["conversationState"]>[0],
+    ) => store.conversationState(input),
+    replaceConversationStateIfCurrent: async (
+      input: Parameters<CrmStore["replaceConversationStateIfCurrent"]>[0],
+    ) => store.replaceConversationStateIfCurrent(input),
+  };
+}
+
 test("conversation service creates, reads and CAS-replaces flat state", async () => {
-  const service = new ConversationStateService({ store: new CrmStore() });
+  const service = new ConversationStateService({ store: conversationStore() });
   assert.deepEqual(
     await service.initialize(context, {
       conversation_id: "conversation-1",
@@ -40,7 +55,7 @@ test("conversation service creates, reads and CAS-replaces flat state", async ()
 });
 
 test("stale conversation revision fails without leaking the current state", async () => {
-  const service = new ConversationStateService({ store: new CrmStore() });
+  const service = new ConversationStateService({ store: conversationStore() });
   await service.initialize(context, {
     conversation_id: "conversation-conflict",
     state: { value: 1 },
@@ -56,12 +71,13 @@ test("stale conversation revision fails without leaking the current state", asyn
       expected_revision: 0,
       state: { value: 3 },
     }),
-    (error) => error.code === "CRM_CONFLICT" && !error.state,
+    (error) =>
+      testError(error).code === "CRM_CONFLICT" && !testError(error).state,
   );
 });
 
 test("conversation state validates identifiers, revisions and bounded JSON objects", async () => {
-  const service = new ConversationStateService({ store: new CrmStore() });
+  const service = new ConversationStateService({ store: conversationStore() });
   await assert.rejects(
     service.initialize(context, { conversation_id: "", state: {} }),
     /conversation_id/,

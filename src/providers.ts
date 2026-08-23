@@ -1,31 +1,79 @@
 import { createDashScopeProvider } from "./provider-dashscope.ts";
 import { createMockProvider } from "./provider-mock.ts";
 import { createOpenAiProvider } from "./provider-openai.ts";
-import { LOCALES, MAX_PROVIDER_TIMEOUT_MS, positiveInteger, upstream, type ProviderAdapter } from "./provider-common.ts";
+import {
+  LOCALES,
+  MAX_PROVIDER_TIMEOUT_MS,
+  isJsonRecord,
+  positiveInteger,
+  upstream,
+  type AudioAsset,
+  type FetchImplementation,
+  type ProviderAdapter,
+  type ProviderCallOptions,
+  type TranscriptionResult,
+  type UnderstandingResult,
+} from "./provider-common.ts";
 import { createControlEngine } from "./control/index.ts";
 
 const DEFAULT_SOFT_TIMEOUT_MS = 10_000;
 const DEFAULT_HARD_GRACE_MS = 2_000;
 type ProviderEnvironment = Record<string, string | undefined>;
-type ProviderFactory = (input: { env: ProviderEnvironment; fetchImpl: (...args: any[]) => Promise<any> }) => ProviderAdapter;
+type ProviderKind = "asr" | "intent" | "tts";
+type ProviderNames = Record<ProviderKind, string>;
+type ProviderFactory = (input: {
+  env: ProviderEnvironment;
+  fetchImpl: FetchImplementation;
+}) => ProviderAdapter;
+type ProviderStatus = Readonly<{
+  provider: string;
+  ready: boolean;
+  reason?: string;
+  circuit: string;
+}>;
+type ProviderReadiness = Readonly<{
+  names: ProviderNames;
+  statuses: Record<ProviderKind, ProviderStatus>;
+  ready: boolean;
+}>;
 type ProviderControl = {
-  breaker(key: string, options?: Record<string, unknown>): { snapshot(): { state: string }; run<T>(operation: () => T | PromiseLike<T>, options?: Record<string, unknown>): Promise<T> };
-  run<T>(key: string, operation: (signal: AbortSignal) => T | PromiseLike<T>, options?: Record<string, unknown>): Promise<T>;
+  breaker(
+    key: string,
+    options?: Record<string, unknown>,
+  ): {
+    snapshot(): { state: string };
+    run<T>(
+      operation: () => T | PromiseLike<T>,
+      options?: Record<string, unknown>,
+    ): Promise<T>;
+  };
+  run<T>(
+    key: string,
+    operation: (signal: AbortSignal) => T | PromiseLike<T>,
+    options?: Record<string, unknown>,
+  ): Promise<T>;
 };
 export type ProviderRuntime = {
-  providerReadiness(): Record<string, any>;
-  transcribe(audio: Buffer, options?: any): Promise<Record<string, any>>;
-  understand(transcript: string, options?: any): Promise<Record<string, any>>;
-  synthesize(text: string, options?: any): Promise<Record<string, any>>;
+  providerReadiness(): ProviderReadiness;
+  transcribe(
+    audio: Buffer,
+    options?: ProviderCallOptions,
+  ): Promise<TranscriptionResult>;
+  understand(
+    transcript: string,
+    options?: ProviderCallOptions,
+  ): Promise<UnderstandingResult>;
+  synthesize(text: string, options?: ProviderCallOptions): Promise<AudioAsset>;
   ttsDefaultFormat(): string;
 };
-const BUILT_IN_FACTORIES: Readonly<Record<string, ProviderFactory>> = Object.freeze({
-  mock: createMockProvider,
-  "openai-compatible": createOpenAiProvider,
-  dashscope: createDashScopeProvider,
-});
+const BUILT_IN_FACTORIES: Readonly<Record<string, ProviderFactory>> =
+  Object.freeze({
+    mock: createMockProvider,
+    "openai-compatible": createOpenAiProvider,
+    dashscope: createDashScopeProvider,
+  });
 
-function providerNames(env: ProviderEnvironment): Record<"asr" | "intent" | "tts", string> {
+function providerNames(env: ProviderEnvironment): ProviderNames {
   return {
     asr: env.ASR_PROVIDER || "mock",
     intent: env.INTENT_PROVIDER || "mock",
@@ -35,27 +83,50 @@ function providerNames(env: ProviderEnvironment): Record<"asr" | "intent" | "tts
 
 export function createProviderRuntime({
   env = process.env,
-  fetchImpl = (url: any, init?: any) => globalThis.fetch(url, init),
+  fetchImpl = (url, init) => globalThis.fetch(url, init),
   factories = BUILT_IN_FACTORIES,
-  control = createControlEngine() as unknown as ProviderControl,
-}: { env?: ProviderEnvironment; fetchImpl?: (...args: any[]) => Promise<any>; factories?: Readonly<Record<string, ProviderFactory>>; control?: ProviderControl } = {}): ProviderRuntime {
-  const adapters = new Map(Object.entries(factories).map(([name, factory]) => [name, factory({ env, fetchImpl })]));
+  control = createControlEngine(),
+}: {
+  env?: ProviderEnvironment;
+  fetchImpl?: FetchImplementation;
+  factories?: Readonly<Record<string, ProviderFactory>>;
+  control?: ProviderControl;
+} = {}): ProviderRuntime {
+  const adapters = new Map(
+    Object.entries(factories).map(([name, factory]) => [
+      name,
+      factory({ env, fetchImpl }),
+    ]),
+  );
 
   function breakerFor(kind: string, provider: string) {
-    return control.breaker(`provider.${kind}.${provider}`, { threshold: 3, cooldownMs: 30_000 });
+    return control.breaker(`provider.${kind}.${provider}`, {
+      threshold: 3,
+      cooldownMs: 30_000,
+    });
   }
 
-  function adapterFor(kind: "asr" | "intent" | "tts"): { adapter: ProviderAdapter; name: string } {
+  function adapterFor(kind: ProviderKind): {
+    adapter: ProviderAdapter;
+    name: string;
+  } {
     const name = providerNames(env)[kind];
     const adapter = adapters.get(name);
-    const method = ({ asr: "transcribe", intent: "understand", tts: "synthesize" } as const)[kind];
-    if (!adapter || typeof (adapter as any)[method] !== "function") {
+    const method = (
+      { asr: "transcribe", intent: "understand", tts: "synthesize" } as const
+    )[kind];
+    if (!adapter || typeof adapter[method] !== "function") {
       throw upstream(`unsupported ${kind.toUpperCase()} provider: ${name}`);
     }
     return { adapter, name };
   }
 
-  async function timed<T>(kind: string, provider: string, operation: (signal: AbortSignal) => T | PromiseLike<T>, parentSignal?: AbortSignal): Promise<T> {
+  async function timed<T>(
+    kind: string,
+    provider: string,
+    operation: (signal: AbortSignal) => T | PromiseLike<T>,
+    parentSignal?: AbortSignal,
+  ): Promise<T> {
     const softTimeoutMs = positiveInteger(
       env.PROVIDER_SOFT_TIMEOUT_MS ?? env.PROVIDER_TIMEOUT_MS,
       DEFAULT_SOFT_TIMEOUT_MS,
@@ -77,8 +148,13 @@ export function createProviderRuntime({
         breaker: { threshold: 3, cooldownMs: 30_000 },
       });
     } catch (error: unknown) {
-      const candidate = error && typeof error === "object" ? error as { name?: unknown; code?: unknown } : undefined;
-      if (candidate?.name === "StagedTimeoutError" && kind === "asr" && candidate) candidate.code = "ASR_TIMEOUT";
+      const candidate = isJsonRecord(error) ? error : undefined;
+      if (
+        candidate?.name === "StagedTimeoutError" &&
+        kind === "asr" &&
+        candidate
+      )
+        candidate.code = "ASR_TIMEOUT";
       if (candidate?.code) throw error;
       throw upstream(`${kind} provider failed`, error);
     }
@@ -87,32 +163,87 @@ export function createProviderRuntime({
   return {
     providerReadiness() {
       const names = providerNames(env);
-      const statuses = Object.fromEntries(Object.entries(names).map(([kind, name]) => {
+      const statusFor = (kind: ProviderKind): ProviderStatus => {
+        const name = names[kind];
         const adapter = adapters.get(name);
-        const configured = Boolean(adapter?.configured?.(kind));
+        const configured = Boolean(adapter?.configured(kind));
         const circuit = breakerFor(kind, name).snapshot().state;
-        return [kind, {
+        return {
           provider: name,
           ready: configured && circuit === "closed",
-          reason: !configured ? "credentials_or_adapter_missing" : circuit === "closed" ? undefined : "circuit_not_closed",
+          reason: !configured
+            ? "credentials_or_adapter_missing"
+            : circuit === "closed"
+              ? undefined
+              : "circuit_not_closed",
           circuit,
-        }];
-      }));
-      return { names, statuses, ready: Object.values(statuses).every(({ ready }) => ready) };
+        };
+      };
+      const statuses = {
+        asr: statusFor("asr"),
+        intent: statusFor("intent"),
+        tts: statusFor("tts"),
+      };
+      return {
+        names,
+        statuses,
+        ready: Object.values(statuses).every(({ ready }) => ready),
+      };
     },
-    async transcribe(audio: Buffer, { locale = "zh-CN", contentType = "audio/wav", signal }: { locale?: string; contentType?: string; signal?: AbortSignal } = {}) {
-      if (!LOCALES.has(locale)) throw Object.assign(new Error("unsupported ASR locale"), { code: "INVALID_REQUEST" });
+    async transcribe(
+      audio: Buffer,
+      {
+        locale = "zh-CN",
+        contentType = "audio/wav",
+        signal,
+      }: { locale?: string; contentType?: string; signal?: AbortSignal } = {},
+    ) {
+      if (!LOCALES.has(locale))
+        throw Object.assign(new Error("unsupported ASR locale"), {
+          code: "INVALID_REQUEST",
+        });
       const { adapter, name } = adapterFor("asr");
-      return await timed("asr", name, (operationSignal) => adapter.transcribe(audio, { locale, contentType, signal: operationSignal }), signal);
+      return await timed(
+        "asr",
+        name,
+        (operationSignal) =>
+          adapter.transcribe(audio, {
+            locale,
+            contentType,
+            signal: operationSignal,
+          }),
+        signal,
+      );
     },
-    async understand(transcript: string, { locale = "zh-CN", signal }: { locale?: string; signal?: AbortSignal } = {}) {
-      if (!LOCALES.has(locale)) throw Object.assign(new Error("unsupported intent locale"), { code: "INVALID_REQUEST" });
+    async understand(
+      transcript: string,
+      {
+        locale = "zh-CN",
+        signal,
+      }: { locale?: string; signal?: AbortSignal } = {},
+    ) {
+      if (!LOCALES.has(locale))
+        throw Object.assign(new Error("unsupported intent locale"), {
+          code: "INVALID_REQUEST",
+        });
       const { adapter, name } = adapterFor("intent");
-      return await timed("intent", name, (operationSignal) => adapter.understand(transcript, { locale, signal: operationSignal }), signal);
+      return await timed(
+        "intent",
+        name,
+        (operationSignal) =>
+          adapter.understand(transcript, { locale, signal: operationSignal }),
+        signal,
+      );
     },
-    async synthesize(text: string, options: Record<string, any> = {}) {
+    async synthesize(text: string, options: ProviderCallOptions = {}) {
       const { adapter, name } = adapterFor("tts");
-      return await timed("tts", name, (operationSignal) => adapter.synthesize(text, { ...options, signal: operationSignal }), options.signal);
+      return await timed(
+        "tts",
+        name,
+        (operationSignal) =>
+          adapter.synthesize(text, { ...options, signal: operationSignal }),
+        options.signal,
+      );
     },
     ttsDefaultFormat() {
       const { adapter } = adapterFor("tts");
@@ -124,7 +255,10 @@ export function createProviderRuntime({
 const runtime = createProviderRuntime();
 
 export const providerReadiness = () => runtime.providerReadiness();
-export const transcribe = (audio: Buffer, options?: any) => runtime.transcribe(audio, options);
-export const understand = (transcript: string, options?: any) => runtime.understand(transcript, options);
-export const synthesize = (text: string, options?: any) => runtime.synthesize(text, options);
+export const transcribe = (audio: Buffer, options?: ProviderCallOptions) =>
+  runtime.transcribe(audio, options);
+export const understand = (transcript: string, options?: ProviderCallOptions) =>
+  runtime.understand(transcript, options);
+export const synthesize = (text: string, options?: ProviderCallOptions) =>
+  runtime.synthesize(text, options);
 export const ttsDefaultFormat = () => runtime.ttsDefaultFormat();

@@ -6,32 +6,255 @@ import {
   assertTtsCommand,
 } from "./commands.ts";
 import type { ApplicationRequestContext } from "./commands.ts";
+import type {
+  normalizeAskCommand,
+  normalizeReviewCommand,
+  normalizeTtsCommand,
+} from "./commands.ts";
 import { normalizeUnderstanding } from "./mutation-policy.ts";
 import { authorizationError } from "../authorization/errors.ts";
 import { createAgentCrmActionProposal } from "../agent-crm-contract.ts";
+import type {
+  AudioAsset,
+  ProviderCallOptions,
+  TranscriptionResult,
+  UnderstandingResult,
+} from "../provider-common.ts";
+import type {
+  AbandonInteractionInput,
+  BeginInteractionInput,
+  CheckpointInteractionInput,
+  CompleteInteractionInput,
+  CreateReviewInput,
+  CrmCommandResult,
+  CrmEntities,
+  ExecuteCrmInput,
+  FailInteractionInput,
+  RecordInputAssetInput,
+  StoredAsset,
+} from "../store.ts";
 
 const PROGRESS_SINK_KEYS = ["progressSink", "eventSink"];
 const NOOP_PROGRESS_SINK = () => {};
 
-/** Dynamic ports are an adapter boundary; protocol/domain values stay typed at callers. */
-type AdapterRecord = Record<string, any>;
-type ServicePorts = AdapterRecord;
+type AdapterRecord = Record<string, unknown>;
+type Awaitable<T> = T | PromiseLike<T>;
+type AskCommand = ReturnType<typeof normalizeAskCommand>;
+type TtsCommand = ReturnType<typeof normalizeTtsCommand>;
+type ReviewCommand = ReturnType<typeof normalizeReviewCommand>;
 type ServiceCommand = AdapterRecord;
-type ProgressContext = ApplicationRequestContext & { readonly conversation_id?: string };
+type ProgressContext = ApplicationRequestContext & {
+  readonly conversation_id?: string;
+};
 type ProgressSink = (event: AdapterRecord) => unknown | PromiseLike<unknown>;
+type InteractionResult = AdapterRecord & {
+  replay?: boolean;
+  response?: AdapterRecord;
+};
+type PersistedAsset = AdapterRecord & {
+  asset: StoredAsset;
+  object_key?: string;
+  byte_length?: number;
+  sha256?: string;
+};
+type PersistedInputAsset = PersistedAsset & {
+  object_key: string;
+  byte_length: number;
+  sha256: string;
+};
+type CompleteInteractionCommand = Omit<
+  CompleteInteractionInput,
+  "http_status"
+> & {
+  outcome: string;
+};
+type FailInteractionCommand = Omit<FailInteractionInput, "http_status">;
+type CheckpointInteractionCommand = CheckpointInteractionInput & AdapterRecord;
+type TtsStoreContext = AdapterRecord & {
+  tenant_id?: string;
+  actor_id?: string;
+  request_id?: string;
+  object_key?: string;
+};
+type ReviewTask = AdapterRecord & { id?: string; review_id?: string };
+type ReviewDecision = AdapterRecord & {
+  review_id?: string;
+  status?: string;
+};
+type StoreIdentityArgs = {
+  tenant_id: string;
+  actor_id: string;
+  request_id: string;
+  idempotency_key: string;
+};
+type AskResponseDraft = AdapterRecord & {
+  status: string;
+  answer: { text: string; language: string };
+  understanding: UnderstandingResult;
+  review_task?: ReviewTask;
+  crm?: CrmCommandResult;
+  audio?: StoredAsset;
+};
+type ServiceResponseSchema =
+  | "AskResponse"
+  | "ReviewResponse"
+  | "ReviewDecisionResponse"
+  | "TtsSynthesizeResponse";
+type TracerPort = {
+  runSpan<T>(
+    name: string,
+    options: {
+      parent?: string;
+      signal?: AbortSignal;
+      attributes: AdapterRecord;
+    },
+    operation: () => Awaitable<T>,
+  ): Promise<T>;
+};
+interface ServicePorts extends AdapterRecord {
+  now?: () => number;
+  progressSink?: ProgressSink;
+  eventSink?: ProgressSink | { emit: ProgressSink };
+  tracer?: TracerPort;
+  authorize?: (request: AdapterRecord) => Awaitable<unknown>;
+  beginInteraction?: (
+    args: BeginInteractionInput,
+  ) => Awaitable<InteractionResult>;
+  checkpointInteraction?: (
+    args: CheckpointInteractionCommand,
+  ) => Awaitable<unknown>;
+  completeInteraction?: (
+    args: CompleteInteractionCommand,
+  ) => Awaitable<unknown>;
+  failInteraction?: (args: FailInteractionCommand) => Awaitable<unknown>;
+  abandonInteraction?: (args: AbandonInteractionInput) => Awaitable<unknown>;
+  createReview?: (args: CreateReviewInput) => Awaitable<ReviewTask>;
+  executeCrm?: (args: ExecuteCrmInput) => Awaitable<CrmCommandResult>;
+  recordInputAsset?: (args: RecordInputAssetInput) => Awaitable<unknown>;
+  recordTts?: (
+    key: string,
+    fingerprint: string,
+    asset: StoredAsset,
+    context?: TtsStoreContext,
+  ) => Awaitable<StoredAsset>;
+  replayTts?: (
+    key: string,
+    fingerprint: string,
+  ) => Awaitable<StoredAsset | undefined>;
+  decideReview?: (args: AdapterRecord) => Awaitable<ReviewDecision>;
+  transcribe?: (
+    audio: Buffer,
+    options: ProviderCallOptions,
+  ) => Awaitable<TranscriptionResult>;
+  understand?: (
+    transcript: string,
+    options: ProviderCallOptions,
+  ) => Awaitable<UnderstandingResult>;
+  synthesize?: (
+    text: string,
+    options: ProviderCallOptions,
+  ) => Awaitable<AudioAsset>;
+  ttsDefaultFormat?: () => string;
+  persistInputAudio?: (
+    audio: Buffer,
+    options: { tenantId: string; requestId: string; contentType: string },
+  ) => Awaitable<PersistedInputAsset>;
+  persistAudioAsset?: (
+    asset: AudioAsset,
+    options: { tenantId: string; kind?: string },
+  ) => Awaitable<PersistedAsset>;
+  validateResponse?: <T>(schema: ServiceResponseSchema, value: T) => T;
+}
+
+const CALLABLE_PORT_KEYS = [
+  "now",
+  "authorize",
+  "beginInteraction",
+  "checkpointInteraction",
+  "completeInteraction",
+  "failInteraction",
+  "abandonInteraction",
+  "createReview",
+  "executeCrm",
+  "recordInputAsset",
+  "recordTts",
+  "replayTts",
+  "decideReview",
+  "transcribe",
+  "understand",
+  "synthesize",
+  "ttsDefaultFormat",
+  "persistInputAudio",
+  "persistAudioAsset",
+  "validateResponse",
+] as const;
+
+function isServicePorts(ports: AdapterRecord): ports is ServicePorts {
+  return CALLABLE_PORT_KEYS.every(
+    (key) => ports[key] === undefined || typeof ports[key] === "function",
+  );
+}
+
+function isAdapterRecord(value: unknown): value is AdapterRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function valueAtPath(value: unknown, ...path: string[]): unknown {
+  let current = value;
+  for (const key of path) {
+    if (!isAdapterRecord(current)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function crmEntities(value: Record<string, unknown>): CrmEntities {
+  const entities: CrmEntities = {};
+  for (const [name, entity] of Object.entries(value)) {
+    if (entity !== undefined && !isAdapterRecord(entity)) {
+      throw new TypeError(`CRM entity ${name} must be an object`);
+    }
+    entities[name] = entity;
+  }
+  return entities;
+}
+
+function assertAskServiceCommand(
+  command: ServiceCommand,
+): asserts command is ServiceCommand & AskCommand {
+  assertAskCommand(command);
+}
+
+function assertTtsServiceCommand(
+  command: ServiceCommand,
+): asserts command is ServiceCommand & TtsCommand {
+  assertTtsCommand(command);
+}
+
+function assertReviewServiceCommand(
+  command: ServiceCommand,
+): asserts command is ServiceCommand & ReviewCommand {
+  assertReviewCommand(command);
+}
 
 function resolveProgressSink(ports: ServicePorts = {}): ProgressSink {
   for (const key of PROGRESS_SINK_KEYS) {
     const candidate = ports[key];
-    if (typeof candidate === "function") return candidate;
-    if (candidate && typeof candidate.emit === "function") {
-      return candidate.emit.bind(candidate);
+    if (typeof candidate === "function") {
+      return (event) => candidate(event);
+    }
+    if (isAdapterRecord(candidate) && typeof candidate.emit === "function") {
+      const emit = candidate.emit;
+      return (event) => emit(event);
     }
   }
   return NOOP_PROGRESS_SINK;
 }
 
-function createServicePorts(ports: ServicePorts, defaults: ServicePorts = {}): ServicePorts {
+function createServicePorts(
+  ports: ServicePorts,
+  defaults: ServicePorts = {},
+): ServicePorts {
   return Object.freeze({
     now: () => Date.now(),
     ...defaults,
@@ -50,14 +273,15 @@ function finiteNumber(value: unknown, fallback?: number): number | undefined {
 
 function safeResource(resource: unknown): string {
   if (typeof resource === "string" && resource.length > 0) return resource;
-  if (!resource || typeof resource !== "object") return "none";
-  const record = resource as AdapterRecord;
-  const type = opaque(record.type, "resource");
-  const id = opaque(record.id, "unknown");
+  if (!isAdapterRecord(resource)) return "none";
+  const type = opaque(resource.type, "resource");
+  const id = opaque(resource.id, "unknown");
   return `${type}/${id}`;
 }
 
-function jsonScalar(value: unknown): string | number | boolean | null | undefined {
+function jsonScalar(
+  value: unknown,
+): string | number | boolean | null | undefined {
   if (value === null || typeof value === "string" || typeof value === "boolean")
     return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -73,14 +297,16 @@ function occurredAt(ports: ServicePorts): string {
     const date = new Date(timestamp);
     if (!Number.isNaN(date.getTime())) return date.toISOString();
   }
-  if (typeof timestamp === "string") {
-    const date = new Date(timestamp);
-    if (!Number.isNaN(date.getTime())) return date.toISOString();
-  }
   return new Date().toISOString();
 }
 
-function progressEvent(context: ProgressContext, ports: ServicePorts, type: string, fields: AdapterRecord = {}, conversationId?: string): AdapterRecord {
+function progressEvent(
+  context: ProgressContext,
+  ports: ServicePorts,
+  type: string,
+  fields: AdapterRecord = {},
+  conversationId?: string,
+): AdapterRecord {
   const event: AdapterRecord = {
     type,
     request_id: opaque(context?.request_id),
@@ -99,7 +325,13 @@ function progressEvent(context: ProgressContext, ports: ServicePorts, type: stri
   return event;
 }
 
-async function emitProgress(ports: ServicePorts, context: ProgressContext, type: string, fields?: AdapterRecord, conversationId?: string): Promise<void> {
+async function emitProgress(
+  ports: ServicePorts,
+  context: ProgressContext,
+  type: string,
+  fields?: AdapterRecord,
+  conversationId?: string,
+): Promise<void> {
   const sink = ports.progressSink;
   if (typeof sink !== "function") return;
   try {
@@ -109,7 +341,13 @@ async function emitProgress(ports: ServicePorts, context: ProgressContext, type:
   }
 }
 
-async function traced<T>(ports: ServicePorts, context: ProgressContext, name: string, attributes: AdapterRecord, operation: () => T | PromiseLike<T>): Promise<T> {
+async function traced<T>(
+  ports: ServicePorts,
+  context: ProgressContext,
+  name: string,
+  attributes: AdapterRecord,
+  operation: () => T | PromiseLike<T>,
+): Promise<T> {
   if (typeof ports.tracer?.runSpan !== "function") return operation();
   return ports.tracer.runSpan(
     name,
@@ -126,7 +364,11 @@ function assertActive(context: ProgressContext): void {
   context.signal?.throwIfAborted();
 }
 
-function authorizationRequest(context: ProgressContext, action: string, resource: AdapterRecord = {}): AdapterRecord {
+function authorizationRequest(
+  context: ProgressContext,
+  action: string,
+  resource: AdapterRecord = {},
+): AdapterRecord {
   const identity = context.identity;
   const principal: AdapterRecord = {
     subject_id: opaque(identity.subject_id ?? identity.actor_id),
@@ -177,7 +419,12 @@ function authorizationRequest(context: ProgressContext, action: string, resource
   });
 }
 
-export async function authorizeAction(ports: ServicePorts, context: ProgressContext, action: string, resource: AdapterRecord = {}): Promise<unknown> {
+export async function authorizeAction(
+  ports: ServicePorts,
+  context: ProgressContext,
+  action: string,
+  resource: AdapterRecord = {},
+): Promise<unknown> {
   assertActive(context);
   if (typeof ports?.authorize !== "function") throw authorizationError();
   let decision;
@@ -186,26 +433,35 @@ export async function authorizeAction(ports: ServicePorts, context: ProgressCont
       authorizationRequest(context, action, resource),
     );
   } catch (error: unknown) {
-    const candidate = error && typeof error === "object" ? error as { code?: unknown; details?: unknown } : {};
-    if (candidate.code === "FORBIDDEN") throw authorizationError(candidate.details);
+    const candidate = isAdapterRecord(error) ? error : {};
+    if (candidate.code === "FORBIDDEN")
+      throw authorizationError(candidate.details);
     throw error;
   }
   assertActive(context);
-  if (decision?.effect !== "allow") throw authorizationError(decision);
+  if (valueAtPath(decision, "effect") !== "allow") {
+    throw authorizationError(decision);
+  }
   return decision;
 }
 
-function entityId(understanding: AdapterRecord, names: readonly string[], fallback: string): string {
+function entityId(
+  understanding: AdapterRecord,
+  names: readonly string[],
+  fallback: string,
+): string {
   for (const name of names) {
-    const entity = understanding?.entities?.[name];
-    const candidate =
-      entity && typeof entity === "object" ? entity.value : entity;
+    const entity = valueAtPath(understanding, "entities", name);
+    const candidate = isAdapterRecord(entity) ? entity.value : entity;
     if (typeof candidate === "string" && candidate.length > 0) return candidate;
   }
   return fallback;
 }
 
-function resourceForIntent(context: ProgressContext, understanding: AdapterRecord): AdapterRecord {
+function resourceForIntent(
+  context: ProgressContext,
+  understanding: AdapterRecord,
+): AdapterRecord {
   if (understanding.intent === "crm.customer.create") {
     return {
       type: "customer",
@@ -223,7 +479,7 @@ function resourceForIntent(context: ProgressContext, understanding: AdapterRecor
     };
   }
   return {
-    type: understanding?.entities?.deal ? "deal" : "customer",
+    type: valueAtPath(understanding, "entities", "deal") ? "deal" : "customer",
     id: entityId(
       understanding,
       ["customer", "customer_id", "deal", "deal_id", "query"],
@@ -232,7 +488,10 @@ function resourceForIntent(context: ProgressContext, understanding: AdapterRecor
   };
 }
 
-function identityArgs(context: ProgressContext, idempotencyKey: string): AdapterRecord {
+function identityArgs(
+  context: ProgressContext,
+  idempotencyKey: string,
+): StoreIdentityArgs {
   return {
     ...context.identity,
     request_id: context.request_id,
@@ -241,17 +500,21 @@ function identityArgs(context: ProgressContext, idempotencyKey: string): Adapter
 }
 
 function knownErrorCode(error: unknown): string {
-  const candidate = error && typeof error === "object" ? error as { code?: unknown } : {};
-  return typeof candidate.code === "string" && Object.hasOwn(ERROR_CODES, candidate.code)
+  const candidate = isAdapterRecord(error) ? error : {};
+  return typeof candidate.code === "string" &&
+    Object.hasOwn(ERROR_CODES, candidate.code)
     ? candidate.code
     : "INVALID_REQUEST";
 }
 
-function result(kind: string, response: unknown): Readonly<{ kind: string; response: unknown }> {
+function result(
+  kind: string,
+  response: unknown,
+): Readonly<{ kind: string; response: unknown }> {
   return Object.freeze({ kind, response });
 }
 
-function askFingerprint(command: ServiceCommand): string {
+function askFingerprint(command: AskCommand): string {
   return sha256(
     JSON.stringify({
       input:
@@ -269,7 +532,7 @@ function askFingerprint(command: ServiceCommand): string {
   );
 }
 
-function interactionPayload(command: ServiceCommand): AdapterRecord {
+function interactionPayload(command: AskCommand): AdapterRecord {
   const common = {
     locale: command.locale,
     output_mode: command.outputMode,
@@ -289,13 +552,18 @@ function interactionPayload(command: ServiceCommand): AdapterRecord {
 export class AskService {
   readonly ports: ServicePorts;
 
-  constructor(ports: ServicePorts = {}) {
+  constructor(ports: AdapterRecord = {}) {
+    if (!isServicePorts(ports))
+      throw new TypeError("application port must be callable");
     this.ports = createServicePorts(ports, { intentProviderName: "unknown" });
   }
 
-  async execute(context: ProgressContext, command: ServiceCommand): Promise<Readonly<{ kind: string; response: unknown }>> {
+  async execute(
+    context: ProgressContext,
+    command: ServiceCommand,
+  ): Promise<Readonly<{ kind: string; response: unknown }>> {
     assertRequestContext(context);
-    assertAskCommand(command);
+    assertAskServiceCommand(command);
     assertActive(context);
     const ports = this.ports;
     await authorizeAction(ports, context, "interaction.ask", {
@@ -322,7 +590,7 @@ export class AskService {
     );
     let interaction: AdapterRecord;
     try {
-      interaction = await ports.beginInteraction({
+      interaction = await ports.beginInteraction!({
         ...storeArgs,
         request_fingerprint: requestFingerprint,
         input_type: command.input.type,
@@ -342,11 +610,11 @@ export class AskService {
     }
     if (interaction.replay) {
       const schema =
-        interaction.response?.status === "needs_review"
+        valueAtPath(interaction.response, "status") === "needs_review"
           ? "ReviewResponse"
           : "AskResponse";
       try {
-        const validated = ports.validateResponse(schema, interaction.response);
+        const validated = ports.validateResponse!(schema, interaction.response);
         await emitProgress(
           ports,
           context,
@@ -370,9 +638,11 @@ export class AskService {
     }
 
     try {
+      const input = command.input;
       let audioBytes: Buffer | undefined;
-      if (command.input.type === "audio") {
-        audioBytes = Buffer.from(command.input.data_base64, "base64");
+      if (input.type === "audio") {
+        const inputAudio = Buffer.from(input.data_base64, "base64");
+        audioBytes = inputAudio;
         const persistedInput = await traced(
           ports,
           context,
@@ -382,14 +652,14 @@ export class AskService {
             "input.type": "audio",
           },
           () =>
-            ports.persistInputAudio(audioBytes, {
+            ports.persistInputAudio!(inputAudio, {
               tenantId: context.identity.tenant_id,
               requestId: context.request_id,
-              contentType: command.input.content_type,
+              contentType: input.content_type,
             }),
         );
         assertActive(context);
-        await ports.recordInputAsset({
+        await ports.recordInputAsset!({
           ...storeArgs,
           ...persistedInput,
           asset: persistedInput.asset,
@@ -414,9 +684,9 @@ export class AskService {
         );
       }
 
-      const asrStarted = ports.now();
+      const asrStarted = ports.now!();
       const transcriptResult =
-        command.input.type === "audio"
+        input.type === "audio"
           ? await traced(
               ports,
               context,
@@ -426,14 +696,17 @@ export class AskService {
                 "provider.kind": ports.asrProviderKind ?? "unknown",
               },
               () =>
-                ports.transcribe(audioBytes, {
-                  locale: command.locale,
-                  contentType: command.input.content_type,
-                  signal: context.signal,
-                }),
+                ports.transcribe!(
+                  audioBytes ?? Buffer.from(input.data_base64, "base64"),
+                  {
+                    locale: command.locale,
+                    contentType: input.content_type,
+                    signal: context.signal,
+                  },
+                ),
             )
           : {
-              text: command.input.text,
+              text: input.text,
               language: command.locale.split("-")[0],
               confidence: 1,
               provider: "direct",
@@ -446,7 +719,7 @@ export class AskService {
         });
       }
       assertActive(context);
-      await ports.checkpointInteraction({
+      await ports.checkpointInteraction!({
         ...storeArgs,
         transcript: transcriptResult,
         provider_invocations: [
@@ -458,7 +731,7 @@ export class AskService {
           },
         ],
         model_versions: { asr: transcriptResult.model },
-        latency_ms: { asr: ports.now() - asrStarted },
+        latency_ms: { asr: ports.now!() - asrStarted },
       });
       await emitProgress(
         ports,
@@ -473,24 +746,27 @@ export class AskService {
         command.conversationId,
       );
 
-      const intentStarted = ports.now();
-      const understanding: AdapterRecord = normalizeUnderstanding(
-        await traced(
-          ports,
-          context,
-          "provider.intent",
-          {
-            "provider.kind": ports.intentProviderKind ?? "unknown",
-          },
-          () =>
-            ports.understand(transcriptResult.text, {
-              locale: command.locale,
-              signal: context.signal,
-            }),
-        ),
-      ) as AdapterRecord;
-      const intentModel =
-        understanding.source?.model ?? understanding.model ?? "unknown";
+      const intentStarted = ports.now!();
+      const providerUnderstanding = await traced(
+        ports,
+        context,
+        "provider.intent",
+        {
+          "provider.kind": ports.intentProviderKind ?? "unknown",
+        },
+        () =>
+          ports.understand!(transcriptResult.text, {
+            locale: command.locale,
+            signal: context.signal,
+          }),
+      );
+      const policyUnderstanding = normalizeUnderstanding(providerUnderstanding);
+      const understanding: UnderstandingResult & { entities: CrmEntities } = {
+        ...providerUnderstanding,
+        entities: crmEntities(providerUnderstanding.entities),
+        needs_confirmation: policyUnderstanding.needs_confirmation,
+      };
+      const intentModel = understanding.source.model;
       assertActive(context);
       const resource = resourceForIntent(context, understanding);
       const businessAction = createAgentCrmActionProposal({
@@ -506,20 +782,20 @@ export class AskService {
         businessAction.policy.authorization_action,
         resource,
       );
-      await ports.checkpointInteraction({
+      await ports.checkpointInteraction!({
         ...storeArgs,
         understanding,
         business_action: businessAction,
         provider_invocations: [
           {
             operation: "intent",
-            provider: ports.intentProviderName,
+            provider: opaque(ports.intentProviderName),
             model: intentModel,
             status: "succeeded",
           },
         ],
         model_versions: { intent: intentModel },
-        latency_ms: { intent: ports.now() - intentStarted },
+        latency_ms: { intent: ports.now!() - intentStarted },
       });
       await emitProgress(
         ports,
@@ -534,11 +810,11 @@ export class AskService {
         command.conversationId,
       );
 
-      const response: AdapterRecord = {
+      const response: AskResponseDraft = {
         request_id: context.request_id,
         status: understanding.needs_confirmation ? "needs_review" : "completed",
         input: {
-          type: command.input.type,
+          type: input.type,
           transcript: transcriptResult.text,
           language: transcriptResult.language,
           asr: transcriptResult,
@@ -564,7 +840,7 @@ export class AskService {
             "app.result": "needs_review",
           },
           () =>
-            ports.createReview({
+            ports.createReview!({
               ...storeArgs,
               request_fingerprint: requestFingerprint,
               understanding,
@@ -582,8 +858,8 @@ export class AskService {
           },
           command.conversationId,
         );
-        const validated = ports.validateResponse("ReviewResponse", response);
-        await ports.completeInteraction({
+        const validated = ports.validateResponse!("ReviewResponse", response);
+        await ports.completeInteraction!({
           ...storeArgs,
           response: validated,
           outcome: "review_required",
@@ -610,7 +886,7 @@ export class AskService {
           "app.operation": "ask",
         },
         () =>
-          ports.executeCrm({
+          ports.executeCrm!({
             ...storeArgs,
             request_fingerprint: requestFingerprint,
             intent: understanding.intent,
@@ -630,7 +906,7 @@ export class AskService {
         command.conversationId,
       );
       if (command.outputMode === "audio" || command.outputMode === "both") {
-        const format = ports.ttsDefaultFormat();
+        const format = ports.ttsDefaultFormat!();
         const audioFingerprint = sha256(
           JSON.stringify({
             text: response.answer.text,
@@ -638,7 +914,7 @@ export class AskService {
             format,
           }),
         );
-        const ttsStarted = ports.now();
+        const ttsStarted = ports.now!();
         const generated = await traced(
           ports,
           context,
@@ -648,7 +924,7 @@ export class AskService {
             "provider.kind": ports.ttsProviderKind ?? "unknown",
           },
           () =>
-            ports.synthesize(response.answer.text, {
+            ports.synthesize!(response.answer.text, {
               language: command.locale,
               format,
               signal: context.signal,
@@ -662,7 +938,7 @@ export class AskService {
             "storage.kind": ports.storageKind ?? "unknown",
           },
           () =>
-            ports.persistAudioAsset(generated, {
+            ports.persistAudioAsset!(generated, {
               tenantId: context.identity.tenant_id,
               kind: "tts",
             }),
@@ -676,7 +952,7 @@ export class AskService {
             "db.system": ports.databaseKind ?? "unknown",
           },
           () =>
-            ports.recordTts(
+            ports.recordTts!(
               `${context.identity.tenant_id}:${command.idempotencyKey}:audio:${audioFingerprint}`,
               audioFingerprint,
               persisted.asset,
@@ -699,22 +975,22 @@ export class AskService {
           },
           command.conversationId,
         );
-        await ports.checkpointInteraction({
+        await ports.checkpointInteraction!({
           ...storeArgs,
           provider_invocations: [
             {
               operation: "tts",
-              provider: generated.provider,
-              model: generated.model,
+              provider: opaque(generated.provider),
+              model: opaque(generated.model),
               status: "succeeded",
             },
           ],
-          model_versions: { tts: generated.model },
-          latency_ms: { tts: ports.now() - ttsStarted },
+          model_versions: { tts: opaque(generated.model) },
+          latency_ms: { tts: ports.now!() - ttsStarted },
         });
       }
-      const validated = ports.validateResponse("AskResponse", response);
-      await ports.completeInteraction({
+      const validated = ports.validateResponse!("AskResponse", response);
+      await ports.completeInteraction!({
         ...storeArgs,
         response: validated,
         outcome: "completed",
@@ -747,10 +1023,11 @@ export class AskService {
         );
       } else {
         try {
-          await ports.failInteraction({
+          await ports.failInteraction!({
             ...storeArgs,
             error_code: errorCode,
-            error_message: error instanceof Error ? error.message : "request failed",
+            error_message:
+              error instanceof Error ? error.message : "request failed",
           });
         } catch {}
         await emitProgress(
@@ -771,13 +1048,18 @@ export class AskService {
 export class TtsService {
   readonly ports: ServicePorts;
 
-  constructor(ports: ServicePorts = {}) {
+  constructor(ports: AdapterRecord = {}) {
+    if (!isServicePorts(ports))
+      throw new TypeError("application port must be callable");
     this.ports = createServicePorts(ports);
   }
 
-  async execute(context: ProgressContext, command: ServiceCommand): Promise<Readonly<{ kind: string; response: unknown }>> {
+  async execute(
+    context: ProgressContext,
+    command: ServiceCommand,
+  ): Promise<Readonly<{ kind: string; response: unknown }>> {
     assertRequestContext(context);
-    assertTtsCommand(command);
+    assertTtsServiceCommand(command);
     assertActive(context);
     await authorizeAction(this.ports, context, "media.tts.create", {
       type: "media_asset",
@@ -792,9 +1074,9 @@ export class TtsService {
         format: command.format,
       }),
     );
-    const replay = await this.ports.replayTts(key, fingerprint);
+    const replay = await this.ports.replayTts!(key, fingerprint);
     if (replay) {
-      const response = this.ports.validateResponse("TtsSynthesizeResponse", {
+      const response = this.ports.validateResponse!("TtsSynthesizeResponse", {
         request_id: context.request_id,
         asset: replay,
         idempotency_replay: true,
@@ -813,7 +1095,7 @@ export class TtsService {
         "provider.kind": this.ports.ttsProviderKind ?? "unknown",
       },
       () =>
-        this.ports.synthesize(command.text, {
+        this.ports.synthesize!(command.text, {
           language: command.language,
           voice: command.voice,
           format: command.format,
@@ -828,7 +1110,7 @@ export class TtsService {
         "storage.kind": this.ports.storageKind ?? "unknown",
       },
       () =>
-        this.ports.persistAudioAsset(generated, {
+        this.ports.persistAudioAsset!(generated, {
           tenantId: context.identity.tenant_id,
           kind: "tts",
         }),
@@ -842,14 +1124,14 @@ export class TtsService {
         "db.system": this.ports.databaseKind ?? "unknown",
       },
       () =>
-        this.ports.recordTts(key, fingerprint, persisted.asset, {
+        this.ports.recordTts!(key, fingerprint, persisted.asset, {
           ...identityArgs(context, command.idempotencyKey),
           object_key: persisted.object_key,
           byte_length: persisted.byte_length,
           sha256: persisted.sha256,
         }),
     );
-    const response = this.ports.validateResponse("TtsSynthesizeResponse", {
+    const response = this.ports.validateResponse!("TtsSynthesizeResponse", {
       request_id: context.request_id,
       asset,
       idempotency_replay: false,
@@ -866,19 +1148,25 @@ export class TtsService {
 export class ReviewService {
   readonly ports: ServicePorts;
 
-  constructor(ports: ServicePorts = {}) {
+  constructor(ports: AdapterRecord = {}) {
+    if (!isServicePorts(ports))
+      throw new TypeError("application port must be callable");
     this.ports = createServicePorts(ports);
   }
 
-  async execute(context: ProgressContext, command: ServiceCommand): Promise<Readonly<{ kind: string; response: unknown }>> {
+  async execute(
+    context: ProgressContext,
+    command: ServiceCommand,
+  ): Promise<Readonly<{ kind: string; response: unknown }>> {
     assertRequestContext(context);
-    assertReviewCommand(command);
+    assertReviewServiceCommand(command);
     assertActive(context);
     await authorizeAction(this.ports, context, "review.decide", {
       type: "review",
       id: command.reviewId,
     });
-    if (typeof this.ports.decideReview !== "function") {
+    const decideReview = this.ports.decideReview;
+    if (typeof decideReview !== "function") {
       throw Object.assign(
         new Error("review decisions require STORE_PROVIDER=postgres"),
         { code: "UPSTREAM_UNAVAILABLE" },
@@ -893,14 +1181,14 @@ export class ReviewService {
         "app.operation": "review",
       },
       () =>
-        this.ports.decideReview({
+        decideReview({
           ...identityArgs(context, command.idempotencyKey),
           review_id: command.reviewId,
           decision: command.decision,
           correction: command.correction,
         }),
     );
-    const response = this.ports.validateResponse(
+    const response = this.ports.validateResponse!(
       "ReviewDecisionResponse",
       decision,
     );
