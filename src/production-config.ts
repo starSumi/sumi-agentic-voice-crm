@@ -1,23 +1,34 @@
+import { z } from "zod";
+
 type ProductionComponent = "api" | "outbox";
+
+const nonEmptyString = z.string().min(1);
+const httpsUrl = z.url().refine((value) => value.startsWith("https://"), {
+  message: "HTTPS URL required",
+});
+const uuid = z.uuid();
+const positiveInteger = z.string().regex(/^\d+$/u).transform(Number);
 
 function requireValue(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
-  if (!value) throw new Error(`${name} is required in production`);
-  return value;
+  const parsed = nonEmptyString.safeParse(value);
+  if (!parsed.success) throw new Error(`${name} is required in production`);
+  return parsed.data;
 }
 
 function requireHttps(env: NodeJS.ProcessEnv, name: string): string {
   const value = requireValue(env, name);
-  let url;
-  try { url = new URL(value); }
-  catch { throw new Error(`${name} must be a valid HTTPS URL in production`); }
-  if (url.protocol !== "https:") throw new Error(`${name} must use HTTPS in production`);
-  return value;
+  const parsed = httpsUrl.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(`${name} must use HTTPS in production`);
+  }
+  return parsed.data;
 }
 
 function requirePositiveInteger(env: NodeJS.ProcessEnv, name: string, max?: number): void {
   if (env[name] === undefined || env[name] === "") return;
-  const value = Number(env[name]);
+  const parsed = positiveInteger.safeParse(env[name]);
+  const value = parsed.success ? parsed.data : Number.NaN;
   if (!Number.isSafeInteger(value) || value <= 0 || (max !== undefined && value > max)) {
     const suffix = max === undefined ? "" : ` no greater than ${max}`;
     throw new Error(`${name} must be a positive integer${suffix} in production`);
@@ -26,7 +37,7 @@ function requirePositiveInteger(env: NodeJS.ProcessEnv, name: string, max?: numb
 
 function requireUuid(env: NodeJS.ProcessEnv, name: string): void {
   const value = requireValue(env, name);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+  if (!uuid.safeParse(value).success) {
     throw new Error(`${name} must be a UUID in production`);
   }
 }

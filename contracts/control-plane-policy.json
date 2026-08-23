@@ -40,8 +40,8 @@
       "version_fence": "lease-and-transition-sequence",
       "recovery_scope": "expired-lease-reclaim",
       "verification_tests": [
-        "test/message-job-queue.test.mjs",
-        "test/message-job-http.test.mjs"
+        "test/message-job-queue.test.ts",
+        "test/message-job-http.test.ts"
       ]
     },
     {
@@ -63,8 +63,8 @@
       "version_fence": "lease-and-wal-sequence",
       "recovery_scope": "expired-lease-reclaim",
       "verification_tests": [
-        "test/interaction-persistence.test.mjs",
-        "test/application-services.test.mjs"
+        "test/interaction-persistence.test.ts",
+        "test/application-services.test.ts"
       ]
     },
     {
@@ -87,8 +87,8 @@
       "version_fence": "registry-generation-epoch",
       "recovery_scope": "explicit-restart-only",
       "verification_tests": [
-        "test/extensions.test.mjs",
-        "test/rust-process-supervisor.test.mjs"
+        "test/extensions.test.ts",
+        "test/rust-process-supervisor.test.ts"
       ]
     },
     {
@@ -107,8 +107,8 @@
       "version_fence": "lease-and-attempt",
       "recovery_scope": "expired-lease-reclaim",
       "verification_tests": [
-        "test/outbox-relay.test.mjs",
-        "test/outbox-worker.test.mjs"
+        "test/outbox-relay.test.ts",
+        "test/outbox-worker.test.ts"
       ]
     },
     {
@@ -129,7 +129,7 @@
       "status_evidence": "committed-revision",
       "version_fence": "revision-cas",
       "recovery_scope": "caller-retry-after-conflict",
-      "verification_tests": ["test/conversation-state.test.mjs"]
+      "verification_tests": ["test/conversation-state.test.ts"]
     },
     {
       "id": "managed-task",
@@ -149,7 +149,7 @@
       "status_evidence": "task-result-and-snapshot",
       "version_fence": "stable-name-and-task-instance",
       "recovery_scope": "owner-recreates-after-process-restart",
-      "verification_tests": ["test/managed-task-registry.test.mjs"]
+      "verification_tests": ["test/managed-task-registry.test.ts"]
     },
     {
       "id": "guardian-review",
@@ -170,8 +170,8 @@
       "version_fence": "turn-id-and-review-id",
       "recovery_scope": "human-review-or-explicit-clear",
       "verification_tests": [
-        "test/guardian-denial-governor.test.mjs",
-        "test/guardian-review.test.mjs"
+        "test/guardian-denial-governor.test.ts",
+        "test/guardian-review.test.ts"
       ]
     }
   ],

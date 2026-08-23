@@ -12,7 +12,7 @@
       "inputs": [
         "default",
         "^default",
-        "{workspaceRoot}/astro.config.mjs",
+        "{workspaceRoot}/astro.config.ts",
         "{workspaceRoot}/src/content.config.ts",
         "{workspaceRoot}/src/pages/**/*",
         "{workspaceRoot}/src/scripts/**/*",
@@ -25,7 +25,7 @@
       "inputs": [
         "default",
         "^default",
-        "{workspaceRoot}/astro.config.mjs",
+        "{workspaceRoot}/astro.config.ts",
         "{workspaceRoot}/src/content.config.ts",
         "{workspaceRoot}/src/pages/**/*",
         "{workspaceRoot}/src/scripts/**/*",
@@ -34,7 +34,7 @@
       ]
     },
     "test": {
-      "command": "node --test test/workbench-source.test.mjs",
+      "command": "node --test test/workbench-source.test.ts",
       "cache": true
     },
     "ci": {

@@ -152,7 +152,7 @@
     "path": { "type": "string", "pattern": "^(?:src|db)/[a-z0-9_./-]+\\.ts$" },
     "testPath": {
       "type": "string",
-      "pattern": "^test/[a-z0-9_.-]+\\.test\\.mjs$"
+      "pattern": "^test/[a-z0-9_.-]+\\.test\\.ts$"
     },
     "controller": {
       "type": "object",

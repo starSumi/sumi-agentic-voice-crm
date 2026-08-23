@@ -15,7 +15,7 @@ Start with the first failing command and its exit code. Preserve the request ID,
 | ---------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile` rejects the runtime | `node --version`, `pnpm --version`, and `.nvmrc` | Use Node `24.19.0` or newer and pnpm `10.33.4`.                                           |
 | Astro reports missing frontmatter                    | The named file under `docs/`                     | Add required `title`, `description`, `docId`, `locale`, `audience`, and `contentVersion`. |
-| A human page exists but MCP omits it                 | `astro.config.mjs` document mappings             | Add an explicit source, machine path, and page route; rebuild.                            |
+| A human page exists but MCP omits it                 | `astro.config.ts` document mappings              | Add an explicit source, machine path, and page route; rebuild.                            |
 | MCP URL returns 404                                  | `_mcp/sumi-docs-routes.json` and `--base-url`    | Keep machine path and rendered route aligned; include a trailing slash in the base URL.   |
 | `verify:mcp` cannot find the server                  | `SUMI_DOCS_MCP_ENTRY`                            | Build the sibling Sumi-Docs-MCP repo or set the variable to its compiled `dist/index.js`. |
 

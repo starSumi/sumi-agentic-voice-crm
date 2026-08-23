@@ -24,7 +24,7 @@ COPY packages ./packages
 COPY scripts ./scripts
 COPY src ./src
 COPY --from=rust-build /workspace/target/release/sumi-runtime-supervisor ./target/release/sumi-runtime-supervisor
-RUN node scripts/build.mjs
+RUN node scripts/build.ts
 
 FROM node:24.19.0-bookworm-slim AS runtime
 WORKDIR /app
