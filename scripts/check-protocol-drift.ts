@@ -12,6 +12,7 @@ const roots = [
   "src/extensions/generated",
   "src/generated",
 ];
+const exactFiles = ["contracts/runtime-supervisor.schema.json"];
 
 async function files(root: string): Promise<string[]> {
   const found: string[] = [];
@@ -74,6 +75,22 @@ try {
         differences.push(`${root}/${path}: added or removed`);
       }
     }
+  }
+  for (const path of exactFiles) {
+    const committedPath = join(repositoryRoot, path);
+    const generatedPath = join(generated, path);
+    const committedExists = await exists(committedPath);
+    const generatedExists = await exists(generatedPath);
+    if (!committedExists)
+      differences.push(`${path}: committed projection is missing`);
+    if (!generatedExists)
+      differences.push(`${path}: temporary projection was not generated`);
+    if (!committedExists || !generatedExists) continue;
+    const [committed, actual] = await Promise.all([
+      readFile(committedPath),
+      readFile(generatedPath),
+    ]);
+    if (!committed.equals(actual)) differences.push(`${path}: content changed`);
   }
   if (differences.length) {
     throw new Error(

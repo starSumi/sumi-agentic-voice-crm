@@ -15,13 +15,14 @@ use std::time::{Duration, Instant};
 
 mod protocol;
 pub use protocol::{
-    EXTENSION_READY_FRAME, MAX_ARGUMENT_BYTES, MAX_ARGUMENTS, MAX_ENVIRONMENT_KEYS,
-    MAX_ENVIRONMENT_VALUE_BYTES, MAX_FRAME_BYTES, MAX_GRACE_MS, MAX_PROGRAM_BYTES,
-    MAX_REQUEST_ID_BYTES, PROTOCOL_VERSION, Request, Response, SupervisorState,
+    EXTENSION_READY_FRAME, MAX_ARGUMENT_CHARS, MAX_ARGUMENTS, MAX_ENVIRONMENT_KEYS,
+    MAX_ENVIRONMENT_VALUE_CHARS, MAX_FRAME_BYTES, MAX_GRACE_MS, MAX_PROGRAM_CHARS,
+    MAX_REQUEST_ID_CHARS, MAX_SAFE_JSON_INTEGER, PROTOCOL_VERSION, Request, Response,
+    SupervisorState,
 };
 use protocol::{
     INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, JsonRpcId, METHOD_NOT_FOUND, PARSE_ERROR,
-    ResultPayload, StartParams,
+    ResultPayload, StartParams, unicode_len,
 };
 
 pub fn generate_protocol_outputs(output_root: &Path) -> io::Result<()> {
@@ -60,9 +61,12 @@ impl From<ExitStatus> for ExitDetail {
 
 struct OwnedChild {
     child: Child,
-    process_group: i32,
+    process_group: Option<i32>,
     shutdown_grace: Duration,
 }
+
+const PROCESS_GROUP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const PROCESS_GROUP_KILL_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl OwnedChild {
     fn spawn(
@@ -111,7 +115,7 @@ impl OwnedChild {
         }
         Ok(Self {
             child,
-            process_group,
+            process_group: Some(process_group),
             shutdown_grace,
         })
     }
@@ -120,22 +124,74 @@ impl OwnedChild {
         self.child.id()
     }
 
-    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        self.child.try_wait()
+    fn refresh(&mut self) -> io::Result<Option<ExitDetail>> {
+        let Some(status) = self.child.try_wait()? else {
+            return Ok(None);
+        };
+        let exit = status.into();
+        self.kill_remaining_group()?;
+        Ok(Some(exit))
     }
 
     fn stop(mut self) -> io::Result<(ExitDetail, bool)> {
-        signal_group(self.process_group, libc::SIGTERM)?;
+        let process_group = self
+            .process_group
+            .ok_or_else(|| io::Error::other("extension process group is not owned"))?;
+        signal_group(process_group, libc::SIGTERM)?;
         let deadline = Instant::now() + self.shutdown_grace;
+        let mut leader_exit = None;
         while Instant::now() < deadline {
-            if let Some(status) = self.child.try_wait()? {
-                return Ok((status.into(), false));
+            if leader_exit.is_none() {
+                leader_exit = self.child.try_wait()?.map(ExitDetail::from);
             }
-            thread::sleep(Duration::from_millis(10));
+            if !process_group_exists(process_group)? {
+                let exit = match leader_exit {
+                    Some(exit) => exit,
+                    None => self.child.wait()?.into(),
+                };
+                self.process_group = None;
+                return Ok((exit, false));
+            }
+            thread::sleep(PROCESS_GROUP_POLL_INTERVAL);
         }
-        signal_group(self.process_group, libc::SIGKILL)?;
-        let status = self.child.wait()?;
-        Ok((status.into(), true))
+        if leader_exit.is_none() {
+            leader_exit = self.child.try_wait()?.map(ExitDetail::from);
+        }
+        let forced = process_group_exists(process_group)?;
+        if forced {
+            signal_group(process_group, libc::SIGKILL)?;
+        }
+        let exit = match leader_exit {
+            Some(exit) => exit,
+            None => self.child.wait()?.into(),
+        };
+        if forced
+            && !wait_for_group_exit(process_group, Instant::now() + PROCESS_GROUP_KILL_TIMEOUT)?
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "extension process group survived SIGKILL",
+            ));
+        }
+        self.process_group = None;
+        Ok((exit, forced))
+    }
+
+    fn kill_remaining_group(&mut self) -> io::Result<()> {
+        let Some(process_group) = self.process_group else {
+            return Ok(());
+        };
+        if process_group_exists(process_group)? {
+            signal_group(process_group, libc::SIGKILL)?;
+            if !wait_for_group_exit(process_group, Instant::now() + PROCESS_GROUP_KILL_TIMEOUT)? {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "orphaned extension process group survived SIGKILL",
+                ));
+            }
+        }
+        self.process_group = None;
+        Ok(())
     }
 }
 
@@ -164,10 +220,37 @@ fn wait_for_ready(stdout: impl io::Read + Send + 'static, timeout: Duration) -> 
 
 impl Drop for OwnedChild {
     fn drop(&mut self) {
-        if matches!(self.child.try_wait(), Ok(None)) {
-            let _ = signal_group(self.process_group, libc::SIGKILL);
+        if let Some(process_group) = self.process_group {
+            let _ = signal_group(process_group, libc::SIGKILL);
             let _ = self.child.wait();
+            let _ = wait_for_group_exit(process_group, Instant::now() + PROCESS_GROUP_KILL_TIMEOUT);
+            self.process_group = None;
         }
+    }
+}
+
+fn process_group_exists(process_group: i32) -> io::Result<bool> {
+    let result = unsafe { libc::kill(-process_group, 0) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(error),
+    }
+}
+
+fn wait_for_group_exit(process_group: i32, deadline: Instant) -> io::Result<bool> {
+    loop {
+        if !process_group_exists(process_group)? {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        thread::sleep(PROCESS_GROUP_POLL_INTERVAL);
     }
 }
 
@@ -199,11 +282,11 @@ impl Supervisor {
 
     fn refresh(&mut self) -> io::Result<()> {
         let status = match self.child.as_mut() {
-            Some(child) => child.try_wait()?,
+            Some(child) => child.refresh()?,
             None => None,
         };
         if let Some(status) = status {
-            self.last_exit = Some(status.into());
+            self.last_exit = Some(status);
             self.child = None;
             self.state = SupervisorState::Stopped;
         }
@@ -214,12 +297,7 @@ impl Supervisor {
         let request_id = request.id().clone();
         if let Err(message) = validate_common(&request) {
             return (
-                Response::failure_result(
-                    Some(request_id.clone()),
-                    self.state,
-                    INVALID_REQUEST,
-                    message,
-                ),
+                Response::failure_result(None, self.state, INVALID_REQUEST, message),
                 false,
             );
         }
@@ -309,9 +387,9 @@ impl Supervisor {
                         false,
                     )),
                 };
-                self.state = SupervisorState::Stopped;
                 match result {
                     Ok((exit, forced)) => {
+                        self.state = SupervisorState::Stopped;
                         let result = ResultPayload {
                             state: self.state,
                             ready: Some(false),
@@ -322,15 +400,18 @@ impl Supervisor {
                         };
                         (Response::success_result(id, result), true)
                     }
-                    Err(error) => (
-                        Response::failure_result(
-                            Some(id),
-                            SupervisorState::Failed,
-                            protocol::APPLICATION_ERROR,
-                            error.to_string(),
-                        ),
-                        true,
-                    ),
+                    Err(error) => {
+                        self.state = SupervisorState::Failed;
+                        (
+                            Response::failure_result(
+                                Some(id),
+                                self.state,
+                                protocol::APPLICATION_ERROR,
+                                error.to_string(),
+                            ),
+                            true,
+                        )
+                    }
                 }
             }
         }
@@ -346,17 +427,21 @@ fn validate_common(request: &Request) -> Result<(), String> {
 
 fn validate_start(params: &StartParams) -> Result<(), String> {
     validate_identifier(&params.extension_id, true, "extension_id")?;
-    if params.program.len() > MAX_PROGRAM_BYTES || !Path::new(&params.program).is_absolute() {
+    if unicode_len(&params.program) > MAX_PROGRAM_CHARS || !Path::new(&params.program).is_absolute()
+    {
         return Err("program must be a bounded absolute path".to_owned());
     }
     if params.args.len() > MAX_ARGUMENTS
-        || params.args.iter().any(|arg| arg.len() > MAX_ARGUMENT_BYTES)
+        || params
+            .args
+            .iter()
+            .any(|arg| unicode_len(arg) > MAX_ARGUMENT_CHARS)
     {
         return Err("args exceed the supervisor bounds".to_owned());
     }
     if params.env.len() > MAX_ENVIRONMENT_KEYS
         || params.env.iter().any(|(key, value)| {
-            !valid_environment_key(key) || value.len() > MAX_ENVIRONMENT_VALUE_BYTES
+            !valid_environment_key(key) || unicode_len(value) > MAX_ENVIRONMENT_VALUE_CHARS
         })
     {
         return Err("env exceeds the supervisor bounds".to_owned());
@@ -374,11 +459,11 @@ fn validate_start(params: &StartParams) -> Result<(), String> {
 fn validate_identifier(value: &str, extension: bool, name: &str) -> Result<(), String> {
     let bytes = value.as_bytes();
     let valid = !value.is_empty()
-        && value.len()
+        && unicode_len(value)
             <= if extension {
-                protocol::MAX_EXTENSION_ID_BYTES
+                protocol::MAX_EXTENSION_ID_CHARS
             } else {
-                MAX_REQUEST_ID_BYTES
+                MAX_REQUEST_ID_CHARS
             }
         && if extension {
             bytes[0].is_ascii_lowercase()
@@ -498,23 +583,20 @@ fn decode_request(line: &[u8], state: SupervisorState) -> Result<Request, Respon
             "JSON-RPC request must be an object",
         )
     })?;
-    if object.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0") {
-        return Err(Response::failure_result(
-            parse_id(object.get("id")),
-            state,
-            INVALID_REQUEST,
-            "JSON-RPC request must declare version 2.0",
-        ));
-    }
-    if !matches!(
-        object.get("id"),
-        Some(serde_json::Value::String(_) | serde_json::Value::Number(_))
-    ) {
+    let Some(id) = parse_id(object.get("id")).filter(JsonRpcId::valid) else {
         return Err(Response::failure_result(
             None,
             state,
             INVALID_REQUEST,
-            "JSON-RPC request id is required and must be a string or number",
+            "JSON-RPC request id is required and must be a bounded string or integer",
+        ));
+    };
+    if object.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0") {
+        return Err(Response::failure_result(
+            Some(id.clone()),
+            state,
+            INVALID_REQUEST,
+            "JSON-RPC request must declare version 2.0",
         ));
     }
     let method = object
@@ -522,7 +604,7 @@ fn decode_request(line: &[u8], state: SupervisorState) -> Result<Request, Respon
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
             Response::failure_result(
-                None,
+                Some(id.clone()),
                 state,
                 INVALID_REQUEST,
                 "JSON-RPC request method is missing",
@@ -530,7 +612,7 @@ fn decode_request(line: &[u8], state: SupervisorState) -> Result<Request, Respon
         })?;
     if !matches!(method, "runtime.start" | "runtime.health" | "runtime.stop") {
         return Err(Response::failure_result(
-            parse_id(object.get("id")),
+            Some(id.clone()),
             state,
             METHOD_NOT_FOUND,
             "runtime supervisor method was not found",
@@ -539,7 +621,7 @@ fn decode_request(line: &[u8], state: SupervisorState) -> Result<Request, Respon
     let allowed = ["jsonrpc", "id", "method", "params"];
     if object.keys().any(|key| !allowed.contains(&key.as_str())) {
         return Err(Response::failure_result(
-            parse_id(object.get("id")),
+            Some(id.clone()),
             state,
             INVALID_REQUEST,
             "JSON-RPC request contains an unknown field",
@@ -564,16 +646,15 @@ fn decode_request(line: &[u8], state: SupervisorState) -> Result<Request, Respon
     };
     if !params_valid {
         return Err(Response::failure_result(
-            parse_id(object.get("id")),
+            Some(id.clone()),
             state,
             INVALID_PARAMS,
             "JSON-RPC request parameters are invalid",
         ));
     }
-    let id = parse_id(object.get("id"));
     serde_json::from_value(value.clone()).map_err(|_| {
         Response::failure_result(
-            id,
+            Some(id),
             state,
             INVALID_PARAMS,
             "JSON-RPC request parameters are invalid",
@@ -592,7 +673,9 @@ fn parse_id(value: Option<&serde_json::Value>) -> Option<JsonRpcId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::io::Cursor;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn response_values(input: impl Into<Vec<u8>>) -> Vec<serde_json::Value> {
         let mut output = Vec::new();
@@ -629,23 +712,152 @@ mod tests {
     #[test]
     fn invalid_params_unknown_fields_and_ids_fail_closed() {
         let values = response_values(
-            b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"runtime.health\",\"params\":{\"x\":true}}\n"
-                .to_vec(),
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"runtime.health\",\"params\":{{\"x\":true}}}}\n{{\"jsonrpc\":\"2.0\",\"id\":\"\",\"method\":\"runtime.health\",\"params\":{{}}}}\n{{\"jsonrpc\":\"2.0\",\"id\":\"{}\",\"method\":\"runtime.health\",\"params\":{{}}}}\n",
+                "x".repeat(MAX_REQUEST_ID_CHARS + 1)
+            )
+            .into_bytes(),
         );
         assert_eq!(values[0]["error"]["code"], INVALID_PARAMS);
         assert_eq!(values[0]["id"], 7);
+        assert_eq!(values[1]["error"]["code"], INVALID_REQUEST);
+        assert!(values[1]["id"].is_null());
+        assert_eq!(values[2]["error"]["code"], INVALID_REQUEST);
+        assert!(values[2]["id"].is_null());
+    }
+
+    #[test]
+    fn invalid_ids_are_never_echoed_from_early_error_branches() {
+        let oversized_id = "x".repeat(MAX_REQUEST_ID_CHARS + 1);
+        let inputs = [
+            serde_json::json!({
+                "jsonrpc": "1.0", "id": "", "method": "runtime.health", "params": {}
+            }),
+            serde_json::json!({"jsonrpc": "2.0", "id": oversized_id}),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": "", "method": "runtime.unknown", "params": {}
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": "", "method": "runtime.health", "params": {},
+                "unknown": true
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": "", "method": "runtime.health", "params": {"x": true}
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 1.5, "method": "runtime.health", "params": {}
+            }),
+        ];
+        let input = inputs
+            .into_iter()
+            .map(|value| serde_json::to_string(&value).expect("serialize request"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let values = response_values(input.into_bytes());
+        assert_eq!(values.len(), 6);
+        for value in values {
+            assert_eq!(value["error"]["code"], INVALID_REQUEST);
+            assert!(value["id"].is_null());
+        }
+    }
+
+    #[test]
+    fn id_boundaries_match_unicode_and_javascript_number_semantics() {
+        let exact_unicode = "界".repeat(MAX_REQUEST_ID_CHARS);
+        let over_unicode = "界".repeat(MAX_REQUEST_ID_CHARS + 1);
+        let input = [
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": exact_unicode, "method": "runtime.health", "params": {}
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": over_unicode, "method": "runtime.health", "params": {}
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": MAX_SAFE_JSON_INTEGER, "method": "runtime.health", "params": {}
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": -MAX_SAFE_JSON_INTEGER, "method": "runtime.health", "params": {}
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": MAX_SAFE_JSON_INTEGER + 1, "method": "runtime.health", "params": {}
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": -MAX_SAFE_JSON_INTEGER - 1, "method": "runtime.health", "params": {}
+            }),
+        ]
+        .into_iter()
+        .map(|value| serde_json::to_string(&value).expect("serialize bounded id request"))
+        .collect::<Vec<_>>()
+        .join("\n")
+            + "\n";
+        let values = response_values(input.into_bytes());
+        assert_eq!(values[0]["id"], "界".repeat(MAX_REQUEST_ID_CHARS));
+        assert!(values[1]["id"].is_null());
+        assert_eq!(values[2]["id"], MAX_SAFE_JSON_INTEGER);
+        assert_eq!(values[3]["id"], -MAX_SAFE_JSON_INTEGER);
+        assert!(values[4]["id"].is_null());
+        assert!(values[5]["id"].is_null());
+    }
+
+    #[test]
+    fn start_string_bounds_use_unicode_code_points() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "UNICODE".to_owned(),
+            "界".repeat(MAX_ENVIRONMENT_VALUE_CHARS),
+        );
+        let exact = StartParams {
+            extension_id: "fixture.unicode".to_owned(),
+            program: format!("/{}", "界".repeat(MAX_PROGRAM_CHARS - 1)),
+            args: vec!["界".repeat(MAX_ARGUMENT_CHARS)],
+            env,
+            startup_timeout_ms: 1_000,
+            shutdown_grace_ms: 1_000,
+        };
+        assert_eq!(validate_start(&exact), Ok(()));
+
+        let mut over_program = exact.clone();
+        over_program.program = format!("/{}", "界".repeat(MAX_PROGRAM_CHARS));
+        assert!(validate_start(&over_program).is_err());
+        let mut over_argument = exact.clone();
+        over_argument.args = vec!["界".repeat(MAX_ARGUMENT_CHARS + 1)];
+        assert!(validate_start(&over_argument).is_err());
+        let mut over_environment = exact;
+        over_environment.env.insert(
+            "UNICODE".to_owned(),
+            "界".repeat(MAX_ENVIRONMENT_VALUE_CHARS + 1),
+        );
+        assert!(validate_start(&over_environment).is_err());
+    }
+
+    #[test]
+    fn internal_error_is_a_json_rpc_error_with_a_required_null_id() {
+        let response = Response::failure_result(
+            None,
+            SupervisorState::Failed,
+            INTERNAL_ERROR,
+            "supervisor state refresh failed",
+        );
+        let value = serde_json::to_value(response).expect("internal error response");
+        assert_eq!(value["jsonrpc"], "2.0");
+        assert!(value["id"].is_null());
+        assert_eq!(value["error"]["code"], INTERNAL_ERROR);
+        assert_eq!(value["error"]["data"]["state"], "failed");
     }
 
     #[test]
     fn oversized_frames_are_rejected_without_unbounded_allocation() {
         let input = format!(
-            "{}\n{{\"jsonrpc\":\"2.0\",\"id\":\"r2\",\"method\":\"runtime.health\",\"params\":{{}}}}\n",
+            "{}\n{}\n{{\"jsonrpc\":\"2.0\",\"id\":\"r2\",\"method\":\"runtime.health\",\"params\":{{}}}}\n",
+            "x".repeat(MAX_FRAME_BYTES),
             "x".repeat(MAX_FRAME_BYTES + 1)
         );
         let values = response_values(input.into_bytes());
-        assert_eq!(values[0]["error"]["code"], INVALID_REQUEST);
-        assert_eq!(values[1]["id"], "r2");
-        assert_eq!(values[1]["result"]["state"], "created");
+        assert_eq!(values[0]["error"]["code"], PARSE_ERROR);
+        assert_eq!(values[1]["error"]["code"], INVALID_REQUEST);
+        assert_eq!(values[2]["id"], "r2");
+        assert_eq!(values[2]["result"]["state"], "created");
     }
 
     #[test]
@@ -716,5 +928,68 @@ mod tests {
             serde_json::to_value(stopped).expect("stop response")["result"]["state"],
             "stopped"
         );
+    }
+
+    #[test]
+    fn stop_kills_a_term_ignoring_descendant_after_the_leader_exits() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let marker = std::env::temp_dir().join(format!(
+            "sumi-runtime-supervisor-{}-{nonce}.pid",
+            std::process::id()
+        ));
+        let descendant_ready = marker.with_extension("descendant-ready");
+        let leader_terminated = marker.with_extension("leader-terminated");
+        let mut env = BTreeMap::new();
+        env.insert(
+            "DESCENDANT_PID_FILE".to_owned(),
+            marker.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "DESCENDANT_READY_FILE".to_owned(),
+            descendant_ready.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "LEADER_TERMINATED_FILE".to_owned(),
+            leader_terminated.to_string_lossy().into_owned(),
+        );
+        let script = concat!(
+            "trap 'printf terminated > \"$LEADER_TERMINATED_FILE\"; exit 0' TERM; ",
+            "(trap '' TERM; printf ready > \"$DESCENDANT_READY_FILE\"; ",
+            "while :; do sleep 1; done) & ",
+            "descendant=$!; printf '%s' \"$descendant\" > \"$DESCENDANT_PID_FILE\"; ",
+            "while [ ! -s \"$DESCENDANT_READY_FILE\" ]; do :; done; ",
+            "printf 'sumi.runtime.extension.ready.v1\\n'; ",
+            "while :; do sleep 1; done"
+        );
+        let child = OwnedChild::spawn(
+            "/bin/sh",
+            &["-c".to_owned(), script.to_owned()],
+            &env,
+            Duration::from_secs(1),
+            Duration::from_millis(50),
+        )
+        .expect("spawn extension with descendant");
+        let process_group = child.process_group.expect("owned process group");
+        let descendant_pid: i32 = fs::read_to_string(&marker)
+            .expect("descendant pid marker")
+            .parse()
+            .expect("numeric descendant pid");
+        assert_ne!(descendant_pid, process_group);
+        assert_eq!(unsafe { libc::getpgid(descendant_pid) }, process_group);
+        assert!(process_group_exists(process_group).expect("live process group"));
+
+        let (_, forced) = child.stop().expect("bounded group stop");
+        assert!(forced);
+        assert_eq!(
+            fs::read_to_string(&leader_terminated).expect("leader TERM handler marker"),
+            "terminated"
+        );
+        assert!(!process_group_exists(process_group).expect("reaped process group"));
+        fs::remove_file(marker).expect("remove descendant pid marker");
+        fs::remove_file(descendant_ready).expect("remove descendant ready marker");
+        fs::remove_file(leader_terminated).expect("remove leader terminated marker");
     }
 }

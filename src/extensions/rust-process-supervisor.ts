@@ -12,9 +12,20 @@ import {
 } from "./generated/runtime-supervisor-protocol.ts";
 
 export { RUST_SUPERVISOR_PROTOCOL_VERSION };
-const MAX_FRAME_BYTES = RUST_SUPERVISOR_LIMITS.maxFrameBytes;
+const MAX_FRAME_CONTENT_BYTES = RUST_SUPERVISOR_LIMITS.maxFrameBytes;
 const RESPONSE_KEYS = new Set(["jsonrpc", "id", "result", "error"]);
+const RESULT_KEYS = new Set([
+  "state",
+  "ready",
+  "child_pid",
+  "forced",
+  "exit_code",
+  "signal",
+]);
+const ERROR_KEYS = new Set(["code", "message", "data"]);
+const ERROR_DATA_KEYS = new Set(["state", "detail"]);
 const STATES = new Set(["created", "running", "stopped", "failed"]);
+type SupervisorOperation = "start" | "health" | "stop";
 type LaunchSpec = {
   program: string;
   args: readonly string[];
@@ -24,10 +35,17 @@ type ResolveEntrypoint = (
   manifest: Readonly<ExtensionManifest>,
 ) => LaunchSpec | PromiseLike<LaunchSpec>;
 type PendingRequest = {
+  operation: SupervisorOperation;
   resolve: (response: SupervisorResponse) => void;
   reject: (error: unknown) => void;
 };
 type SpawnImpl = typeof spawn;
+type KillProcessGroupImpl = (childPid: number) => void;
+type StopResult = Readonly<{ forced: boolean }>;
+
+function killProcessGroup(childPid: number): void {
+  process.kill(-childPid, "SIGKILL");
+}
 
 function abortError(
   reason: unknown,
@@ -44,12 +62,16 @@ function abortError(
 function validateString(
   value: unknown,
   name: string,
-  maxBytes: number = RUST_SUPERVISOR_LIMITS.argumentMax,
+  maxCharacters: number = RUST_SUPERVISOR_LIMITS.argumentMax,
 ): string {
-  if (typeof value !== "string" || Buffer.byteLength(value) > maxBytes) {
+  if (typeof value !== "string" || unicodeLength(value) > maxCharacters) {
     throw new TypeError(`${name} must be a bounded string`);
   }
   return value;
+}
+
+function unicodeLength(value: string): number {
+  return Array.from(value).length;
 }
 
 function defaultSupervisorBinary() {
@@ -114,30 +136,117 @@ function normalizeLaunchSpec(
   }) as LaunchSpec;
 }
 
-export function validateSupervisorResponse(value: unknown): SupervisorResponse {
+function validResponseId(value: unknown): boolean {
+  return (
+    value === null ||
+    (typeof value === "string" &&
+      unicodeLength(value) >= 1 &&
+      unicodeLength(value) <= RUST_SUPERVISOR_LIMITS.requestIdMax) ||
+    (typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      Math.abs(value) <= RUST_SUPERVISOR_LIMITS.safeIntegerMax)
+  );
+}
+
+function validInt32(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= -2_147_483_648 &&
+    value <= 2_147_483_647
+  );
+}
+
+export function validateSupervisorResponse(
+  value: unknown,
+  operation?: SupervisorOperation,
+): SupervisorResponse {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("supervisor returned a non-object frame");
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some((key) => !RESPONSE_KEYS.has(key)))
     throw new Error("supervisor returned an unknown field");
-  if (record.jsonrpc !== "2.0") throw new Error("supervisor JSON-RPC version mismatch");
+  if (record.jsonrpc !== "2.0")
+    throw new Error("supervisor JSON-RPC version mismatch");
+  if (!Object.hasOwn(record, "id") || !validResponseId(record.id))
+    throw new Error("supervisor response id is invalid");
   const result = record.result;
   if (result !== undefined) {
-    if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("supervisor result is invalid");
+    if (!result || typeof result !== "object" || Array.isArray(result))
+      throw new Error("supervisor result is invalid");
     const fields = result as Record<string, unknown>;
-    if (!STATES.has(fields.state as string)) throw new Error("supervisor response state is invalid");
-    if (fields.child_pid !== undefined && (!Number.isSafeInteger(fields.child_pid) || (fields.child_pid as number) <= 0)) throw new Error("supervisor child_pid is invalid");
-    for (const key of ["ready", "forced"] as const) if (fields[key] !== undefined && typeof fields[key] !== "boolean") throw new Error(`supervisor ${key} is invalid`);
-    for (const key of ["exit_code", "signal"] as const) if (fields[key] !== undefined && !Number.isSafeInteger(fields[key])) throw new Error(`supervisor ${key} is invalid`);
-    if (typeof fields.signal === "number" && fields.signal < 1) throw new Error("supervisor signal is invalid");
+    if (Object.keys(fields).some((key) => !RESULT_KEYS.has(key)))
+      throw new Error("supervisor result contains an unknown field");
+    if (!STATES.has(fields.state as string))
+      throw new Error("supervisor response state is invalid");
+    if (
+      fields.child_pid !== undefined &&
+      (!Number.isSafeInteger(fields.child_pid) ||
+        (fields.child_pid as number) < 2 ||
+        (fields.child_pid as number) > 4_294_967_295)
+    )
+      throw new Error("supervisor child_pid is invalid");
+    for (const key of ["ready", "forced"] as const)
+      if (fields[key] !== undefined && typeof fields[key] !== "boolean")
+        throw new Error(`supervisor ${key} is invalid`);
+    for (const key of ["exit_code", "signal"] as const)
+      if (fields[key] !== undefined && !validInt32(fields[key]))
+        throw new Error(`supervisor ${key} is invalid`);
+    if (typeof fields.signal === "number" && fields.signal < 1)
+      throw new Error("supervisor signal is invalid");
+    if (operation === "start") {
+      if (
+        fields.state !== "running" ||
+        fields.ready !== true ||
+        typeof fields.child_pid !== "number"
+      )
+        throw new Error("supervisor start result is invalid");
+    } else if (operation === "health") {
+      if (
+        typeof fields.ready !== "boolean" ||
+        fields.ready !== (fields.state === "running") ||
+        (fields.state === "running" && typeof fields.child_pid !== "number")
+      )
+        throw new Error("supervisor health result is invalid");
+    } else if (operation === "stop") {
+      if (
+        fields.state !== "stopped" ||
+        fields.ready !== false ||
+        typeof fields.forced !== "boolean"
+      )
+        throw new Error("supervisor stop result is invalid");
+    }
   }
   const error = record.error;
   if (error !== undefined) {
-    if (!error || typeof error !== "object" || Array.isArray(error)) throw new Error("supervisor error response is invalid");
+    if (!error || typeof error !== "object" || Array.isArray(error))
+      throw new Error("supervisor error response is invalid");
     const fields = error as Record<string, unknown>;
-    if (Object.keys(fields).some((key) => !["code", "message", "data"].includes(key)) || typeof fields.code !== "number" || !Number.isSafeInteger(fields.code) || typeof fields.message !== "string" || !fields.message || fields.message.length > RUST_SUPERVISOR_LIMITS.errorMessageMax) throw new Error("supervisor error response is invalid");
+    if (
+      Object.keys(fields).some((key) => !ERROR_KEYS.has(key)) ||
+      !validInt32(fields.code) ||
+      typeof fields.message !== "string" ||
+      unicodeLength(fields.message) < 1 ||
+      unicodeLength(fields.message) > RUST_SUPERVISOR_LIMITS.errorMessageMax ||
+      !fields.data ||
+      typeof fields.data !== "object" ||
+      Array.isArray(fields.data)
+    )
+      throw new Error("supervisor error response is invalid");
+    const data = fields.data as Record<string, unknown>;
+    if (
+      Object.keys(data).some((key) => !ERROR_DATA_KEYS.has(key)) ||
+      !STATES.has(data.state as string) ||
+      (data.detail !== undefined &&
+        (typeof data.detail !== "string" ||
+          unicodeLength(data.detail) > RUST_SUPERVISOR_LIMITS.errorMessageMax))
+    )
+      throw new Error("supervisor error data is invalid");
   }
-  if ((result === undefined) === (error === undefined)) throw new Error("supervisor response must contain exactly one result or error");
+  if ((result === undefined) === (error === undefined))
+    throw new Error(
+      "supervisor response must contain exactly one result or error",
+    );
   return record as unknown as SupervisorResponse;
 }
 
@@ -161,11 +270,14 @@ export class RustSupervisedExtension {
   #pending = new Map<string, PendingRequest>();
   #requestSequence = 0;
   #resolveEntrypoint: ResolveEntrypoint;
+  #killProcessGroup: KillProcessGroupImpl;
   #spawn: SpawnImpl;
   #state: "created" | "starting" | SupervisorState = "created";
   #stderrBytes = 0;
+  #stopPromise?: Promise<StopResult>;
   #stdoutBuffer = "";
   #supervisor?: ChildProcessWithoutNullStreams;
+  #terminationPromise?: Promise<void>;
   readonly manifest: ExtensionManifest;
   readonly shutdownGraceMs: number;
   readonly startupTimeoutMs: number;
@@ -179,6 +291,7 @@ export class RustSupervisedExtension {
     shutdownGraceMs,
     startupTimeoutMs,
     spawnImpl,
+    killProcessGroupImpl,
   }: {
     manifest: ExtensionManifest;
     ports: Record<string, unknown>;
@@ -188,6 +301,7 @@ export class RustSupervisedExtension {
     shutdownGraceMs: number;
     startupTimeoutMs: number;
     spawnImpl: SpawnImpl;
+    killProcessGroupImpl: KillProcessGroupImpl;
   }) {
     if (process.platform !== "linux")
       throw new Error("Rust process supervision currently requires Linux");
@@ -228,6 +342,7 @@ export class RustSupervisedExtension {
     this.shutdownGraceMs = shutdownGraceMs;
     this.startupTimeoutMs = startupTimeoutMs;
     this.#spawn = spawnImpl;
+    this.#killProcessGroup = killProcessGroupImpl;
   }
 
   get state() {
@@ -247,18 +362,24 @@ export class RustSupervisedExtension {
       throw new Error(`supervised extension cannot start from ${this.#state}`);
     if (signal?.aborted)
       throw abortError(signal.reason, "extension startup was aborted");
-    const spec = normalizeLaunchSpec(
-      await this.#resolveEntrypoint(this.manifest),
-      this.#allowedEnvironmentKeys,
-    );
-    await access(this.#binaryPath, constants.X_OK);
-    await access(spec.program, constants.X_OK);
-    this.#spawnSupervisor();
+    this.#state = "starting";
     const onAbort = () => {
-      void this.terminate();
+      void this.terminate().catch(() => {});
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
+      const spec = normalizeLaunchSpec(
+        await this.#resolveEntrypoint(this.manifest),
+        this.#allowedEnvironmentKeys,
+      );
+      this.#assertStartActive(signal);
+      await Promise.all([
+        access(this.#binaryPath, constants.X_OK),
+        access(spec.program, constants.X_OK),
+      ]);
+      this.#assertStartActive(signal);
+      this.#spawnSupervisor();
+      this.#assertStartActive(signal);
       const response = await this.#request("start", {
         extension_id: this.manifest.id,
         program: spec.program,
@@ -267,8 +388,9 @@ export class RustSupervisedExtension {
         startup_timeout_ms: this.startupTimeoutMs,
         shutdown_grace_ms: this.shutdownGraceMs,
       });
+      this.#assertStartActive(signal);
       const result = responseResult(response);
-      if (!result || result.state !== "running" || result.ready !== true) {
+      if (!result) {
         throw new Error(
           `supervisor rejected extension start: ${responseErrorCode(response)}`,
         );
@@ -307,37 +429,114 @@ export class RustSupervisedExtension {
     }
   }
 
-  async stop(): Promise<Readonly<{ forced: boolean }>> {
+  async stop(): Promise<StopResult> {
+    if (this.#stopPromise) return this.#stopPromise;
+    const stopping = this.#stopOwned();
+    this.#stopPromise = stopping;
+    try {
+      return await stopping;
+    } finally {
+      if (this.#stopPromise === stopping) this.#stopPromise = undefined;
+    }
+  }
+
+  async #stopOwned(): Promise<StopResult> {
+    if (this.#terminationPromise) {
+      await this.#terminationPromise;
+      return Object.freeze({ forced: true });
+    }
     if (this.#state === "stopped") return Object.freeze({ forced: false });
+    if (this.#state === "starting") {
+      await this.terminate();
+      return Object.freeze({ forced: true });
+    }
+    if (this.#childPid !== undefined && !this.#supervisor) {
+      await this.terminate();
+      return Object.freeze({ forced: true });
+    }
     if (!this.#supervisor || this.#supervisor.exitCode !== null) {
       this.#state = "stopped";
       return Object.freeze({ forced: false });
     }
-    const response = await this.#request("stop");
-    this.#state = "stopped";
-    this.#supervisor.stdin.end();
-    await this.#exitPromise;
-    return Object.freeze({ forced: responseResult(response)?.forced === true });
+    try {
+      const response = await this.#request("stop");
+      const result = responseResult(response);
+      if (!result)
+        throw new Error(
+          `supervisor rejected extension stop: ${responseErrorCode(response)}`,
+        );
+      this.#state = "stopped";
+      this.#supervisor?.stdin.end();
+      await this.#exitPromise;
+      return Object.freeze({ forced: result.forced === true });
+    } catch (error: unknown) {
+      await this.terminate();
+      throw error;
+    }
   }
 
   async terminate(): Promise<void> {
-    if (this.#state === "stopped") return;
-    if (this.#childPid) {
-      try {
-        process.kill(-this.#childPid, "SIGKILL");
-      } catch (error: unknown) {
-        const code =
-          error && typeof error === "object"
-            ? (error as { code?: unknown }).code
-            : undefined;
-        if (code !== "ESRCH") throw error;
-      }
-    }
-    if (this.#supervisor && this.#supervisor.exitCode === null) {
-      this.#supervisor.kill("SIGKILL");
-      await this.#exitPromise;
-    }
+    if (this.#terminationPromise) return this.#terminationPromise;
+    if (
+      this.#state === "stopped" &&
+      this.#childPid === undefined &&
+      (!this.#supervisor || this.#supervisor.exitCode !== null)
+    )
+      return;
     this.#state = "stopped";
+    const termination = Promise.resolve().then(async () => {
+      let cleanupError: unknown;
+      try {
+        this.#killOwnedProcessGroup();
+      } catch (error: unknown) {
+        cleanupError = error;
+      }
+      try {
+        if (this.#supervisor && this.#supervisor.exitCode === null) {
+          this.#supervisor.kill("SIGKILL");
+          await this.#exitPromise;
+        }
+      } catch (error: unknown) {
+        cleanupError = cleanupError
+          ? new AggregateError(
+              [cleanupError, error],
+              "supervised process termination failed",
+            )
+          : error;
+      }
+      if (!cleanupError) this.#childPid = undefined;
+      if (cleanupError) {
+        this.#state = "failed";
+        throw cleanupError;
+      }
+    });
+    this.#terminationPromise = termination;
+    try {
+      await termination;
+    } finally {
+      if (this.#terminationPromise === termination)
+        this.#terminationPromise = undefined;
+    }
+  }
+
+  #assertStartActive(signal?: AbortSignal): void {
+    if (signal?.aborted)
+      throw abortError(signal.reason, "extension startup was aborted");
+    if (this.#state !== "starting")
+      throw new Error(`supervised extension startup ended in ${this.#state}`);
+  }
+
+  #killOwnedProcessGroup(): void {
+    if (this.#childPid === undefined) return;
+    try {
+      this.#killProcessGroup(this.#childPid);
+    } catch (error: unknown) {
+      const code =
+        error && typeof error === "object"
+          ? (error as { code?: unknown }).code
+          : undefined;
+      if (code !== "ESRCH") throw error;
+    }
   }
 
   #spawnSupervisor(): void {
@@ -347,7 +546,6 @@ export class RustSupervisedExtension {
       windowsHide: true,
     });
     const supervisor = this.#supervisor;
-    this.#state = "starting";
     supervisor.stdout.setEncoding("utf8");
     supervisor.stdout.on("data", (chunk: string) => this.#receive(chunk));
     // Drain stderr to avoid a blocked trusted supervisor. Content is never
@@ -355,62 +553,94 @@ export class RustSupervisedExtension {
     supervisor.stderr.on("data", (chunk: string) => {
       this.#stderrBytes = Math.min(
         this.#stderrBytes + chunk.length,
-        MAX_FRAME_BYTES,
+        MAX_FRAME_CONTENT_BYTES,
       );
     });
     this.#exitPromise = new Promise<void>((resolveExit) => {
-      supervisor.once("exit", () => {
-        if (this.#state !== "stopped") this.#state = "stopped";
-        const error = new Error("Rust runtime supervisor exited");
-        for (const { reject } of this.#pending.values()) reject(error);
+      supervisor.once("close", () => {
+        let closeError: Error = new Error("Rust runtime supervisor exited");
+        let processGroupSettled = true;
+        if (this.#state !== "stopped") {
+          try {
+            this.#killOwnedProcessGroup();
+          } catch (error: unknown) {
+            processGroupSettled = false;
+            closeError = new AggregateError(
+              [closeError, error],
+              "Rust runtime supervisor exited and process-group cleanup failed",
+            );
+          }
+          this.#state = processGroupSettled ? "stopped" : "failed";
+        }
+        for (const { reject } of this.#pending.values()) reject(closeError);
         this.#pending.clear();
+        if (processGroupSettled && !this.#terminationPromise)
+          this.#childPid = undefined;
+        if (this.#supervisor === supervisor) this.#supervisor = undefined;
         resolveExit();
       });
     });
     supervisor.once("error", (error: Error) => {
       for (const pending of this.#pending.values()) pending.reject(error);
       this.#pending.clear();
+      if (this.#state !== "stopped") this.#state = "failed";
     });
   }
 
   #receive(chunk: string): void {
-    this.#stdoutBuffer += chunk;
-    if (
-      Buffer.byteLength(this.#stdoutBuffer) > MAX_FRAME_BYTES &&
-      !this.#stdoutBuffer.includes("\n")
-    ) {
-      void this.terminate();
-      return;
-    }
-    let newline;
-    while ((newline = this.#stdoutBuffer.indexOf("\n")) !== -1) {
-      const line = this.#stdoutBuffer.slice(0, newline);
-      this.#stdoutBuffer = this.#stdoutBuffer.slice(newline + 1);
-      if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
-        void this.terminate();
-        continue;
+    let remaining = chunk;
+    while (remaining.length > 0) {
+      const newline = remaining.indexOf("\n");
+      const segment = newline === -1 ? remaining : remaining.slice(0, newline);
+      if (
+        Buffer.byteLength(this.#stdoutBuffer) + Buffer.byteLength(segment) >
+        MAX_FRAME_CONTENT_BYTES
+      ) {
+        this.#failProtocol(
+          new Error("supervisor response exceeds 65536 bytes"),
+        );
+        return;
       }
+      this.#stdoutBuffer += segment;
+      if (newline === -1) return;
+      const line = this.#stdoutBuffer;
+      this.#stdoutBuffer = "";
+      remaining = remaining.slice(newline + 1);
+      if (line.length === 0) continue;
       let response;
       try {
         response = validateSupervisorResponse(JSON.parse(line));
       } catch (error: unknown) {
-        for (const pending of this.#pending.values()) pending.reject(error);
-        this.#pending.clear();
-        void this.terminate();
+        this.#failProtocol(error);
         return;
       }
       const pending = this.#pending.get(String(response.id));
       if (!pending) {
-        void this.terminate();
+        this.#failProtocol(new Error("supervisor response id is not pending"));
         return;
       }
+      try {
+        validateSupervisorResponse(response, pending.operation);
+      } catch (error: unknown) {
+        this.#failProtocol(error);
+        return;
+      }
+      if (pending.operation === "start")
+        this.#childPid = responseResult(response)?.child_pid;
       this.#pending.delete(String(response.id));
       pending.resolve(response);
     }
   }
 
+  #failProtocol(error: unknown): void {
+    for (const pending of this.#pending.values()) pending.reject(error);
+    this.#pending.clear();
+    this.#stdoutBuffer = "";
+    void this.terminate().catch(() => {});
+  }
+
   #request(
-    op: "start" | "health" | "stop",
+    op: SupervisorOperation,
     fields: Record<string, unknown> = {},
   ): Promise<SupervisorResponse> {
     if (!this.#supervisor || this.#supervisor.exitCode !== null) {
@@ -420,20 +650,22 @@ export class RustSupervisedExtension {
     }
     const requestId = `${this.manifest.id}.${++this.#requestSequence}`;
     const method = `runtime.${op}`;
-    const frame = `${JSON.stringify({
+    const content = JSON.stringify({
       jsonrpc: "2.0",
       id: requestId,
       method,
       params: fields,
-    })}\n`;
-    if (Buffer.byteLength(frame) > MAX_FRAME_BYTES) {
+    });
+    if (Buffer.byteLength(content) > MAX_FRAME_CONTENT_BYTES) {
       return Promise.reject(
         new Error("supervisor request exceeds 65536 bytes"),
       );
     }
+    const frame = `${content}\n`;
     const supervisor = this.#supervisor;
     return new Promise((resolveRequest, rejectRequest) => {
       this.#pending.set(requestId, {
+        operation: op,
         resolve: resolveRequest,
         reject: rejectRequest,
       });
@@ -458,6 +690,7 @@ export class RustSupervisedExtension {
  * @param {number} [options.startupTimeoutMs]
  * @param {number} [options.shutdownGraceMs]
  * @param {typeof spawn} [options.spawnImpl]
+ * @param {(childPid: number) => void} [options.killProcessGroupImpl]
  * @returns {(input: {manifest: Readonly<object>, ports: Record<string, never>}) => RustSupervisedExtension}
  */
 export function createRustProcessExtensionLauncher({
@@ -467,6 +700,7 @@ export function createRustProcessExtensionLauncher({
   startupTimeoutMs = 2_000,
   shutdownGraceMs = 2_000,
   spawnImpl = spawn,
+  killProcessGroupImpl = killProcessGroup,
 }: {
   binaryPath?: string;
   resolveEntrypoint?: ResolveEntrypoint;
@@ -474,6 +708,7 @@ export function createRustProcessExtensionLauncher({
   startupTimeoutMs?: number;
   shutdownGraceMs?: number;
   spawnImpl?: SpawnImpl;
+  killProcessGroupImpl?: KillProcessGroupImpl;
 } = {}): (input: {
   manifest: ExtensionManifest;
   ports: Record<string, unknown>;
@@ -482,6 +717,8 @@ export function createRustProcessExtensionLauncher({
     throw new TypeError("Rust supervisor binaryPath must be absolute");
   if (typeof resolveEntrypoint !== "function")
     throw new TypeError("resolveEntrypoint must be a trusted function");
+  if (typeof killProcessGroupImpl !== "function")
+    throw new TypeError("killProcessGroupImpl must be a trusted function");
   if (
     !Array.isArray(allowedEnvironmentKeys) ||
     allowedEnvironmentKeys.some((key) => typeof key !== "string")
@@ -505,5 +742,6 @@ export function createRustProcessExtensionLauncher({
       startupTimeoutMs,
       shutdownGraceMs,
       spawnImpl,
+      killProcessGroupImpl,
     });
 }

@@ -16,16 +16,18 @@ use ts_rs::TS;
 
 pub const PROTOCOL_VERSION: &str = "sumi.runtime.supervisor.v2";
 pub const EXTENSION_READY_FRAME: &[u8] = b"sumi.runtime.extension.ready.v1";
+/// Maximum JSON content bytes in one frame; the LF delimiter is not included.
 pub const MAX_FRAME_BYTES: usize = 65_536;
-pub const MAX_REQUEST_ID_BYTES: usize = 128;
-pub const MAX_EXTENSION_ID_BYTES: usize = 128;
-pub const MAX_PROGRAM_BYTES: usize = 4096;
+pub const MAX_REQUEST_ID_CHARS: usize = 128;
+pub const MAX_EXTENSION_ID_CHARS: usize = 128;
+pub const MAX_PROGRAM_CHARS: usize = 4096;
 pub const MAX_ARGUMENTS: usize = 64;
-pub const MAX_ARGUMENT_BYTES: usize = 4096;
+pub const MAX_ARGUMENT_CHARS: usize = 4096;
 pub const MAX_ENVIRONMENT_KEYS: usize = 32;
-pub const MAX_ENVIRONMENT_VALUE_BYTES: usize = 8192;
+pub const MAX_ENVIRONMENT_VALUE_CHARS: usize = 8192;
 pub const MAX_GRACE_MS: u64 = 30_000;
-pub const MAX_ERROR_MESSAGE_BYTES: usize = 512;
+pub const MAX_ERROR_MESSAGE_CHARS: usize = 512;
+pub const MAX_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
 
 pub const PARSE_ERROR: i32 = -32_700;
 pub const INVALID_REQUEST: i32 = -32_600;
@@ -52,9 +54,51 @@ pub enum JsonRpcId {
 fn json_rpc_id_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
         "anyOf": [
-            { "type": "string" },
-            { "type": "integer", "format": "int64" }
+            {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_REQUEST_ID_CHARS
+            },
+            {
+                "type": "integer",
+                "format": "int64",
+                "minimum": -MAX_SAFE_JSON_INTEGER,
+                "maximum": MAX_SAFE_JSON_INTEGER
+            }
         ]
+    })
+}
+
+fn nullable_json_rpc_id_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "anyOf": [
+            {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_REQUEST_ID_CHARS
+            },
+            {
+                "type": "integer",
+                "format": "int64",
+                "minimum": -MAX_SAFE_JSON_INTEGER,
+                "maximum": MAX_SAFE_JSON_INTEGER
+            },
+            { "type": "null" }
+        ]
+    })
+}
+
+fn environment_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "object",
+        "maxProperties": MAX_ENVIRONMENT_KEYS,
+        "propertyNames": {
+            "pattern": r"^[A-Z_][A-Z0-9_]{0,63}$"
+        },
+        "additionalProperties": {
+            "type": "string",
+            "maxLength": MAX_ENVIRONMENT_VALUE_CHARS
+        }
     })
 }
 
@@ -78,21 +122,31 @@ impl<'de> Deserialize<'de> for JsonRpcId {
             }
 
             fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                Ok(JsonRpcId::String(value.to_owned()))
+                self.visit_string(value.to_owned())
             }
 
             fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
-                Ok(JsonRpcId::String(value))
+                let id = JsonRpcId::String(value);
+                id.valid()
+                    .then_some(id)
+                    .ok_or_else(|| E::custom("JSON-RPC string id exceeds its bounds"))
             }
 
             fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-                Ok(JsonRpcId::Number(value))
+                let id = JsonRpcId::Number(value);
+                id.valid()
+                    .then_some(id)
+                    .ok_or_else(|| E::custom("JSON-RPC numeric id exceeds the safe integer range"))
             }
 
             fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-                i64::try_from(value)
-                    .map(JsonRpcId::Number)
-                    .map_err(|_| E::custom("JSON-RPC id exceeds signed integer range"))
+                if value <= MAX_SAFE_JSON_INTEGER as u64 {
+                    Ok(JsonRpcId::Number(value as i64))
+                } else {
+                    Err(E::custom(
+                        "JSON-RPC numeric id exceeds the safe integer range",
+                    ))
+                }
             }
         }
         deserializer.deserialize_any(IdVisitor)
@@ -109,10 +163,14 @@ impl JsonRpcId {
 
     pub fn valid(&self) -> bool {
         match self {
-            Self::String(value) => !value.is_empty() && value.len() <= MAX_REQUEST_ID_BYTES,
-            Self::Number(_) => true,
+            Self::String(value) => !value.is_empty() && unicode_len(value) <= MAX_REQUEST_ID_CHARS,
+            Self::Number(value) => value.abs_diff(0) <= MAX_SAFE_JSON_INTEGER as u64,
         }
     }
+}
+
+pub(crate) fn unicode_len(value: &str) -> usize {
+    value.chars().count()
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize, TS)]
@@ -138,7 +196,7 @@ pub struct StartParams {
     pub program: String,
     #[schemars(length(max = 64), inner(length(max = 4096)))]
     pub args: Vec<String>,
-    #[schemars(length(max = 32), inner(length(max = 8192)))]
+    #[schemars(schema_with = "environment_schema")]
     pub env: BTreeMap<String, String>,
     #[ts(type = "number")]
     #[schemars(range(min = 1, max = 30000))]
@@ -217,6 +275,7 @@ pub struct ResultPayload {
     pub ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    #[schemars(range(min = 2))]
     pub child_pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -226,6 +285,7 @@ pub struct ResultPayload {
     pub exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    #[schemars(range(min = 1))]
     pub signal: Option<i32>,
 }
 
@@ -236,6 +296,7 @@ pub struct ErrorData {
     pub state: SupervisorState,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    #[schemars(length(max = 512))]
     pub detail: Option<String>,
 }
 
@@ -244,10 +305,9 @@ pub struct ErrorData {
 #[schemars(deny_unknown_fields)]
 pub struct ErrorObject {
     pub code: i32,
+    #[schemars(length(min = 1, max = 512))]
     pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub data: Option<ErrorData>,
+    pub data: ErrorData,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize, TS)]
@@ -256,18 +316,21 @@ pub struct ErrorObject {
 pub enum Response {
     Result {
         jsonrpc: JsonRpcVersion,
+        #[schemars(required, schema_with = "nullable_json_rpc_id_schema")]
         id: Option<JsonRpcId>,
         result: ResultPayload,
     },
     Error {
         jsonrpc: JsonRpcVersion,
+        #[schemars(required, schema_with = "nullable_json_rpc_id_schema")]
         id: Option<JsonRpcId>,
         error: ErrorObject,
     },
 }
 
 impl Response {
-    pub fn success(id: JsonRpcId, result: ResultPayload) -> Self {
+    pub(crate) fn success(id: JsonRpcId, result: ResultPayload) -> Self {
+        debug_assert!(id.valid(), "success response id must be valid");
         Self::Result {
             jsonrpc: JsonRpcVersion::V2,
             id: Some(id),
@@ -275,23 +338,33 @@ impl Response {
         }
     }
 
-    pub fn error(
+    pub(crate) fn error(
         id: Option<JsonRpcId>,
         code: i32,
         message: impl Into<String>,
         state: SupervisorState,
     ) -> Self {
-        let message = message.into();
+        let mut message = message.into();
+        if message.is_empty() {
+            message = "supervisor error".to_owned();
+        }
+        if unicode_len(&message) > MAX_ERROR_MESSAGE_CHARS {
+            let boundary = message
+                .char_indices()
+                .nth(MAX_ERROR_MESSAGE_CHARS)
+                .map_or(message.len(), |(index, _)| index);
+            message.truncate(boundary);
+        }
         Self::Error {
             jsonrpc: JsonRpcVersion::V2,
-            id,
+            id: id.filter(JsonRpcId::valid),
             error: ErrorObject {
                 code,
-                message: message.chars().take(MAX_ERROR_MESSAGE_BYTES).collect(),
-                data: Some(ErrorData {
+                message,
+                data: ErrorData {
                     state,
                     detail: None,
-                }),
+                },
             },
         }
     }
@@ -362,7 +435,7 @@ pub fn generate_outputs(output_root: &Path) -> io::Result<()> {
     .collect::<Vec<_>>()
     .join("\n");
     let ts = format!(
-        "// Generated by Rust schemars + ts-rs from crates/runtime-supervisor/src/protocol.rs. Do not edit.\n\nexport const RUST_SUPERVISOR_PROTOCOL_VERSION = {PROTOCOL_VERSION:?} as const;\nexport const JSONRPC_VERSION = \"2.0\" as const;\nexport const EXTENSION_READY_FRAME = \"sumi.runtime.extension.ready.v1\" as const;\nexport const RUST_SUPERVISOR_LIMITS = Object.freeze({{\n  maxFrameBytes: {MAX_FRAME_BYTES},\n  requestIdMax: {MAX_REQUEST_ID_BYTES},\n  extensionIdMax: {MAX_EXTENSION_ID_BYTES},\n  programMax: {MAX_PROGRAM_BYTES},\n  argsMax: {MAX_ARGUMENTS},\n  argumentMax: {MAX_ARGUMENT_BYTES},\n  environmentKeysMax: {MAX_ENVIRONMENT_KEYS},\n  environmentValueMax: {MAX_ENVIRONMENT_VALUE_BYTES},\n  timeoutMax: {MAX_GRACE_MS},\n  errorMessageMax: {MAX_ERROR_MESSAGE_BYTES},\n}});\n\n{declarations}\nexport type SupervisorRequest = Request;\nexport type SupervisorResponse = Response;\nexport type SupervisorStartParams = StartParams;\n"
+        "// Generated by Rust schemars + ts-rs from crates/runtime-supervisor/src/protocol.rs. Do not edit.\n\nexport const RUST_SUPERVISOR_PROTOCOL_VERSION = {PROTOCOL_VERSION:?} as const;\nexport const JSONRPC_VERSION = \"2.0\" as const;\nexport const EXTENSION_READY_FRAME = \"sumi.runtime.extension.ready.v1\" as const;\nexport const RUST_SUPERVISOR_LIMITS = Object.freeze({{\n  // JSON content bytes; the LF frame delimiter is excluded.\n  maxFrameBytes: {MAX_FRAME_BYTES},\n  // String maxima count Unicode code points, matching JSON Schema maxLength.\n  requestIdMax: {MAX_REQUEST_ID_CHARS},\n  extensionIdMax: {MAX_EXTENSION_ID_CHARS},\n  programMax: {MAX_PROGRAM_CHARS},\n  argsMax: {MAX_ARGUMENTS},\n  argumentMax: {MAX_ARGUMENT_CHARS},\n  environmentKeysMax: {MAX_ENVIRONMENT_KEYS},\n  environmentValueMax: {MAX_ENVIRONMENT_VALUE_CHARS},\n  timeoutMax: {MAX_GRACE_MS},\n  errorMessageMax: {MAX_ERROR_MESSAGE_CHARS},\n  safeIntegerMax: {MAX_SAFE_JSON_INTEGER},\n}});\n\n{declarations}\nexport type SupervisorRequest = Request;\nexport type SupervisorResponse = Response;\nexport type SupervisorStartParams = StartParams;\n"
     );
     let ts_path = output_root.join("src/extensions/generated/runtime-supervisor-protocol.ts");
     write_text(&ts_path, &ts)
@@ -399,6 +472,51 @@ mod tests {
         )
         .expect("valid numeric id");
         assert_eq!(numeric.id().as_string(), "7");
+    }
+
+    #[test]
+    fn ids_use_unicode_code_points_and_javascript_safe_integers() {
+        assert!(JsonRpcId::String("界".repeat(MAX_REQUEST_ID_CHARS)).valid());
+        assert!(!JsonRpcId::String("界".repeat(MAX_REQUEST_ID_CHARS + 1)).valid());
+        assert!(JsonRpcId::Number(MAX_SAFE_JSON_INTEGER).valid());
+        assert!(JsonRpcId::Number(-MAX_SAFE_JSON_INTEGER).valid());
+        assert!(!JsonRpcId::Number(MAX_SAFE_JSON_INTEGER + 1).valid());
+        assert!(!JsonRpcId::Number(-MAX_SAFE_JSON_INTEGER - 1).valid());
+        for invalid_id in [
+            serde_json::json!("界".repeat(MAX_REQUEST_ID_CHARS + 1)),
+            serde_json::json!(MAX_SAFE_JSON_INTEGER + 1),
+            serde_json::json!(-MAX_SAFE_JSON_INTEGER - 1),
+        ] {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": invalid_id,
+                "method": "runtime.health",
+                "params": {}
+            });
+            assert!(serde_json::from_value::<Request>(request).is_err());
+        }
+    }
+
+    #[test]
+    fn error_messages_are_bounded_by_unicode_code_points() {
+        let exact = "界".repeat(MAX_ERROR_MESSAGE_CHARS);
+        let exact_response =
+            Response::error(None, INTERNAL_ERROR, exact.clone(), SupervisorState::Failed);
+        let Response::Error { error, .. } = exact_response else {
+            panic!("expected error response");
+        };
+        assert_eq!(error.message, exact);
+
+        let over_response = Response::error(
+            None,
+            INTERNAL_ERROR,
+            "界".repeat(MAX_ERROR_MESSAGE_CHARS + 1),
+            SupervisorState::Failed,
+        );
+        let Response::Error { error, .. } = over_response else {
+            panic!("expected error response");
+        };
+        assert_eq!(unicode_len(&error.message), MAX_ERROR_MESSAGE_CHARS);
     }
 
     #[test]

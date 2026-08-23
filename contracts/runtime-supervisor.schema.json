@@ -8,6 +8,7 @@
       "additionalProperties": false,
       "properties": {
         "detail": {
+          "maxLength": 512,
           "type": [
             "string",
             "null"
@@ -30,32 +31,32 @@
           "type": "integer"
         },
         "data": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ErrorData"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/ErrorData"
         },
         "message": {
+          "maxLength": 512,
+          "minLength": 1,
           "type": "string"
         }
       },
       "required": [
         "code",
-        "message"
+        "message",
+        "data"
       ],
       "type": "object"
     },
     "JsonRpcId": {
       "anyOf": [
         {
+          "maxLength": 128,
+          "minLength": 1,
           "type": "string"
         },
         {
           "format": "int64",
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
           "type": "integer"
         }
       ]
@@ -153,7 +154,15 @@
             "id": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/JsonRpcId"
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "format": "int64",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
@@ -169,6 +178,7 @@
           },
           "required": [
             "jsonrpc",
+            "id",
             "result"
           ],
           "type": "object"
@@ -182,7 +192,15 @@
             "id": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/JsonRpcId"
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "format": "int64",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
@@ -195,6 +213,7 @@
           },
           "required": [
             "jsonrpc",
+            "id",
             "error"
           ],
           "type": "object"
@@ -206,7 +225,7 @@
       "properties": {
         "child_pid": {
           "format": "uint32",
-          "minimum": 0,
+          "minimum": 2,
           "type": [
             "integer",
             "null"
@@ -233,6 +252,7 @@
         },
         "signal": {
           "format": "int32",
+          "minimum": 1,
           "type": [
             "integer",
             "null"
@@ -260,7 +280,12 @@
         },
         "env": {
           "additionalProperties": {
+            "maxLength": 8192,
             "type": "string"
+          },
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"
           },
           "type": "object"
         },

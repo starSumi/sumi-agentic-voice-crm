@@ -4,7 +4,9 @@ export const RUST_SUPERVISOR_PROTOCOL_VERSION = "sumi.runtime.supervisor.v2" as 
 export const JSONRPC_VERSION = "2.0" as const;
 export const EXTENSION_READY_FRAME = "sumi.runtime.extension.ready.v1" as const;
 export const RUST_SUPERVISOR_LIMITS = Object.freeze({
+  // JSON content bytes; the LF frame delimiter is excluded.
   maxFrameBytes: 65536,
+  // String maxima count Unicode code points, matching JSON Schema maxLength.
   requestIdMax: 128,
   extensionIdMax: 128,
   programMax: 4096,
@@ -14,6 +16,7 @@ export const RUST_SUPERVISOR_LIMITS = Object.freeze({
   environmentValueMax: 8192,
   timeoutMax: 30000,
   errorMessageMax: 512,
+  safeIntegerMax: 9007199254740991,
 });
 
 export type JsonRpcVersion = "2.0";
@@ -32,7 +35,7 @@ export type ResultPayload = { state: SupervisorState, ready?: boolean, child_pid
 
 export type ErrorData = { state: SupervisorState, detail?: string, };
 
-export type ErrorObject = { code: number, message: string, data?: ErrorData, };
+export type ErrorObject = { code: number, message: string, data: ErrorData, };
 
 export type Response = { jsonrpc: JsonRpcVersion, id: JsonRpcId | null, result: ResultPayload, } | { jsonrpc: JsonRpcVersion, id: JsonRpcId | null, error: ErrorObject, };
 
