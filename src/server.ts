@@ -348,6 +348,31 @@ function postgresReviewDecision(
   return {
     tenant_id: requiredString(input.tenant_id, "tenant_id"),
     actor_id: typeof input.actor_id === "string" ? input.actor_id : undefined,
+    subject_id:
+      typeof input.subject_id === "string" ? input.subject_id : undefined,
+    kind: typeof input.kind === "string" ? input.kind : undefined,
+    principal_kind:
+      typeof input.principal_kind === "string"
+        ? input.principal_kind
+        : undefined,
+    token_scopes: Array.isArray(input.token_scopes)
+      ? input.token_scopes.filter(
+          (scope): scope is string => typeof scope === "string",
+        )
+      : undefined,
+    authentication_methods: Array.isArray(input.authentication_methods)
+      ? input.authentication_methods.filter(
+          (method): method is string => typeof method === "string",
+        )
+      : undefined,
+    network_zone:
+      input.network_zone === "public" ||
+      input.network_zone === "private" ||
+      input.network_zone === "service"
+        ? input.network_zone
+        : undefined,
+    workload_id:
+      typeof input.workload_id === "string" ? input.workload_id : undefined,
     review_id: requiredString(input.review_id, "review_id"),
     decision,
     idempotency_key: requiredString(input.idempotency_key, "idempotency_key"),

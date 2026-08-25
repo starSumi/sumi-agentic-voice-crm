@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { testError, testErrorDetails, testRecord } from "./test-types.ts";
 import { createApp, readRequestBody } from "../src/server.ts";
+import { createRuntime } from "../src/composition-root.ts";
 import { REQUEST_BODY_LIMITS } from "../src/protocol-policy.ts";
 import { CrmStore } from "../src/store.ts";
 import { MemoryObjectStorage } from "../src/object-storage.ts";
@@ -187,6 +188,85 @@ test("application shutdown bounds HTTP drain and aborts a stuck request", async 
   await app.close();
   assert.equal(app.draining, true);
   assert.deepEqual(closed, ["store", "runtime"]);
+});
+
+test("PostgreSQL review adapter preserves token-bound authorization facts", async () => {
+  let decisionInput: Readonly<Record<string, unknown>> | undefined;
+  class ReviewBoundaryStore extends CrmStore {
+    async principalFor(identity: Readonly<Record<string, unknown>>) {
+      return {
+        ...identity,
+        subject_id: identity.actor_id,
+        kind: "human",
+        status: "active",
+        roles: ["tenant_admin"],
+        actor_scopes: ["review.decide"],
+        policy_version: "test-policy.v1",
+      };
+    }
+
+    async decideReview(input: Readonly<Record<string, unknown>>) {
+      decisionInput = input;
+      return {
+        review_id: input.review_id,
+        status: "rejected",
+        decision: { decision: input.decision },
+      };
+    }
+  }
+
+  const store = new ReviewBoundaryStore();
+  const app = createApp({
+    runtimeFactory: () =>
+      createRuntime({
+        env: {
+          APP_ENV: "test",
+          STORE_PROVIDER: "memory",
+          OBJECT_STORAGE_PROVIDER: "memory",
+        },
+        overrides: {
+          store,
+          authenticate: async () => ({
+            tenant_id: "tenant_demo",
+            actor_id: "reviewer-actor",
+            principal_kind: "human",
+            token_scopes: ["review.decide"],
+            authentication_methods: ["static_token"],
+            network_zone: "private",
+          }),
+          authorize: async () => ({
+            effect: "allow",
+            policy_version: "test-policy.v1",
+            reason_codes: ["ALLOW"],
+            obligations: [],
+          }),
+        },
+      }),
+  });
+  await new Promise<void>((resolve, reject) => {
+    app.server.once("error", reject);
+    app.listen(0, resolve);
+  });
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${tcpPort(app.server.address())}/v1/reviews/rev_abcd/decision`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+          "idempotency-key": "review-boundary-0001",
+        },
+        body: JSON.stringify({ decision: "reject" }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(decisionInput?.token_scopes, ["review.decide"]);
+    assert.deepEqual(decisionInput?.authentication_methods, ["static_token"]);
+    assert.equal(decisionInput?.network_zone, "private");
+  } finally {
+    await app.close();
+  }
 });
 
 test("request body reader rejects declared and chunked payloads before buffering beyond the cap", async () => {
