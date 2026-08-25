@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  assertProviderResponse,
   checkedJson,
   parseUnderstanding,
   upstream,
@@ -9,6 +10,15 @@ import {
 } from "./provider-common.ts";
 
 type ProviderEnvironment = Record<string, string | undefined>;
+type AgentCrmHttpConfiguration = Readonly<{
+  url: URL;
+  model: string;
+  callerId: string;
+  token: string;
+}>;
+
+const OPAQUE_CALLER_ID =
+  /^sumi-caller-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 const responseEnvelope = z.strictObject({
   request_id: z.string().min(1).max(256),
@@ -20,15 +30,15 @@ function configuredValue(env: ProviderEnvironment, name: string): string {
   return env[name]?.trim() || "";
 }
 
-function endpoint(env: ProviderEnvironment): URL {
+export function agentCrmHttpConfiguration(
+  env: ProviderEnvironment,
+): AgentCrmHttpConfiguration {
   const raw = configuredValue(env, "AGENT_CRM_HTTP_URL");
   let url: URL;
   try {
     url = new URL(raw);
-  } catch (error) {
-    throw upstream("Agent CRM HTTP URL is invalid", error, {
-      breakerEligible: false,
-    });
+  } catch {
+    throw new TypeError("AGENT_CRM_HTTP_URL must be an absolute URL");
   }
   if (
     url.protocol !== "https:" ||
@@ -36,13 +46,25 @@ function endpoint(env: ProviderEnvironment): URL {
     url.password ||
     url.hash
   ) {
-    throw upstream(
-      "Agent CRM HTTP URL must use credential-free HTTPS without a fragment",
-      undefined,
-      { breakerEligible: false },
+    throw new TypeError(
+      "AGENT_CRM_HTTP_URL must use credential-free HTTPS without a fragment",
     );
   }
-  return url;
+  const model = configuredValue(env, "AGENT_CRM_HTTP_MODEL");
+  if (!model || model.length > 256) {
+    throw new TypeError("AGENT_CRM_HTTP_MODEL must contain 1 to 256 characters");
+  }
+  const callerId = configuredValue(env, "AGENT_CRM_HTTP_CALLER_ID");
+  if (!OPAQUE_CALLER_ID.test(callerId)) {
+    throw new TypeError(
+      "AGENT_CRM_HTTP_CALLER_ID must use the non-PII sumi-caller-<UUID> format",
+    );
+  }
+  const token = configuredValue(env, "AGENT_CRM_HTTP_BEARER_TOKEN");
+  if (token && (token.length > 8_192 || /[\u0000-\u0020\u007f]/u.test(token))) {
+    throw new TypeError("AGENT_CRM_HTTP_BEARER_TOKEN is invalid");
+  }
+  return Object.freeze({ url, model, callerId, token });
 }
 
 function unsupported(capability: string): never {
@@ -63,48 +85,61 @@ export function createAgentCrmHttpProvider({
     defaultTtsFormat: "wav",
     configured(kind) {
       if (kind !== undefined && kind !== "intent") return false;
-      return Boolean(
-        configuredValue(env, "AGENT_CRM_HTTP_URL") &&
-          configuredValue(env, "AGENT_CRM_HTTP_MODEL") &&
-          configuredValue(env, "AGENT_CRM_HTTP_CALLER_ID"),
-      );
+      try {
+        agentCrmHttpConfiguration(env);
+        return true;
+      } catch {
+        return false;
+      }
     },
     async transcribe() {
       return unsupported("ASR");
     },
     async understand(transcript, { locale, signal }) {
-      const requestId = `sumi-${randomUUID()}`;
-      const callerId = configuredValue(env, "AGENT_CRM_HTTP_CALLER_ID");
-      const model = configuredValue(env, "AGENT_CRM_HTTP_MODEL");
-      if (!callerId || !model) {
-        throw upstream("Agent CRM HTTP provider is not configured", undefined, {
+      let configuration: AgentCrmHttpConfiguration;
+      try {
+        configuration = agentCrmHttpConfiguration(env);
+      } catch (error) {
+        throw upstream("Agent CRM HTTP provider is not configured", error, {
           breakerEligible: false,
         });
       }
-      const token = configuredValue(env, "AGENT_CRM_HTTP_BEARER_TOKEN");
-      const response = await fetchImpl(endpoint(env), {
+      const requestId = `sumi-${randomUUID()}`;
+      const response = await fetchImpl(configuration.url, {
         method: "POST",
         redirect: "error",
         signal,
         headers: {
           "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...(configuration.token
+            ? { authorization: `Bearer ${configuration.token}` }
+            : {}),
         },
         body: JSON.stringify({
           request_id: requestId,
-          phone_number: callerId,
+          phone_number: configuration.callerId,
           query: transcript,
         }),
       });
+      if (!response.ok) {
+        assertProviderResponse(response, "Agent CRM HTTP intent");
+      }
+      if (!/^application\/json(?:\s*;|$)/iu.test(response.headers.get("content-type") ?? "")) {
+        throw upstream("Agent CRM HTTP returned a non-JSON content type");
+      }
       const body = await checkedJson(response, "Agent CRM HTTP intent");
       const parsed = responseEnvelope.safeParse(body);
-      if (!parsed.success || parsed.data.request_id !== requestId) {
+      if (
+        !parsed.success ||
+        parsed.data.request_id !== requestId ||
+        parsed.data.phone_number !== configuration.callerId
+      ) {
         throw upstream("Agent CRM HTTP returned an invalid response envelope");
       }
       return parseUnderstanding(parsed.data.response, {
         transcript,
         locale,
-        model,
+        model: configuration.model,
       });
     },
     async synthesize() {

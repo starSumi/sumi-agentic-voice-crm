@@ -246,7 +246,7 @@ test("configured OpenTelemetry mode exports only explicit redacted spans", async
         {
           parent: span,
           attributes: {
-            "provider.kind": "mock",
+            "provider.kind": "agent-crm-http",
             signed_url: "https://secret.invalid",
           },
         },
@@ -268,7 +268,7 @@ test("configured OpenTelemetry mode exports only explicit redacted spans", async
     "app.operation": "ask",
     "input.type": "text",
   });
-  assert.deepEqual(provider.attributes, { "provider.kind": "mock" });
+  assert.deepEqual(provider.attributes, { "provider.kind": "agent-crm-http" });
   assert.doesNotMatch(
     JSON.stringify(spans.map((span) => span.attributes)),
     /secret|transcript|token|signed/i,

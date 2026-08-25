@@ -35,7 +35,13 @@ const ENUM_ATTRIBUTES = Object.freeze({
   "db.system": new Set(["memory", "postgresql", "unknown"]),
   "input.type": new Set(["audio", "text", "unknown"]),
   "output.mode": new Set(["audio", "both", "text", "unknown"]),
-  "provider.kind": new Set(["dashscope", "mock", "openai-compatible", "unknown"]),
+  "provider.kind": new Set([
+    "agent-crm-http",
+    "dashscope",
+    "mock",
+    "openai-compatible",
+    "unknown",
+  ]),
   "storage.kind": new Set(["memory", "s3", "unknown"]),
 });
 

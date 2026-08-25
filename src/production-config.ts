@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentCrmHttpConfiguration } from "./provider-agent-crm-http.ts";
 
 type ProductionComponent = "api" | "outbox";
 
@@ -122,9 +123,16 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env, {
     }
   }
   if (env.INTENT_PROVIDER === "agent-crm-http") {
-    requireHttps(env, "AGENT_CRM_HTTP_URL");
-    requireValue(env, "AGENT_CRM_HTTP_MODEL");
-    requireValue(env, "AGENT_CRM_HTTP_CALLER_ID");
+    try {
+      agentCrmHttpConfiguration(env);
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "unknown configuration error";
+      throw new Error(
+        `Agent CRM HTTP production configuration is invalid: ${reason}`,
+        { cause: error },
+      );
+    }
   }
   if (requireValue(env, "METRICS_BEARER_TOKEN").length < 32) throw new Error("METRICS_BEARER_TOKEN must contain at least 32 characters");
 }

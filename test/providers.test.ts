@@ -51,7 +51,8 @@ function agentCrmHttpEnv(overrides: NodeJS.ProcessEnv = {}) {
     TTS_PROVIDER: "mock",
     AGENT_CRM_HTTP_URL: "https://agent-crm.example.test/chat?variant=fine",
     AGENT_CRM_HTTP_MODEL: "sumi.agent-crm-training-example.v1",
-    AGENT_CRM_HTTP_CALLER_ID: "00000000000",
+    AGENT_CRM_HTTP_CALLER_ID:
+      "sumi-caller-00000000-0000-4000-8000-000000000001",
     ...overrides,
   };
 }
@@ -174,7 +175,10 @@ test("Agent CRM HTTP adapter validates the double-encoded intent envelope", asyn
     { locale: "zh-CN" },
   );
   assert.equal(observedUrl, agentCrmHttpEnv().AGENT_CRM_HTTP_URL);
-  assert.equal(observedRequest.phone_number, "00000000000");
+  assert.equal(
+    observedRequest.phone_number,
+    "sumi-caller-00000000-0000-4000-8000-000000000001",
+  );
   assert.equal(observedRequest.query, "确认把 deal-1 移到 Negotiation");
   assert.match(String(observedRequest.request_id), /^sumi-[0-9a-f-]{36}$/);
   assert.equal(result.intent, "crm.deal.update_stage");
@@ -188,12 +192,12 @@ test("Agent CRM HTTP adapter rejects invalid envelopes and request ID mismatches
     { response: JSON.stringify(validUnderstanding()) },
     {
       request_id: "wrong-request",
-      phone_number: "00000000000",
+      phone_number: "sumi-caller-00000000-0000-4000-8000-000000000001",
       response: JSON.stringify(validUnderstanding()),
     },
     {
       request_id: "wrong-request",
-      phone_number: "00000000000",
+      phone_number: "sumi-caller-00000000-0000-4000-8000-000000000001",
       response: "not-json",
     },
   ]) {
@@ -206,6 +210,210 @@ test("Agent CRM HTTP adapter rejects invalid envelopes and request ID mismatches
       (error) => testError(error).code === "UPSTREAM_UNAVAILABLE",
     );
   }
+});
+
+test("Agent CRM HTTP configuration rejects PII-shaped callers and unsafe URLs before readiness", async () => {
+  for (const overrides of [
+    { AGENT_CRM_HTTP_CALLER_ID: "13800138000" },
+    { AGENT_CRM_HTTP_URL: "https://user@example.test/chat" },
+    { AGENT_CRM_HTTP_URL: "https://example.test/chat#fragment" },
+  ]) {
+    const runtime = createProviderRuntime({
+      env: agentCrmHttpEnv(overrides),
+      fetchImpl: async () => assert.fail("invalid configuration must not fetch"),
+    });
+    assert.equal(runtime.providerReadiness().statuses.intent.ready, false);
+    await assert.rejects(
+      () => runtime.understand("查询客户", { locale: "zh-CN" }),
+      (error) =>
+        testError(error).code === "UPSTREAM_UNAVAILABLE" &&
+        testError(error).breakerEligible === false,
+    );
+  }
+});
+
+test("Agent CRM HTTP preserves neutral and breaker-eligible failure semantics", async () => {
+  let neutralCalls = 0;
+  const secret = "unit-only-bearer-token";
+  const neutral = createProviderRuntime({
+    env: agentCrmHttpEnv({ AGENT_CRM_HTTP_BEARER_TOKEN: secret }),
+    fetchImpl: async (_input, init = {}) => {
+      neutralCalls += 1;
+      assert.equal(init.redirect, "error");
+      assert.equal(
+        new Headers(init.headers).get("authorization"),
+        `Bearer ${secret}`,
+      );
+      return new Response("provider detail must not leak", { status: 400 });
+    },
+  });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await assert.rejects(
+      () => neutral.understand("查询客户", { locale: "zh-CN" }),
+      (error) => {
+        const candidate = testError(error);
+        return (
+          candidate.code === "PROVIDER_REJECTED" &&
+          candidate.breakerEligible === false &&
+          !JSON.stringify(candidate).includes(secret) &&
+          !candidate.message.includes("provider detail")
+        );
+      },
+    );
+  }
+  assert.equal(neutralCalls, 4);
+  assert.equal(
+    neutral.providerReadiness().statuses.intent.circuit,
+    "closed",
+  );
+
+  for (const status of [429, 503]) {
+    let calls = 0;
+    const runtime = createProviderRuntime({
+      env: agentCrmHttpEnv(),
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(null, { status });
+      },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await assert.rejects(
+        () => runtime.understand("查询客户", { locale: "zh-CN" }),
+        (error) =>
+          testError(error).code ===
+          (status === 429 ? "RATE_LIMITED" : "UPSTREAM_UNAVAILABLE"),
+      );
+    }
+    await assert.rejects(
+      () => runtime.understand("查询客户", { locale: "zh-CN" }),
+      (error) => /circuit is open/u.test(testError(error).message),
+    );
+    assert.equal(calls, 3);
+    assert.equal(runtime.providerReadiness().statuses.intent.circuit, "open");
+  }
+});
+
+test("Agent CRM HTTP rejects redirects and malformed inner responses", async () => {
+  const redirected = createProviderRuntime({
+    env: agentCrmHttpEnv(),
+    fetchImpl: async (_input, init = {}) => {
+      assert.equal(init.redirect, "error");
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://untrusted.example.test/chat" },
+      });
+    },
+  });
+  await assert.rejects(
+    () => redirected.understand("查询客户", { locale: "zh-CN" }),
+    (error) =>
+      testError(error).code === "UPSTREAM_UNAVAILABLE" &&
+      testError(error).breakerEligible === false,
+  );
+  assert.equal(
+    redirected.providerReadiness().statuses.intent.circuit,
+    "closed",
+  );
+
+  for (const responseValue of ["not-json", JSON.stringify({ intent: "crm.future" })]) {
+    const runtime = createProviderRuntime({
+      env: agentCrmHttpEnv(),
+      fetchImpl: async (_input, init = {}) => {
+        const request = JSON.parse(String(init.body));
+        return jsonResponse({
+          request_id: request.request_id,
+          phone_number: request.phone_number,
+          response: responseValue,
+        });
+      },
+    });
+    await assert.rejects(
+      () => runtime.understand("查询客户", { locale: "zh-CN" }),
+      (error) => testError(error).code === "UPSTREAM_UNAVAILABLE",
+    );
+  }
+
+  const mismatchedCaller = createProviderRuntime({
+    env: agentCrmHttpEnv(),
+    fetchImpl: async (_input, init = {}) => {
+      const request = JSON.parse(String(init.body));
+      return jsonResponse({
+        request_id: request.request_id,
+        phone_number: "sumi-caller-00000000-0000-4000-8000-000000000002",
+        response: JSON.stringify(validUnderstanding()),
+      });
+    },
+  });
+  await assert.rejects(
+    () => mismatchedCaller.understand("查询客户", { locale: "zh-CN" }),
+    /invalid response envelope/u,
+  );
+
+  const wrongContentType = createProviderRuntime({
+    env: agentCrmHttpEnv(),
+    fetchImpl: async (_input, init = {}) => {
+      const request = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          request_id: request.request_id,
+          phone_number: request.phone_number,
+          response: JSON.stringify(validUnderstanding()),
+        }),
+        { headers: { "content-type": "text/plain" } },
+      );
+    },
+  });
+  await assert.rejects(
+    () => wrongContentType.understand("查询客户", { locale: "zh-CN" }),
+    /non-JSON content type/u,
+  );
+});
+
+test("Agent CRM HTTP cooperates with parent cancellation and soft timeout", async () => {
+  const waitingFetch = async (_input: RequestInfo | URL, init: RequestInit = {}) =>
+    await new Promise<Response>((_resolve, reject) => {
+      const signal = init.signal;
+      if (!signal) return reject(new Error("provider signal is required"));
+      const abort = () => reject(signal.reason);
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+    });
+
+  const parent = new AbortController();
+  const cancelled = createProviderRuntime({
+    env: agentCrmHttpEnv(),
+    fetchImpl: waitingFetch,
+  });
+  const cancellation = cancelled.understand("查询客户", {
+    locale: "zh-CN",
+    signal: parent.signal,
+  });
+  parent.abort(new Error("client disconnected"));
+  await assert.rejects(
+    cancellation,
+    (error) =>
+      testError(error).name === "AbortError" &&
+      testError(error).breakerEligible === false,
+  );
+  assert.equal(
+    cancelled.providerReadiness().statuses.intent.circuit,
+    "closed",
+  );
+
+  const timedOut = createProviderRuntime({
+    env: agentCrmHttpEnv({
+      PROVIDER_SOFT_TIMEOUT_MS: "10",
+      PROVIDER_HARD_GRACE_MS: "10",
+    }),
+    fetchImpl: waitingFetch,
+  });
+  await assert.rejects(
+    () => timedOut.understand("查询客户", { locale: "zh-CN" }),
+    (error) =>
+      testError(error).name === "StagedTimeoutError" &&
+      testError(error).breakerEligible === true,
+  );
+  assert.equal(timedOut.providerReadiness().statuses.intent.circuit, "closed");
 });
 
 test("DashScope ASR sends the MIME-aware input_audio Data URL", async () => {

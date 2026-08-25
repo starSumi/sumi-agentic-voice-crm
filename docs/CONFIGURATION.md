@@ -70,7 +70,7 @@ transcripts, audio, tokens, SQL parameters, or signed URL query strings.
 
 Existing deployments may keep `ALIYUN_BASE_APIKEY`, `ALIYUN_BASE_URL`, `ALIYUN_BASE_MODEL`, and the corresponding `ALIYUN_ASR_*`/`ALIYUN_TTS_*` variables. They are aliases; `DASHSCOPE_*` takes precedence when both namespaces are present.
 
-`agent-crm-http` sends `request_id`, an opaque non-PII caller identifier in the upstream `phone_number` compatibility field, and the transcript as `query`. It bounds and validates both JSON layers, requires the upstream request ID to be echoed, and applies the current Agent CRM output contract before returning an understanding. `AGENT_CRM_HTTP_BEARER_TOKEN` is optional. This adapter is intentionally limited to intent so an ephemeral model service cannot silently replace ASR or TTS.
+`agent-crm-http` sends `request_id`, a required non-PII `sumi-caller-<UUID>` identifier in the upstream `phone_number` compatibility field, and the transcript as `query`. Phone-number-shaped values are rejected before readiness. It bounds and validates both JSON layers, requires the upstream request and caller identifiers to be echoed, and applies the current Agent CRM output contract before returning an understanding. `AGENT_CRM_HTTP_BEARER_TOKEN` is optional. This adapter is intentionally limited to intent so an ephemeral model service cannot silently replace ASR or TTS.
 
 ## Documentation settings
 

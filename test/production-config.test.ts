@@ -202,7 +202,8 @@ test("production API configuration accepts Agent CRM HTTP for intent only", () =
     DASHSCOPE_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     AGENT_CRM_HTTP_URL: "https://agent-crm.example.test/chat?variant=fine",
     AGENT_CRM_HTTP_MODEL: "sumi.agent-crm-training-example.v1",
-    AGENT_CRM_HTTP_CALLER_ID: "00000000000",
+    AGENT_CRM_HTTP_CALLER_ID:
+      "sumi-caller-00000000-0000-4000-8000-000000000001",
   };
   assert.doesNotThrow(() => validateProductionConfig(agentCrmHttp));
   for (const name of [
@@ -223,6 +224,16 @@ test("production API configuration accepts Agent CRM HTTP for intent only", () =
       }),
     /ASR_PROVIDER/,
   );
+  for (const [name, value] of [
+    ["AGENT_CRM_HTTP_CALLER_ID", "13800138000"],
+    ["AGENT_CRM_HTTP_URL", "https://user@example.test/chat"],
+    ["AGENT_CRM_HTTP_URL", "https://example.test/chat#fragment"],
+  ]) {
+    assert.throws(
+      () => validateProductionConfig({ ...agentCrmHttp, [name]: value }),
+      /Agent CRM HTTP production configuration is invalid/,
+    );
+  }
 });
 
 test("production outbox configuration is independently fail-closed", () => {

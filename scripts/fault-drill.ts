@@ -4,7 +4,141 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { OutboxRelay, outboxConfig } from "../src/outbox-relay.ts";
+import { createProviderRuntime } from "../src/providers.ts";
 import { isolatedDrillEnv } from "./drill-env.ts";
+
+function agentCrmEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ASR_PROVIDER: "mock",
+    INTENT_PROVIDER: "agent-crm-http",
+    TTS_PROVIDER: "mock",
+    AGENT_CRM_HTTP_URL: "https://agent-crm.example.test/chat?variant=fine",
+    AGENT_CRM_HTTP_MODEL: "sumi.agent-crm-training-example.v1",
+    AGENT_CRM_HTTP_CALLER_ID:
+      "sumi-caller-00000000-0000-4000-8000-000000000001",
+    ...overrides,
+  };
+}
+
+async function runAgentCrmFaultMatrix() {
+  const neutral = createProviderRuntime({
+    env: agentCrmEnv({ AGENT_CRM_HTTP_BEARER_TOKEN: "fault-drill-token" }),
+    fetchImpl: async (_input, init = {}) => {
+      assert.equal(init.redirect, "error");
+      assert.equal(
+        new Headers(init.headers).get("authorization"),
+        "Bearer fault-drill-token",
+      );
+      return new Response("sensitive upstream detail", { status: 400 });
+    },
+  });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await assert.rejects(
+      () => neutral.understand("synthetic query", { locale: "en-US" }),
+      (error: unknown) => {
+        const candidate = error as Error & {
+          code?: string;
+          breakerEligible?: boolean;
+        };
+        return (
+          candidate.code === "PROVIDER_REJECTED" &&
+          candidate.breakerEligible === false &&
+          !candidate.message.includes("sensitive upstream detail") &&
+          !JSON.stringify(candidate).includes("fault-drill-token")
+        );
+      },
+    );
+  }
+
+  const eligible: Record<string, { calls: number; circuit: string }> = {};
+  for (const status of [429, 503]) {
+    let calls = 0;
+    const runtime = createProviderRuntime({
+      env: agentCrmEnv(),
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(null, { status });
+      },
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await assert.rejects(() =>
+        runtime.understand("synthetic query", { locale: "en-US" }),
+      );
+    }
+    await assert.rejects(
+      () => runtime.understand("synthetic query", { locale: "en-US" }),
+      /circuit is open/u,
+    );
+    eligible[String(status)] = {
+      calls,
+      circuit: runtime.providerReadiness().statuses.intent.circuit,
+    };
+  }
+
+  const redirect = createProviderRuntime({
+    env: agentCrmEnv(),
+    fetchImpl: async (_input, init = {}) => {
+      assert.equal(init.redirect, "error");
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://untrusted.example.test/chat" },
+      });
+    },
+  });
+  await assert.rejects(
+    () => redirect.understand("synthetic query", { locale: "en-US" }),
+    (error: unknown) =>
+      (error as { breakerEligible?: boolean }).breakerEligible === false,
+  );
+
+  const malformed = createProviderRuntime({
+    env: agentCrmEnv(),
+    fetchImpl: async (_input, init = {}) => {
+      const request = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          request_id: request.request_id,
+          phone_number: request.phone_number,
+          response: "not-json",
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+  await assert.rejects(() =>
+    malformed.understand("synthetic query", { locale: "en-US" }),
+  );
+
+  const timed = createProviderRuntime({
+    env: agentCrmEnv({
+      PROVIDER_SOFT_TIMEOUT_MS: "20",
+      PROVIDER_HARD_GRACE_MS: "20",
+    }),
+    fetchImpl: async (_input, init = {}) =>
+      await new Promise<Response>((_resolve, reject) => {
+        const signal = init.signal;
+        assert.ok(signal);
+        const abort = () => reject(signal.reason);
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      }),
+  });
+  await assert.rejects(
+    () => timed.understand("synthetic query", { locale: "en-US" }),
+    (error: unknown) =>
+      (error as { name?: string }).name === "StagedTimeoutError",
+  );
+
+  return {
+    four_xx_neutral:
+      neutral.providerReadiness().statuses.intent.circuit === "closed",
+    breaker_eligible: eligible,
+    redirect_neutral:
+      redirect.providerReadiness().statuses.intent.circuit === "closed",
+    malformed_rejected: true,
+    timeout_cooperative: true,
+  };
+}
 
 async function listen(server: Server): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
@@ -138,6 +272,7 @@ try {
   await new Promise((resolve) => eventTarget.close(resolve));
   assert.equal(deadLettered, true);
   assert.equal(relayResult.dead_lettered, 1);
+  const agentCrmHttp = await runAgentCrmFaultMatrix();
 
   const evidence = {
     schema_version: "sumi.fault-drill.v1",
@@ -148,6 +283,7 @@ try {
       circuit_open: true,
       readiness_status: readiness.status,
     },
+    agent_crm_http: agentCrmHttp,
     outbox: relayResult,
     passed: true,
   };
