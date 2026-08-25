@@ -206,6 +206,11 @@ test("Nx models the pnpm, Rust, protocol, data, docs and orchestration boundarie
     JSON.parse(await readFile("db/project.json", "utf8")).targets.test.cache,
     false,
   );
+  const docsProject = JSON.parse(
+    await readFile("docs/project.json", "utf8"),
+  );
+  assert.deepEqual(docsProject.targets.ci.dependsOn, ["build", "test"]);
+  assert.match(packageJson.scripts["docs:build"], /^astro check && astro build/);
   assert.match(packageJson.scripts.verify, /exclude=sumi-postgres/);
   assert.equal(packageJson.scripts["verify:ci"].includes("exclude"), false);
   assert.match(

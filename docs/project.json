@@ -38,7 +38,7 @@
       "cache": true
     },
     "ci": {
-      "dependsOn": ["check", "build", "test"],
+      "dependsOn": ["build", "test"],
       "command": "node -e \"console.log('Product documentation passed')\"",
       "cache": true
     }
