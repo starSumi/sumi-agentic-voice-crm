@@ -969,7 +969,7 @@ mod tests {
             &["-c".to_owned(), script.to_owned()],
             &env,
             Duration::from_secs(1),
-            Duration::from_millis(50),
+            Duration::from_secs(1),
         )
         .expect("spawn extension with descendant");
         let process_group = child.process_group.expect("owned process group");
@@ -981,8 +981,10 @@ mod tests {
         assert_eq!(unsafe { libc::getpgid(descendant_pid) }, process_group);
         assert!(process_group_exists(process_group).expect("live process group"));
 
-        let (_, forced) = child.stop().expect("bounded group stop");
+        let (leader_exit, forced) = child.stop().expect("bounded group stop");
         assert!(forced);
+        assert_eq!(leader_exit.code, Some(0));
+        assert_eq!(leader_exit.signal, None);
         assert_eq!(
             fs::read_to_string(&leader_terminated).expect("leader TERM handler marker"),
             "terminated"
