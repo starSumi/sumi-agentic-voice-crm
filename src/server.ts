@@ -45,6 +45,8 @@ import {
 } from "./protocol-policy.ts";
 import { DEFAULT_TEARDOWN_TIMEOUT_MS } from "./control/index.ts";
 import { createMessageJobWorker } from "./message-job-worker.ts";
+import { parseMultipartRequest } from "./multipart.ts";
+import { createRateLimiter } from "./rate-limiter.ts";
 import type { AudioInput, TextAskInput } from "./contracts.ts";
 import type { MessageJob, MessageJobWorkerQueue } from "./message-job-queue.ts";
 import type {
@@ -64,8 +66,6 @@ import type {
 
 type DataRecord = Record<string, unknown>;
 type AskInput = TextAskInput | (AudioInput & { readonly sha256?: string });
-type MultipartFile = { data: Buffer; content_type: string };
-type MultipartParts = Record<string, string | MultipartFile>;
 type RequestBodyChunk = Buffer | string | Uint8Array;
 type RequestBodyStream = {
   readonly headers?: IncomingHttpHeaders;
@@ -127,6 +127,11 @@ type AppStore = MessageJobWorkerQueue & {
     idempotency_key?: string;
   }): Awaitable<MessageJob | undefined>;
   events(tenantId?: string, actorId?: string): Awaitable<unknown[]>;
+  eventPage(
+    tenantId: string,
+    actorId: string | undefined,
+    input?: { limit?: unknown; cursor?: unknown },
+  ): Awaitable<{ events: unknown[]; next_cursor?: string }>;
   assetFor(
     tenantId: string,
     assetId: string,
@@ -416,6 +421,16 @@ function appStore(store: RuntimeStore): AppStore {
         worker_id: requiredString(input.worker_id, "worker_id"),
         result: input.result,
       }),
+    renewMessageJobLease: (input) =>
+      store.renewMessageJobLease({
+        tenant_id: requiredString(input.tenant_id, "tenant_id"),
+        job_id: requiredString(input.job_id, "job_id"),
+        worker_id: requiredString(input.worker_id, "worker_id"),
+        lease_ms:
+          input.lease_ms === undefined
+            ? undefined
+            : positiveNumber(input.lease_ms, "lease_ms"),
+      }),
     failMessageJob: (input) =>
       store.failMessageJob({
         tenant_id: requiredString(input.tenant_id, "tenant_id"),
@@ -427,6 +442,7 @@ function appStore(store: RuntimeStore): AppStore {
           input.max_attempts === undefined
             ? undefined
             : positiveNumber(input.max_attempts, "max_attempts"),
+        retryable: input.retryable,
       }),
     releaseMessageJob: (input) =>
       store.releaseMessageJob({
@@ -464,6 +480,8 @@ function appStore(store: RuntimeStore): AppStore {
       }),
     events: (tenantId, actorId) =>
       store.events(requiredString(tenantId, "tenant_id"), actorId),
+    eventPage: (tenantId, actorId, input) =>
+      store.eventPage(requiredString(tenantId, "tenant_id"), actorId, input),
     assetFor: async (...input) => {
       const asset = await store.assetFor(...input);
       return isDataRecord(asset) ? asset : undefined;
@@ -737,6 +755,11 @@ export function createApp({
   const resolvedTeardownTimeoutMs = teardownTimeout(
     teardownTimeoutMs ?? env.RUNTIME_TEARDOWN_MS,
   );
+  const rateLimiter = createRateLimiter({
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    maxRequests: env.RATE_LIMIT_MAX_REQUESTS,
+    maxKeys: env.RATE_LIMIT_MAX_KEYS,
+  });
   const json = (res: ServerResponse, status: number, body: unknown) => {
     res.statusCode = status;
     res.setHeader("content-type", "application/json; charset=utf-8");
@@ -942,41 +965,12 @@ export function createApp({
             );
             return outcome.response;
           },
+          onResult: (result) => observability.recordMessageJob(result),
         })
       : undefined;
   for (const tenantId of configuredMessageJobTenants(env))
     messageJobWorker?.registerTenant(tenantId);
 
-  function parseMultipart(buf: Buffer, type: string): MultipartParts {
-    const boundary =
-      /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[1] ??
-      /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type)?.[2];
-    if (!boundary)
-      throw Object.assign(new Error("multipart boundary is required"), {
-        code: "INVALID_REQUEST",
-      });
-    const out: MultipartParts = {};
-    for (const part of buf
-      .toString("binary")
-      .split(`--${boundary}`)
-      .slice(1, -1)) {
-      const i = part.indexOf("\r\n\r\n");
-      if (i < 0) continue;
-      const head = part.slice(0, i);
-      const payload = part.slice(i + 4).replace(/\r\n$/, "");
-      const name = /name="([^"]+)"/i.exec(head)?.[1];
-      if (!name) continue;
-      out[name] = /filename=/i.test(head)
-        ? {
-            data: Buffer.from(payload, "binary"),
-            content_type:
-              /Content-Type:\s*([^\r\n]+)/i.exec(head)?.[1]?.trim() ??
-              "application/octet-stream",
-          }
-        : payload;
-    }
-    return out;
-  }
   function requestSignal(
     req: IncomingMessage,
     res: ServerResponse,
@@ -1015,7 +1009,7 @@ export function createApp({
       shutdownController.signal.addEventListener("abort", stopForShutdown, {
         once: true,
       });
-    if (req.aborted || req.destroyed || res.destroyed) abort();
+    if (req.destroyed || res.destroyed) abort();
     return controller.signal;
   }
   async function authenticateContext(
@@ -1054,20 +1048,17 @@ export function createApp({
     const multipart = req.headers["content-type"]?.startsWith(
       "multipart/form-data",
     );
-    const raw = await readRequestBody(
-      req,
-      multipart
-        ? REQUEST_BODY_LIMITS.askMultipart
-        : REQUEST_BODY_LIMITS.askJson,
-    );
+    const raw = multipart
+      ? undefined
+      : await readRequestBody(req, REQUEST_BODY_LIMITS.askJson);
     let input: AskInput;
     let outputMode = "text";
     let locale = DEFAULT_LOCALE;
     let conversationId: string | undefined;
     if (multipart) {
-      const parts = parseMultipart(
-        raw,
-        requiredString(req.headers["content-type"], "content-type"),
+      const parts = await parseMultipartRequest(
+        req,
+        REQUEST_BODY_LIMITS.askMultipart,
       );
       let metadata: DataRecord;
       try {
@@ -1107,7 +1098,7 @@ export function createApp({
     } else {
       const parsed = protocolRecord(
         "AskRequest",
-        JSON.parse(raw.toString("utf8") || "{}"),
+        JSON.parse(raw?.toString("utf8") || "{}"),
       );
       conversationId =
         typeof parsed.conversation_id === "string"
@@ -1288,6 +1279,17 @@ export function createApp({
       observability.finish(telemetry, res.statusCode, errorCode),
     );
     try {
+      if (req.url?.split("?", 1)[0].startsWith("/v1/")) {
+        const decision = rateLimiter.check(
+          req.socket.remoteAddress ?? "unknown",
+        );
+        if (!decision.allowed) {
+          res.setHeader("retry-after", decision.retry_after_seconds);
+          throw Object.assign(new Error("request rate limit exceeded"), {
+            code: "RATE_LIMITED",
+          });
+        }
+      }
       if (req.method === "GET" && req.url === "/health/live")
         return json(res, 200, {
           status: "ok",
@@ -1394,24 +1396,33 @@ export function createApp({
           }),
         );
       }
-      if (req.method === "GET" && req.url === "/v1/events") {
+      if (
+        req.method === "GET" &&
+        req.url?.split("?", 1)[0] === "/v1/events"
+      ) {
+        const requestUrl = new URL(req.url, "http://localhost");
         const context = await authenticateContext(req, res, rid, signal);
         const { identity } = context;
         await authorizeAction(authorizationPorts, context, "events.read", {
           type: "event_stream",
           id: `${identity.tenant_id}:events`,
         });
-        const events: unknown[] = await store.events(
+        const page = await store.eventPage(
           identity.tenant_id,
           identity.actor_id,
+          {
+            limit: requestUrl.searchParams.get("limit") ?? undefined,
+            cursor: requestUrl.searchParams.get("cursor") ?? undefined,
+          },
         );
         return json(res, 200, {
-          events: events.filter((event) => {
+          events: page.events.filter((event) => {
             validateEvent(event);
             return (
               isDataRecord(event) && event.tenant_id === identity.tenant_id
             );
           }),
+          ...(page.next_cursor ? { next_cursor: page.next_cursor } : {}),
           request_id: rid,
         });
       }

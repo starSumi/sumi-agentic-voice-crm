@@ -8,6 +8,7 @@ import {
   createMemoryMessageJobQueue,
   type MessageJobQueue,
 } from "./message-job-queue.ts";
+import { paginateEvents, type EventPageInput } from "./event-pagination.ts";
 import {
   agentCrmIntentDefinition,
   assertAgentCrmActionProposal,
@@ -259,6 +260,9 @@ export class CrmStore {
   }
   completeMessageJob(input: QueueInput<"completeMessageJob">) {
     return this.#messageJobs.completeMessageJob(input);
+  }
+  renewMessageJobLease(input: QueueInput<"renewMessageJobLease">) {
+    return this.#messageJobs.renewMessageJobLease(input);
   }
   failMessageJob(input: QueueInput<"failMessageJob">) {
     return this.#messageJobs.failMessageJob(input);
@@ -845,6 +849,16 @@ export class CrmStore {
   }
   events() {
     return structuredClone(this.#events);
+  }
+  eventPage(
+    tenantId: string,
+    _actorId?: string,
+    input: EventPageInput = {},
+  ) {
+    return paginateEvents(
+      this.#events.filter((event) => event.tenant_id === tenantId),
+      input,
+    );
   }
   audits() {
     return structuredClone(this.#audits);

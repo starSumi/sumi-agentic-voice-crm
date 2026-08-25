@@ -201,6 +201,7 @@ export function createRuntime({
         runtime.store,
         runtime.objectStorage,
         runtime.progressEvents,
+        runtime.observability,
         runtime.tracer,
       ]) {
         try {

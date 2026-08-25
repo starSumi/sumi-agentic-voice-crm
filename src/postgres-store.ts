@@ -36,6 +36,12 @@ import type {
   MessageJobTransition,
 } from "./message-job-queue.ts";
 import { MESSAGE_JOB_STATES } from "./message-job-queue.ts";
+import {
+  decodeEventCursor,
+  encodeEventCursor,
+  eventPageLimit,
+  type EventPageInput,
+} from "./event-pagination.ts";
 
 type DataRecord = Record<string, unknown>;
 type SqlJson = DataRecord & {
@@ -110,9 +116,14 @@ export type PgPoolPort = {
 type PoolConstructor = new (options: {
   connectionString: string;
   max: number;
+  connectionTimeoutMillis: number;
+  query_timeout: number;
+  statement_timeout: number;
+  idle_in_transaction_session_timeout: number;
+  application_name: string;
 }) => PgPoolPort;
-const require = createRequire(import.meta.url);
-const { Pool }: { Pool: PoolConstructor } = require("pg");
+const loadModule = createRequire(import.meta.url);
+const { Pool } = loadModule("pg") as { Pool: PoolConstructor };
 type CipherPort = Pick<DataCipher, "encrypt" | "decrypt">;
 type AuthorizationDecisionLike = {
   effect?: string;
@@ -156,6 +167,41 @@ type PostgresStoreOptions = {
   cipher?: CipherPort;
   authorize?: AuthorizePort;
 };
+
+export function postgresPoolOptions(
+  env: NodeJS.ProcessEnv,
+  connectionString: string,
+) {
+  return Object.freeze({
+    connectionString: requiredString(connectionString, "DATABASE_URL", 8192),
+    max: positiveInteger(env.DATABASE_POOL_MAX, 10, "DATABASE_POOL_MAX", 1000),
+    connectionTimeoutMillis: positiveInteger(
+      env.DATABASE_CONNECTION_TIMEOUT_MS,
+      5_000,
+      "DATABASE_CONNECTION_TIMEOUT_MS",
+      120_000,
+    ),
+    query_timeout: positiveInteger(
+      env.DATABASE_QUERY_TIMEOUT_MS,
+      30_000,
+      "DATABASE_QUERY_TIMEOUT_MS",
+      300_000,
+    ),
+    statement_timeout: positiveInteger(
+      env.DATABASE_STATEMENT_TIMEOUT_MS,
+      30_000,
+      "DATABASE_STATEMENT_TIMEOUT_MS",
+      300_000,
+    ),
+    idle_in_transaction_session_timeout: positiveInteger(
+      env.DATABASE_IDLE_TRANSACTION_TIMEOUT_MS,
+      60_000,
+      "DATABASE_IDLE_TRANSACTION_TIMEOUT_MS",
+      300_000,
+    ),
+    application_name: "sumi-agentic-voice-crm",
+  });
+}
 type MessageTransitionInput = {
   tenant_id: string;
   job_id: string;
@@ -204,6 +250,10 @@ type FailMessageJobInput = CompleteMessageJobInput & {
   error_code?: string;
   error_message?: unknown;
   max_attempts?: number;
+  retryable?: boolean;
+};
+type RenewMessageJobLeaseInput = Omit<CompleteMessageJobInput, "result"> & {
+  lease_ms?: number;
 };
 type ReleaseMessageJobInput = Omit<CompleteMessageJobInput, "result"> & {
   reason?: string;
@@ -475,14 +525,12 @@ export class PostgresCrmStore {
       throw new Error("DATABASE_URL is required when STORE_PROVIDER=postgres");
     this.pool =
       pool ??
-      new Pool({
-        connectionString: requiredString(
-          resolvedConnectionString,
-          "DATABASE_URL",
-          8192,
+      new Pool(
+        postgresPoolOptions(
+          env,
+          requiredString(resolvedConnectionString, "DATABASE_URL", 8192),
         ),
-        max: Number(env.DATABASE_POOL_MAX || 10),
-      });
+      );
     this.cipher =
       cipher ?? new DataCipher({ env: { ...env, STORE_PROVIDER: "postgres" } });
     this.authorize = authorize;
@@ -637,13 +685,19 @@ export class PostgresCrmStore {
     const databaseJobId = job_id ? messageJobUuid(job_id) : undefined;
     return await this.#transaction(
       { tenant_id, actor_id },
-      async (client) => {
+      async (client, actorUuid) => {
         const row = (
           await client.query(
             `select * from message_jobs where tenant_id=$1 and
-             (id::text=$2 or ($3::text is not null and idempotency_key=$3))
+             (id::text=$2 or ($3::text is not null and idempotency_key=$3)) and
+             ($4::uuid is null or actor_id=$4)
              order by created_at desc limit 1`,
-            [tenant_id, databaseJobId ?? "", idempotency_key ?? null],
+            [
+              tenant_id,
+              databaseJobId ?? "",
+              idempotency_key ?? null,
+              actorUuid,
+            ],
           )
         ).rows[0];
         return row ? this.#messageJob(row, tenant_id) : undefined;
@@ -660,12 +714,18 @@ export class PostgresCrmStore {
     const databaseJobId = messageJobUuid(job_id);
     return await this.#transaction(
       { tenant_id, actor_id },
-      async (client) => {
+      async (client, actorUuid) => {
         const rows = await client.query(
           `select sequence,status,worker_id,reason,created_at
-             from message_job_transitions
-            where tenant_id=$1 and job_id=$2 order by sequence`,
-          [tenant_id, databaseJobId],
+             from message_job_transitions transitions
+            where tenant_id=$1 and job_id=$2
+              and ($3::uuid is null or exists (
+                select 1 from message_jobs jobs
+                 where jobs.tenant_id=$1 and jobs.id=$2
+                   and jobs.actor_id=$3
+              ))
+            order by sequence`,
+          [tenant_id, databaseJobId, actorUuid],
         );
         return rows.rows.map(
           (row) =>
@@ -724,6 +784,39 @@ export class PostgresCrmStore {
     );
   }
 
+  async renewMessageJobLease({
+    tenant_id,
+    job_id,
+    worker_id,
+    lease_ms = this.interactionLeaseMs,
+  }: RenewMessageJobLeaseInput) {
+    const databaseJobId = messageJobUuid(job_id);
+    const leaseMs = positiveInteger(
+      lease_ms,
+      this.interactionLeaseMs,
+      "lease_ms",
+      900_000,
+    );
+    return await this.#transaction(
+      { tenant_id },
+      async (client) => {
+        const renewed = await client.query(
+          `update message_jobs
+              set lease_expires_at=now()+($4::bigint * interval '1 millisecond'),
+                  updated_at=now()
+            where tenant_id=$1 and id=$2 and status='running'
+              and worker_id=$3 and lease_expires_at > now()
+          returning *`,
+          [tenant_id, databaseJobId, worker_id, leaseMs],
+        );
+        if (renewed.rowCount !== 1)
+          throw conflict("message job lease was lost before renewal");
+        return this.#messageJob(renewed.rows[0], tenant_id);
+      },
+      { requireActor: false },
+    );
+  }
+
   async failMessageJob({
     tenant_id,
     job_id,
@@ -731,6 +824,7 @@ export class PostgresCrmStore {
     error_code = "UPSTREAM_UNAVAILABLE",
     error_message,
     max_attempts = 8,
+    retryable = true,
   }: FailMessageJobInput) {
     const databaseJobId = messageJobUuid(job_id);
     const maxAttempts = positiveInteger(max_attempts, 8, "max_attempts", 1000);
@@ -745,7 +839,7 @@ export class PostgresCrmStore {
         ).rows[0];
         this.#assertMessageJobLease(row, worker_id);
         const attempts = Number(row.attempts);
-        const deadLetter = attempts >= maxAttempts;
+        const deadLetter = retryable === false || attempts >= maxAttempts;
         const delaySeconds = Math.min(3600, 2 ** Math.min(attempts, 12));
         const errorCiphertext = this.cipher.encrypt(
           {
@@ -2110,6 +2204,47 @@ export class PostgresCrmStore {
         [tenant_id],
       );
       return rows.rows.map((row) => this.#event(row, tenant_id));
+    });
+  }
+
+  async eventPage(
+    tenant_id: string,
+    actor_id?: string,
+    input: EventPageInput = {},
+  ) {
+    const limit = eventPageLimit(input.limit);
+    const cursor = decodeEventCursor(input.cursor);
+    return await this.#transaction({ tenant_id, actor_id }, async (client) => {
+      const rows = await client.query(
+        `select id,event_type,aggregate_type,aggregate_id,aggregate_version,
+                request_id,payload,created_at
+           from outbox_events
+          where tenant_id=$1
+            and ($2::timestamptz is null or (created_at,id) > ($2::timestamptz,$3::uuid))
+          order by created_at,id
+          limit $4`,
+        [
+          tenant_id,
+          cursor?.time ?? null,
+          cursor?.id.slice("evt_".length) ?? null,
+          limit + 1,
+        ],
+      );
+      const events = rows.rows
+        .slice(0, limit)
+        .map((row) => this.#event(row, tenant_id));
+      const last = events.at(-1) as Record<string, unknown> | undefined;
+      return {
+        events,
+        ...(rows.rows.length > limit && last
+          ? {
+              next_cursor: encodeEventCursor({
+                time: requiredString(last.time, "event.time"),
+                id: requiredString(last.id, "event.id"),
+              }),
+            }
+          : {}),
+      };
     });
   }
 

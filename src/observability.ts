@@ -1,10 +1,22 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { ROOT_CONTEXT, SpanStatusCode, TraceFlags, trace } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import {
+  MeterProvider,
+  PeriodicExportingMetricReader,
+} from "@opentelemetry/sdk-metrics";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import type { Context, Span as OtelApiSpan, Tracer as OtelApiTracer } from "@opentelemetry/api";
+import type {
+  Context,
+  Counter,
+  Histogram,
+  Span as OtelApiSpan,
+  Tracer as OtelApiTracer,
+} from "@opentelemetry/api";
+import type { PushMetricExporter } from "@opentelemetry/sdk-metrics";
 import type { SpanExporter, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { ERROR_CODES as PROTOCOL_ERROR_CODES } from "./protocol-policy.ts";
 
@@ -40,6 +52,13 @@ const ENUM_ATTRIBUTES = Object.freeze({
     "dashscope",
     "mock",
     "openai-compatible",
+    "unknown",
+  ]),
+  "gen_ai.operation.name": new Set(["chat", "invoke_agent", "unknown"]),
+  "gen_ai.provider.name": new Set([
+    "alibaba_cloud",
+    "openai",
+    "sumi.agent_crm",
     "unknown",
   ]),
   "storage.kind": new Set(["memory", "s3", "unknown"]),
@@ -161,16 +180,16 @@ function safeAttributes(attributes: TraceAttributes = {}): BoundedAttributes {
   for (const [key, allowed] of Object.entries(ENUM_ATTRIBUTES)) {
     if (Object.hasOwn(attributes, key)) safe[key] = normalizeEnum(attributes[key], allowed);
   }
-  if (Object.hasOwn(attributes, "http.method")) {
-    const method = String(attributes["http.method"] ?? "").toUpperCase();
-    safe["http.method"] = HTTP_METHODS.has(method) ? method : "OTHER";
+  if (Object.hasOwn(attributes, "http.request.method")) {
+    const method = String(attributes["http.request.method"] ?? "").toUpperCase();
+    safe["http.request.method"] = HTTP_METHODS.has(method) ? method : "OTHER";
   }
   if (Object.hasOwn(attributes, "http.route")) {
-    safe["http.route"] = routeName(String(safe["http.method"] ?? "OTHER"), String(attributes["http.route"] ?? ""));
+    safe["http.route"] = routeName(String(safe["http.request.method"] ?? "OTHER"), String(attributes["http.route"] ?? ""));
   }
-  if (Object.hasOwn(attributes, "http.status_code")) {
-    const status = Number(attributes["http.status_code"]);
-    safe["http.status_code"] = Number.isInteger(status) && status >= 100 && status <= 599 ? status : 500;
+  if (Object.hasOwn(attributes, "http.response.status_code")) {
+    const status = Number(attributes["http.response.status_code"]);
+    safe["http.response.status_code"] = Number.isInteger(status) && status >= 100 && status <= 599 ? status : 500;
   }
   if (Object.hasOwn(attributes, "error.code")) {
     const code = String(attributes["error.code"] ?? "").toUpperCase();
@@ -276,13 +295,18 @@ export class Tracer {
   readonly now: () => number;
   readonly idGenerator?: IdGenerator;
   readonly pending = new Set<Promise<void>>();
+  readonly maxPending: number;
+  droppedEvents = 0;
   closed = false;
   closePromise?: Promise<void>;
 
-  constructor({ sink, now = () => Date.now(), idGenerator }: { sink?: TraceSink; now?: () => number; idGenerator?: IdGenerator } = {}) {
+  constructor({ sink, now = () => Date.now(), idGenerator, maxPending = 1024 }: { sink?: TraceSink; now?: () => number; idGenerator?: IdGenerator; maxPending?: number } = {}) {
+    if (!Number.isSafeInteger(maxPending) || maxPending <= 0 || maxPending > 65_536)
+      throw new TypeError("maxPending must be between 1 and 65536");
     this.sink = createSinkAdapter(sink);
     this.now = now;
     this.idGenerator = idGenerator;
+    this.maxPending = maxPending;
     this.pending = new Set();
     this.closed = false;
     this.closePromise = undefined;
@@ -298,6 +322,10 @@ export class Tracer {
 
   emit(event: SpanEvent): void {
     if (this.closed || !this.sink) return;
+    if (this.pending.size >= this.maxPending) {
+      this.droppedEvents += 1;
+      return;
+    }
     let emitted;
     try { emitted = this.sink.emit(event); } catch { return; }
     const pending = Promise.resolve(emitted).catch(() => {}).finally(() => this.pending.delete(pending));
@@ -308,10 +336,14 @@ export class Tracer {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
     this.closePromise = (async () => {
-      await Promise.allSettled(this.pending);
+      await this.flush();
       try { await this.sink?.close?.(); } catch {}
     })();
     return this.closePromise;
+  }
+
+  async flush(): Promise<void> {
+    await Promise.allSettled(this.pending);
   }
 }
 
@@ -393,6 +425,20 @@ class OtelSpan {
   }
 }
 
+function otelResource(env: NodeJS.ProcessEnv) {
+  const serviceName = /^[A-Za-z0-9._-]{1,64}$/.test(env.OTEL_SERVICE_NAME ?? "")
+    ? env.OTEL_SERVICE_NAME
+    : "sumi-agentic-voice-crm";
+  const environment = new Set(["development", "test", "staging", "production"])
+    .has(env.APP_ENV ?? "")
+    ? env.APP_ENV ?? ""
+    : "unknown";
+  return resourceFromAttributes({
+    "service.name": serviceName,
+    "deployment.environment.name": environment,
+  });
+}
+
 /**
  * Explicit OpenTelemetry adapter. It exports only spans created through this
  * bounded port; no HTTP, fetch, provider, SQL, or body auto-instrumentation is
@@ -404,20 +450,10 @@ export class OtelTracer {
   closePromise?: Promise<void>;
 
   constructor({ env = process.env, exporter, spanProcessor }: { env?: NodeJS.ProcessEnv; exporter?: SpanExporter; spanProcessor?: SpanProcessor } = {}) {
-    const serviceName = /^[A-Za-z0-9._-]{1,64}$/.test(env.OTEL_SERVICE_NAME ?? "")
-      ? env.OTEL_SERVICE_NAME
-      : "sumi-agentic-voice-crm";
-    const environment = new Set(["development", "test", "staging", "production"])
-      .has(env.APP_ENV ?? "")
-      ? env.APP_ENV ?? ""
-      : "unknown";
     const traceExporter = exporter ?? new OTLPTraceExporter();
     const processor = spanProcessor ?? new BatchSpanProcessor(traceExporter);
     this.provider = new NodeTracerProvider({
-      resource: resourceFromAttributes({
-        "service.name": serviceName,
-        "deployment.environment.name": environment,
-      }),
+      resource: otelResource(env),
       spanProcessors: [processor],
     });
     this.otelTracer = this.provider.getTracer("sumi-agentic-voice-crm", "0.1.0");
@@ -436,6 +472,10 @@ export class OtelTracer {
     this.closePromise ??= this.provider.shutdown();
     return this.closePromise;
   }
+
+  flush() {
+    return this.provider.forceFlush();
+  }
 }
 
 export function createOtelTracer(options?: ConstructorParameters<typeof OtelTracer>[0]): OtelTracer { return new OtelTracer(options); }
@@ -445,6 +485,86 @@ export function createConfiguredTracer({ env = process.env, ...options }: { env?
   if (mode === "manual") return createTracer(options);
   if (mode === "otel") return createOtelTracer({ env, ...options });
   throw new Error("OBSERVABILITY_MODE must be manual or otel");
+}
+
+const MESSAGE_JOB_OUTCOMES = new Set([
+  "dead_letter",
+  "lease_lost",
+  "lease_renewed",
+  "retry_wait",
+  "succeeded",
+]);
+
+export class OtelMetrics {
+  readonly provider: MeterProvider;
+  readonly httpDuration: Histogram;
+  readonly messageJobs: Counter;
+  readonly traceDrops: Counter;
+  closePromise?: Promise<void>;
+
+  constructor({
+    env = process.env,
+    exporter = new OTLPMetricExporter(),
+  }: {
+    env?: NodeJS.ProcessEnv;
+    exporter?: PushMetricExporter;
+  } = {}) {
+    const interval = Number(env.OTEL_METRIC_EXPORT_INTERVAL_MS || 60_000);
+    if (!Number.isSafeInteger(interval) || interval < 5_000 || interval > 300_000)
+      throw new Error(
+        "OTEL_METRIC_EXPORT_INTERVAL_MS must be between 5000 and 300000",
+      );
+    const reader = new PeriodicExportingMetricReader({
+      exporter,
+      exportIntervalMillis: interval,
+      exportTimeoutMillis: Math.min(30_000, interval - 1),
+      cardinalityLimits: { default: 256 },
+      maxExportBatchSize: 512,
+    });
+    this.provider = new MeterProvider({
+      resource: otelResource(env),
+      readers: [reader],
+    });
+    const meter = this.provider.getMeter("sumi-agentic-voice-crm", "0.1.0");
+    this.httpDuration = meter.createHistogram("http.server.request.duration", {
+      unit: "s",
+      description: "Duration of inbound HTTP requests.",
+    });
+    this.messageJobs = meter.createCounter("sumi.message.job.events", {
+      unit: "{event}",
+      description: "Message job lifecycle outcomes.",
+    });
+    this.traceDrops = meter.createCounter("sumi.telemetry.trace.events.dropped", {
+      unit: "{event}",
+      description: "Trace events dropped at the bounded export boundary.",
+    });
+  }
+
+  recordHttp(method: string, route: string, status: number, duration: number): void {
+    this.httpDuration.record(duration, {
+      "http.request.method": method,
+      "http.route": route,
+      "http.response.status_code": status,
+    });
+  }
+
+  recordMessageJob(outcome: string): void {
+    if (MESSAGE_JOB_OUTCOMES.has(outcome))
+      this.messageJobs.add(1, { "sumi.message.job.outcome": outcome });
+  }
+
+  recordTraceDrops(count: number): void {
+    if (Number.isSafeInteger(count) && count > 0) this.traceDrops.add(count);
+  }
+
+  flush(): Promise<void> {
+    return this.provider.forceFlush();
+  }
+
+  close(): Promise<void> {
+    this.closePromise ??= this.provider.shutdown();
+    return this.closePromise;
+  }
 }
 
 function authorized(header: unknown, token: string | undefined): boolean {
@@ -470,11 +590,17 @@ export class Observability {
   readonly tracer: Tracer | OtelTracer;
   readonly counters = new Map<string, number>();
   readonly durations = new Map<string, number>();
+  readonly otelMetrics?: OtelMetrics;
+  readonly messageJobCounters = new Map<string, number>();
+  recordedTraceDrops = 0;
 
-  constructor({ env = process.env, write = (entry: Record<string, unknown>) => console.log(JSON.stringify(entry)), tracer = createTracer() }: { env?: NodeJS.ProcessEnv; write?: (entry: Record<string, unknown>) => void; tracer?: Tracer | OtelTracer } = {}) {
+  constructor({ env = process.env, write = (entry: Record<string, unknown>) => console.log(JSON.stringify(entry)), tracer = createTracer(), otelMetrics }: { env?: NodeJS.ProcessEnv; write?: (entry: Record<string, unknown>) => void; tracer?: Tracer | OtelTracer; otelMetrics?: OtelMetrics } = {}) {
     this.metricsToken = env.METRICS_BEARER_TOKEN;
     this.write = write;
     this.tracer = tracer;
+    this.otelMetrics =
+      otelMetrics ??
+      (env.OBSERVABILITY_MODE === "otel" ? new OtelMetrics({ env }) : undefined);
     this.counters = new Map(); this.durations = new Map();
   }
 
@@ -483,7 +609,7 @@ export class Observability {
     const route = routeName(method, String(req.url ?? ""));
     const span = this.tracer.startSpan("http.server", {
       parent: typeof req.headers?.traceparent === "string" ? req.headers.traceparent : undefined,
-      attributes: { "http.method": method, "http.route": route },
+      attributes: { "http.request.method": method, "http.route": route },
     });
     return {
       ...span.context,
@@ -501,14 +627,32 @@ export class Observability {
     const labels = `${context.method}|${context.route}|${status}`;
     this.counters.set(labels, (this.counters.get(labels) ?? 0) + 1);
     this.durations.set(labels, (this.durations.get(labels) ?? 0) + durationSeconds);
+    this.otelMetrics?.recordHttp(
+      context.method,
+      context.route,
+      status,
+      durationSeconds,
+    );
     context[ACTIVE_SPAN]?.end({
       status: status === 499 ? "aborted" : status >= 400 ? "error" : "ok",
-      attributes: { "http.status_code": status, ...(error_code ? { "error.code": error_code } : {}) },
+      attributes: { "http.response.status_code": status, ...(error_code ? { "error.code": error_code } : {}) },
     });
-    this.write({ level: status >= 500 ? "error" : status >= 400 ? "warn" : "info", message: "http_request", request_id: context.request_id, trace_id: context.trace_id, method: context.method, route: context.route, status, duration_ms: Math.round(durationSeconds * 1000), error_code, time: new Date().toISOString() });
+    try {
+      this.write({ level: status >= 500 ? "error" : status >= 400 ? "warn" : "info", message: "http_request", request_id: context.request_id, trace_id: context.trace_id, method: context.method, route: context.route, status, duration_ms: Math.round(durationSeconds * 1000), error_code, time: new Date().toISOString() });
+    } catch {}
   }
 
   authorizeMetrics(header: unknown): boolean { return authorized(header, this.metricsToken); }
+
+  recordMessageJob(result: Readonly<Record<string, unknown>>): void {
+    const outcome = String(result.status ?? "");
+    if (!MESSAGE_JOB_OUTCOMES.has(outcome)) return;
+    this.messageJobCounters.set(
+      outcome,
+      (this.messageJobCounters.get(outcome) ?? 0) + 1,
+    );
+    this.otelMetrics?.recordMessageJob(outcome);
+  }
 
   renderMetrics() {
     const lines = ["# HELP sumi_http_requests_total HTTP requests completed.", "# TYPE sumi_http_requests_total counter"];
@@ -523,7 +667,30 @@ export class Observability {
       const labels = `method="${method}",route="${route}",status="${status}"`;
       lines.push(`sumi_http_request_duration_seconds_sum{${labels}} ${seconds}`, `sumi_http_request_duration_seconds_count{${labels}} ${this.counters.get(key)}`);
     }
+    lines.push(
+      "# HELP sumi_message_job_events_total Message job lifecycle outcomes.",
+      "# TYPE sumi_message_job_events_total counter",
+    );
+    for (const [outcome, count] of [...this.messageJobCounters].sort())
+      lines.push(`sumi_message_job_events_total{outcome="${outcome}"} ${count}`);
+    const dropped =
+      this.tracer instanceof Tracer ? this.tracer.droppedEvents : 0;
+    lines.push(
+      "# HELP sumi_trace_events_dropped_total Trace events dropped at the bounded export boundary.",
+      "# TYPE sumi_trace_events_dropped_total counter",
+      `sumi_trace_events_dropped_total ${dropped}`,
+    );
     return `${lines.join("\n")}\n`;
+  }
+
+  async close(): Promise<void> {
+    const dropped =
+      this.tracer instanceof Tracer ? this.tracer.droppedEvents : 0;
+    if (dropped > this.recordedTraceDrops) {
+      this.otelMetrics?.recordTraceDrops(dropped - this.recordedTraceDrops);
+      this.recordedTraceDrops = dropped;
+    }
+    await this.otelMetrics?.close();
   }
 }
 

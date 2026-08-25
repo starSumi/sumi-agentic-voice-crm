@@ -1,6 +1,5 @@
 import {
   INTENT_SCHEMA,
-  MAX_PROVIDER_AUDIO_BYTES,
   bearerHeaders,
   canonicalAudioContentType,
   checkedJson,
@@ -19,6 +18,7 @@ import {
   type ProviderAdapter,
 } from "./provider-common.ts";
 import { audioMagicType } from "./contracts.ts";
+import { MAX_STORED_AUDIO_BYTES } from "./media-policy.ts";
 
 const DEFAULT_TTS_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -177,7 +177,7 @@ export function createOpenAiProvider({
         env.OPENAI_TTS_MAX_BYTES || env.PROVIDER_TTS_MAX_BYTES,
         DEFAULT_TTS_MAX_BYTES,
         "OPENAI_TTS_MAX_BYTES",
-        { max: MAX_PROVIDER_AUDIO_BYTES },
+        { max: MAX_STORED_AUDIO_BYTES },
       );
       const bytes = await readBoundedBody(
         response,

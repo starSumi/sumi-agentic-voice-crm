@@ -1,0 +1,1 @@
+export const MAX_STORED_AUDIO_BYTES = 25 * 1024 * 1024;

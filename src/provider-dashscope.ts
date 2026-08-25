@@ -1,7 +1,7 @@
 import { audioMagicType } from "./contracts.ts";
+import { MAX_STORED_AUDIO_BYTES } from "./media-policy.ts";
 import {
   INTENTS,
-  MAX_PROVIDER_AUDIO_BYTES,
   bearerHeaders,
   canonicalAudioContentType,
   checkedJson,
@@ -228,7 +228,7 @@ async function downloadAudio(
       configuredLimit,
       DEFAULT_TTS_MAX_BYTES,
       "DASHSCOPE_TTS_MAX_BYTES",
-      { max: MAX_PROVIDER_AUDIO_BYTES },
+      { max: MAX_STORED_AUDIO_BYTES },
     );
     const bytes = await readBoundedBody(
       response,
@@ -408,7 +408,7 @@ export function createDashScopeProvider({
         configuredLimit,
         DEFAULT_TTS_MAX_BYTES,
         "DASHSCOPE_TTS_MAX_BYTES",
-        { max: MAX_PROVIDER_AUDIO_BYTES },
+        { max: MAX_STORED_AUDIO_BYTES },
       );
       const downloaded =
         hasAudioData

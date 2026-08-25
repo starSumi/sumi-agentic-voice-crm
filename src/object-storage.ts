@@ -10,6 +10,7 @@ import {
   createAttachmentRef,
   createTtsAsset,
 } from "./application/attachments.ts";
+import { MAX_STORED_AUDIO_BYTES } from "./media-policy.ts";
 
 type StoragePutInput = {
   key: string;
@@ -89,8 +90,6 @@ function sha256Hex(bytes: Uint8Array): string {
 function checksumBase64(hex: string): string {
   return Buffer.from(hex, "hex").toString("base64");
 }
-const MAX_STORED_AUDIO_BYTES = 25 * 1024 * 1024;
-
 function hasByteArrayTransform(
   value: unknown,
 ): value is { transformToByteArray(): Promise<Uint8Array> } {
@@ -152,6 +151,8 @@ export class MemoryObjectStorage {
   readonly objects = new Map<string, StorageObject>();
   async put({ key, body, contentType, sha256 }: StoragePutInput) {
     const bytes = Buffer.from(body);
+    if (bytes.length > MAX_STORED_AUDIO_BYTES)
+      throw storageError("stored audio exceeds the upload limit");
     const digest = sha256 ?? sha256Hex(bytes);
     this.objects.set(key, { body: bytes, contentType, sha256: digest });
     return { key, byte_length: bytes.length, sha256: digest };
@@ -243,6 +244,8 @@ export class S3ObjectStorage {
     metadata = {},
   }: StoragePutInput) {
     const bytes = Buffer.from(body);
+    if (bytes.length > MAX_STORED_AUDIO_BYTES)
+      throw storageError("stored audio exceeds the upload limit");
     const digest = sha256 ?? sha256Hex(bytes);
     try {
       await this.client.send(

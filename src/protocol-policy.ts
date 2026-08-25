@@ -55,6 +55,11 @@ export const ERROR_CODES: Readonly<Record<string, ErrorCodePolicy>> = Object.fre
   }),
 ) as Record<string, ErrorCodePolicy>);
 
+export function isProtocolErrorRetryable(code: unknown): boolean {
+  if (typeof code !== "string") return true;
+  return ERROR_CODES[code]?.[1] ?? true;
+}
+
 const requestBodyLimits = document["x-sumi-request-body-limits"];
 if (!requestBodyLimits || typeof requestBodyLimits !== "object" || Array.isArray(requestBodyLimits)) {
   throw new Error("OpenAPI x-sumi-request-body-limits is required");

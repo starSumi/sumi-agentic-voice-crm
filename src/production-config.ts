@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { agentCrmHttpConfiguration } from "./provider-agent-crm-http.ts";
+import { MAX_STORED_AUDIO_BYTES } from "./media-policy.ts";
+import { DataCipher } from "./data-cipher.ts";
 
 type ProductionComponent = "api" | "outbox";
 
@@ -63,7 +65,17 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env, {
   if (env.APP_ENV !== "production") return;
   if (env.STORE_PROVIDER !== "postgres") throw new Error("STORE_PROVIDER=postgres is required in production");
   requireValue(env, "DATABASE_URL");
-  requireValue(env, "DATA_ENCRYPTION_KEY");
+  const dataCipher = new DataCipher({ env });
+  void dataCipher;
+  requirePositiveInteger(env, "DATABASE_POOL_MAX", 1000);
+  requirePositiveInteger(env, "DATABASE_CONNECTION_TIMEOUT_MS", 120_000);
+  requirePositiveInteger(env, "DATABASE_QUERY_TIMEOUT_MS", 300_000);
+  requirePositiveInteger(env, "DATABASE_STATEMENT_TIMEOUT_MS", 300_000);
+  requirePositiveInteger(
+    env,
+    "DATABASE_IDLE_TRANSACTION_TIMEOUT_MS",
+    300_000,
+  );
   if (component === "outbox") {
     requireValue(env, "OUTBOX_TENANT_IDS");
     requireValue(env, "OUTBOX_HMAC_SECRET");
@@ -77,6 +89,9 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env, {
   requirePositiveInteger(env, "PROVIDER_HARD_GRACE_MS", 30_000);
   requirePositiveInteger(env, "INTERACTION_LEASE_MS", 900_000);
   requirePositiveInteger(env, "RUNTIME_TEARDOWN_MS", 30_000);
+  requirePositiveInteger(env, "RATE_LIMIT_WINDOW_MS", 3_600_000);
+  requirePositiveInteger(env, "RATE_LIMIT_MAX_REQUESTS", 1_000_000);
+  requirePositiveInteger(env, "RATE_LIMIT_MAX_KEYS", 1_000_000);
   for (const name of ["OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "METRICS_BEARER_TOKEN"]) requireValue(env, name);
   requireHttps(env, "PUBLIC_BASE_URL");
   if (env.AUTH_MODE === "oidc") {
@@ -109,14 +124,15 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env, {
     requireValue(env, "OPENAI_API_KEY");
     requireHttps(env, "OPENAI_BASE_URL");
     if (env.INTENT_PROVIDER === "openai-compatible") requireValue(env, "OPENAI_MODEL");
-    requirePositiveInteger(env, "OPENAI_TTS_MAX_BYTES", 50 * 1024 * 1024);
-    requirePositiveInteger(env, "PROVIDER_TTS_MAX_BYTES", 50 * 1024 * 1024);
+    requirePositiveInteger(env, "OPENAI_TTS_MAX_BYTES", MAX_STORED_AUDIO_BYTES);
+    requirePositiveInteger(env, "PROVIDER_TTS_MAX_BYTES", MAX_STORED_AUDIO_BYTES);
   }
   if (selected.has("dashscope")) {
     requireOneOf(env, ["DASHSCOPE_API_KEY", "ALIYUN_BASE_APIKEY"]);
     requireHttpsOneOf(env, ["DASHSCOPE_BASE_URL", "ALIYUN_BASE_URL"]);
     const limitName = selectedName(env, ["DASHSCOPE_TTS_MAX_BYTES", "ALIYUN_TTS_MAX_BYTES"]);
-    if (limitName) requirePositiveInteger(env, limitName, 50 * 1024 * 1024);
+    if (limitName)
+      requirePositiveInteger(env, limitName, MAX_STORED_AUDIO_BYTES);
     const suffixes = env.DASHSCOPE_AUDIO_HOST_SUFFIXES || env.ALIYUN_AUDIO_HOST_SUFFIXES;
     if (suffixes && suffixes.split(",").some((item) => !/^\.?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(item.trim()) || !item.includes("."))) {
       throw new Error("DASHSCOPE_AUDIO_HOST_SUFFIXES must contain comma-separated DNS suffixes in production");

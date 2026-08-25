@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { MessageJob, MessageJobWorkerQueue } from "./message-job-queue.ts";
+import { isProtocolErrorRetryable } from "./protocol-policy.ts";
 
 type WorkerResult = Record<string, unknown>;
 type ProcessJob = (
@@ -103,7 +104,13 @@ export function createMessageJobWorker({
   let task: WorkerTask | undefined;
   let stopping: Promise<void> | undefined;
 
-  async function wait(signal: AbortSignal): Promise<void> {
+  function report(result: WorkerResult): void {
+    try {
+      onResult(result);
+    } catch {}
+  }
+
+  async function waitFor(signal: AbortSignal, delayMs: number): Promise<void> {
     signal.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
       const finish = () => {
@@ -116,27 +123,96 @@ export function createMessageJobWorker({
         signal.removeEventListener("abort", abort);
         reject(signal.reason ?? abortError());
       };
-      const timer = setTimeout(finish, resolvedPollIntervalMs);
+      const timer = setTimeout(finish, delayMs);
       signal.addEventListener("abort", abort, { once: true });
     });
   }
 
+  let tenantCursor = 0;
+
+  function orderedTenants(): string[] {
+    const current = [...tenants];
+    if (current.length === 0) return current;
+    const cursor = tenantCursor % current.length;
+    tenantCursor = (cursor + 1) % current.length;
+    return [...current.slice(cursor), ...current.slice(0, cursor)];
+  }
+
+  async function claimFairBatch(): Promise<MessageJob[]> {
+    const ordered = orderedTenants();
+    const jobs: MessageJob[] = [];
+    if (ordered.length === 0) return jobs;
+    const fairShare = Math.max(
+      1,
+      Math.ceil(resolvedBatchSize / ordered.length),
+    );
+    for (const tenant_id of ordered) {
+      const remaining = resolvedBatchSize - jobs.length;
+      if (remaining === 0) break;
+      jobs.push(
+        ...(await durableQueue.claimMessageJobs({
+          tenant_id,
+          worker_id: workerId,
+          limit: Math.min(fairShare, remaining),
+          lease_ms: resolvedLeaseMs,
+        })),
+      );
+    }
+    return jobs;
+  }
+
+  async function processWithHeartbeat(
+    job: MessageJob,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const controller = new AbortController();
+    const operationSignal = AbortSignal.any([signal, controller.signal]);
+    const heartbeatIntervalMs = Math.max(
+      1,
+      Math.min(10_000, Math.floor(resolvedLeaseMs / 3)),
+    );
+    let completed = false;
+    const operation = Promise.resolve().then(() =>
+      jobHandler(job, { signal: operationSignal, workerId }),
+    );
+    const heartbeat = (async () => {
+      while (!completed) {
+        await waitFor(operationSignal, heartbeatIntervalMs);
+        if (completed) return;
+        await durableQueue.renewMessageJobLease({
+          tenant_id: job.tenant_id,
+          job_id: job.id,
+          worker_id: workerId,
+          lease_ms: resolvedLeaseMs,
+        });
+        report({
+          status: "lease_renewed",
+          job_id: job.id,
+          tenant_id: job.tenant_id,
+        });
+      }
+    })().catch((error: unknown) => {
+      if (!operationSignal.aborted) controller.abort(error);
+      throw error;
+    });
+    try {
+      return await Promise.race([
+        operation,
+        heartbeat.then(() => new Promise<never>(() => {})),
+      ]);
+    } finally {
+      completed = true;
+      if (!controller.signal.aborted)
+        controller.abort(abortError("message job operation completed"));
+      await heartbeat.catch(() => {});
+    }
+  }
+
   async function run(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
-      const jobs: MessageJob[] = [];
-      for (const tenant_id of tenants) {
-        jobs.push(
-          ...(await durableQueue.claimMessageJobs({
-            tenant_id,
-            worker_id: workerId,
-            limit: resolvedBatchSize - jobs.length,
-            lease_ms: resolvedLeaseMs,
-          })),
-        );
-        if (jobs.length >= resolvedBatchSize) break;
-      }
+      const jobs = await claimFairBatch();
       if (jobs.length === 0) {
-        await wait(signal);
+        await waitFor(signal, resolvedPollIntervalMs);
         continue;
       }
       for (const job of jobs) {
@@ -150,14 +226,14 @@ export function createMessageJobWorker({
           throw signal.reason ?? abortError();
         }
         try {
-          const result = await jobHandler(job, { signal, workerId });
+          const result = await processWithHeartbeat(job, signal);
           await durableQueue.completeMessageJob({
             tenant_id: job.tenant_id,
             job_id: job.id,
             worker_id: workerId,
             result,
           });
-          onResult({
+          report({
             status: "succeeded",
             job_id: job.id,
             tenant_id: job.tenant_id,
@@ -176,21 +252,31 @@ export function createMessageJobWorker({
             });
             throw signal.reason ?? error;
           }
+          if (candidate.code === "CRM_CONFLICT") {
+            report({
+              status: "lease_lost",
+              job_id: job.id,
+              tenant_id: job.tenant_id,
+            });
+            continue;
+          }
+          const errorCode =
+            typeof candidate.code === "string"
+              ? candidate.code
+              : "UPSTREAM_UNAVAILABLE";
           const failed = await durableQueue.failMessageJob({
             tenant_id: job.tenant_id,
             job_id: job.id,
             worker_id: workerId,
-            error_code:
-              typeof candidate.code === "string"
-                ? candidate.code
-                : "UPSTREAM_UNAVAILABLE",
+            error_code: errorCode,
             error_message:
               typeof candidate.message === "string"
                 ? candidate.message
                 : String(error),
             max_attempts: resolvedMaxAttempts,
+            retryable: isProtocolErrorRetryable(errorCode),
           });
-          onResult({
+          report({
             status: failed.status,
             job_id: job.id,
             tenant_id: job.tenant_id,

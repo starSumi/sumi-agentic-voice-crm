@@ -37,6 +37,28 @@ import type {
 const PROGRESS_SINK_KEYS = ["progressSink", "eventSink"];
 const NOOP_PROGRESS_SINK = () => {};
 
+function genAiIntentTraceAttributes(providerKind: unknown) {
+  if (providerKind === "agent-crm-http")
+    return {
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.provider.name": "sumi.agent_crm",
+    };
+  if (providerKind === "openai-compatible")
+    return {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "openai",
+    };
+  if (providerKind === "dashscope")
+    return {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "alibaba_cloud",
+    };
+  return {
+    "gen_ai.operation.name": "unknown",
+    "gen_ai.provider.name": "unknown",
+  };
+}
+
 type AdapterRecord = Record<string, unknown>;
 type Awaitable<T> = T | PromiseLike<T>;
 type AskCommand = ReturnType<typeof normalizeAskCommand>;
@@ -753,6 +775,7 @@ export class AskService {
         "provider.intent",
         {
           "provider.kind": ports.intentProviderKind ?? "unknown",
+          ...genAiIntentTraceAttributes(ports.intentProviderKind),
         },
         () =>
           ports.understand!(transcriptResult.text, {

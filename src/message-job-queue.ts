@@ -70,6 +70,7 @@ export type MessageJobQueue = Readonly<{
   getMessageJob(input: GetJobInput): MessageJob | undefined;
   messageJobTransitions(input: GetJobInput): MessageJobTransition[];
   completeMessageJob(input: CompleteInput): MessageJob;
+  renewMessageJobLease(input: RenewLeaseInput): MessageJob;
   failMessageJob(input: FailInput): MessageJob;
   releaseMessageJob(input: ReleaseInput): MessageJob;
   messageJobStats(input?: {
@@ -95,6 +96,7 @@ type ClaimInput = {
 };
 type GetJobInput = {
   tenant_id?: string;
+  actor_id?: string;
   job_id?: string;
   idempotency_key?: string;
 };
@@ -111,7 +113,11 @@ type FailInput = {
   error_code?: string;
   error_message?: unknown;
   max_attempts?: unknown;
+  retryable?: boolean;
   retry_delay_ms?: unknown;
+};
+type RenewLeaseInput = Omit<CompleteInput, "result"> & {
+  lease_ms?: unknown;
 };
 type ReleaseInput = {
   tenant_id?: string;
@@ -138,6 +144,7 @@ type Awaitable<T> = T | PromiseLike<T>;
 export type MessageJobWorkerQueue = Readonly<{
   claimMessageJobs(input: ClaimInput): Awaitable<MessageJob[]>;
   completeMessageJob(input: CompleteInput): Awaitable<MessageJob>;
+  renewMessageJobLease(input: RenewLeaseInput): Awaitable<MessageJob>;
   failMessageJob(input: FailInput): Awaitable<MessageJob>;
   releaseMessageJob(input: ReleaseInput): Awaitable<MessageJob>;
 }>;
@@ -359,11 +366,12 @@ export function createMemoryMessageJobQueue({
     return claimed;
   }
 
-  function getJob({ tenant_id, job_id, idempotency_key }: GetJobInput = {}):
+  function getJob({ tenant_id, actor_id, job_id, idempotency_key }: GetJobInput = {}):
     MessageJob | undefined {
     const found = [...jobs.values()].find(
       (job) =>
         job.tenant_id === tenant_id &&
+        (actor_id === undefined || job.actor_id === actor_id) &&
         (job.id === job_id ||
           (idempotency_key && job.idempotency_key === idempotency_key)),
     );
@@ -372,10 +380,14 @@ export function createMemoryMessageJobQueue({
 
   function transitions({
     tenant_id,
+    actor_id,
     job_id,
   }: GetJobInput = {}): MessageJobTransition[] {
     const found = [...jobs.values()].find(
-      (job) => job.tenant_id === tenant_id && job.id === job_id,
+      (job) =>
+        job.tenant_id === tenant_id &&
+        (actor_id === undefined || job.actor_id === actor_id) &&
+        job.id === job_id,
     );
     return found ? (clone(found.transitions) ?? []) : [];
   }
@@ -416,6 +428,25 @@ export function createMemoryMessageJobQueue({
     return publicJob(job);
   }
 
+  function renewLease({
+    tenant_id,
+    job_id,
+    worker_id,
+    lease_ms = resolvedLeaseMs,
+  }: RenewLeaseInput = {}): MessageJob {
+    const job = [...jobs.values()].find((entry) => entry.id === job_id);
+    assertLease(job, tenant_id, job_id, worker_id);
+    const duration = positiveInteger(
+      lease_ms,
+      resolvedLeaseMs,
+      "lease_ms",
+      900_000,
+    );
+    job.lease_expires_at = new Date(now() + duration).toISOString();
+    job.updated_at = new Date(now()).toISOString();
+    return publicJob(job);
+  }
+
   function fail({
     tenant_id,
     job_id,
@@ -423,12 +454,13 @@ export function createMemoryMessageJobQueue({
     error_code = "UPSTREAM_UNAVAILABLE",
     error_message,
     max_attempts = 8,
+    retryable = true,
     retry_delay_ms,
   }: FailInput = {}): MessageJob {
     const job = [...jobs.values()].find((entry) => entry.id === job_id);
     assertLease(job, tenant_id, job_id, worker_id);
     const max = positiveInteger(max_attempts, 8, "max_attempts", 1000);
-    const retryable = job.attempts < max;
+    const shouldRetry = retryable !== false && job.attempts < max;
     const delay =
       retry_delay_ms === undefined
         ? Math.min(3_600_000, 1000 * 2 ** Math.min(job.attempts, 12))
@@ -440,11 +472,11 @@ export function createMemoryMessageJobQueue({
         : undefined;
     job.worker_id = undefined;
     job.lease_expires_at = undefined;
-    job.next_attempt_at = retryable
+    job.next_attempt_at = shouldRetry
       ? new Date(now() + delay).toISOString()
       : undefined;
-    job.completed_at = retryable ? undefined : new Date(now()).toISOString();
-    transition(job, retryable ? "retry_wait" : "dead_letter", {
+    job.completed_at = shouldRetry ? undefined : new Date(now()).toISOString();
+    transition(job, shouldRetry ? "retry_wait" : "dead_letter", {
       workerId: worker_id,
       reason: error_code,
       now: now(),
@@ -575,6 +607,7 @@ export function createMemoryMessageJobQueue({
     getMessageJob: getJob,
     messageJobTransitions: transitions,
     completeMessageJob: complete,
+    renewMessageJobLease: renewLease,
     failMessageJob: fail,
     releaseMessageJob: release,
     messageJobStats: stats,
