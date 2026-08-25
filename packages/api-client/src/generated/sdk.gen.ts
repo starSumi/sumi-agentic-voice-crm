@@ -15,6 +15,21 @@ import type {
   DecideReviewData,
   DecideReviewErrors,
   DecideReviewResponses,
+  GetAssetContentData,
+  GetAssetContentErrors,
+  GetAssetContentResponses,
+  GetAssetData,
+  GetAssetErrors,
+  GetAssetResponses,
+  GetMessageJobData,
+  GetMessageJobErrors,
+  GetMessageJobResponses,
+  ListEventsData,
+  ListEventsErrors,
+  ListEventsResponses,
+  ListMessageJobStatsData,
+  ListMessageJobStatsErrors,
+  ListMessageJobStatsResponses,
   SynthesizeData,
   SynthesizeErrors,
   SynthesizeResponses,
@@ -92,4 +107,98 @@ export const decideReview = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+
+/**
+ * Resolve tenant-scoped attachment metadata
+ *
+ * Returns only opaque attachment metadata. The response never includes an object-storage key, credentials or signed URL query parameters.
+ */
+export const getAsset = <ThrowOnError extends boolean = false>(
+  options: Options<GetAssetData, ThrowOnError>,
+): RequestResult<GetAssetResponses, GetAssetErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    GetAssetResponses,
+    GetAssetErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/assets/{asset_id}",
+    ...options,
+  });
+
+/**
+ * Download tenant-scoped attachment content
+ *
+ * Authenticated binary retrieval for clients that cannot attach bearer credentials to media elements. Clients should fetch this operation and create a local object URL; raw bytes are never returned by getAsset.
+ */
+export const getAssetContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAssetContentData, ThrowOnError>,
+): RequestResult<
+  GetAssetContentResponses,
+  GetAssetContentErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).get<
+    GetAssetContentResponses,
+    GetAssetContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/assets/{asset_id}/content",
+    ...options,
+  });
+
+/**
+ * List tenant-scoped durable domain events
+ *
+ * Returns the HTTP projection of the normative CloudEvents envelope. Event semantics and event type evolution remain owned by events.yaml.
+ */
+export const listEvents = <ThrowOnError extends boolean = false>(
+  options?: Options<ListEventsData, ThrowOnError>,
+): RequestResult<ListEventsResponses, ListEventsErrors, ThrowOnError> =>
+  (options?.client ?? client).get<
+    ListEventsResponses,
+    ListEventsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/events",
+    ...options,
+  });
+
+/**
+ * Read tenant-scoped message job counts
+ */
+export const listMessageJobStats = <ThrowOnError extends boolean = false>(
+  options?: Options<ListMessageJobStatsData, ThrowOnError>,
+): RequestResult<
+  ListMessageJobStatsResponses,
+  ListMessageJobStatsErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    ListMessageJobStatsResponses,
+    ListMessageJobStatsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/jobs/stats",
+    ...options,
+  });
+
+/**
+ * Read one tenant-scoped message job
+ */
+export const getMessageJob = <ThrowOnError extends boolean = false>(
+  options: Options<GetMessageJobData, ThrowOnError>,
+): RequestResult<GetMessageJobResponses, GetMessageJobErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    GetMessageJobResponses,
+    GetMessageJobErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/jobs/{job_id}",
+    ...options,
   });

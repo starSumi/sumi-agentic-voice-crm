@@ -30,7 +30,7 @@ JSON-RPC transport.
    normative event registry and CloudEvents envelope source.
 2. `protocol/protocol.manifest.json` owns protocol version, source ownership,
    compatibility policy, generated locations and rollback rules.
-3. `npm run protocol:generate` produces:
+3. `pnpm run protocol:generate` produces:
    - `protocol/schema/json/openapi.bundle.json` for runtime validation and
      schema tooling;
    - `protocol/schema/json/events.bundle.json` for event envelope validation;
@@ -45,7 +45,11 @@ JSON-RPC transport.
 6. CI runs generation in an isolated temporary directory and fails when the
    committed projections drift. It also type-checks the generated frontend
    package and runs contract tests against the live route.
-7. Breaking changes require a major protocol/event version, consumer inventory,
+7. Frontend consumers import operations from `packages/api-client/src/api.ts`
+   and data/event types from `packages/api-client/src/protocol.ts`. The root
+   index is compatibility-only. The manifest-driven `contract:consumer-check` gate rejects
+   raw HTTP, literal `/v1/` URLs and duplicate transport DTOs in consumer roots.
+8. Breaking changes require a major protocol/event version, consumer inventory,
    deprecation window, migration plan and rollback to the last compatible
    source/projection pair. Additive fields are the default evolution path.
 

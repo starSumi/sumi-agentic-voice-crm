@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.sumi.invalid/agent-crm/intents/v1/schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "intent_schema_version",
+    "action_schema_version",
+    "training_example_schema_version",
+    "intents"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "sumi.agent-crm-intent-registry.v1" },
+    "intent_schema_version": { "const": "sumi.agent-crm-understanding.v1" },
+    "action_schema_version": { "const": "sumi.agent-crm-action.v1" },
+    "training_example_schema_version": {
+      "const": "sumi.agent-crm-training-example.v1"
+    },
+    "intents": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/intent" }
+    }
+  },
+  "$defs": {
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "effect",
+        "authorization_action",
+        "resource_types",
+        "review_policy",
+        "handler",
+        "required_entity_paths",
+        "allowed_missing_paths",
+        "required_evidence",
+        "entity_schema"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^crm\\.[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$"
+        },
+        "status": { "const": "implemented" },
+        "effect": { "enum": ["read", "write"] },
+        "authorization_action": { "type": "string", "minLength": 1 },
+        "resource_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["customer", "deal"] }
+        },
+        "review_policy": { "enum": ["provider_or_policy", "required"] },
+        "handler": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$"
+        },
+        "required_entity_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/entityPath" }
+        },
+        "allowed_missing_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/entityPath" }
+        },
+        "required_evidence": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["input_digest", "request_fingerprint"] }
+        },
+        "entity_schema": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["type", "additionalProperties", "properties"],
+          "properties": {
+            "type": { "const": "object" },
+            "additionalProperties": { "const": false },
+            "properties": { "type": "object" }
+          }
+        }
+      }
+    },
+    "entityPath": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$"
+    }
+  }
+}

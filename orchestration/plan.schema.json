@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumi.invalid/schemas/dev-orchestration/plan/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "workflow", "tasks"],
+  "properties": {
+    "schema_version": { "const": "sumi.dev-plan.v1" },
+    "workflow": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$"
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://sumi.invalid/schemas/dev-orchestration/task-packet/v1"
+      }
+    }
+  }
+}

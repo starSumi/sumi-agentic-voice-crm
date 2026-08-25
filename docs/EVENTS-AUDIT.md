@@ -29,7 +29,7 @@ Events follow a CloudEvents 1.0-compatible shape. `contracts/events.yaml` is nor
 
 `id` is the deduplication key. `subject + aggregate_version` provides ordering; consumers reject a gap and re-read the aggregate rather than guessing state.
 
-The runtime emits `crm.command.committed.v1`, `crm.review.requested.v1`, and `tts.asset.created.v1` into the same PostgreSQL transaction as the corresponding durable state. `src/outbox-worker.mjs` delivers leased rows as structured CloudEvents with an event-ID idempotency header and optional bearer plus required production HMAC authentication.
+The runtime emits `crm.command.committed.v1`, `crm.review.requested.v1`, and `tts.asset.created.v1` into the same PostgreSQL transaction as the corresponding durable state. `src/outbox-worker.ts` delivers leased rows as structured CloudEvents with an event-ID idempotency header and optional bearer plus required production HMAC authentication.
 
 ## Audit trail
 
@@ -61,7 +61,7 @@ Required attributes: `sumi.request_id`, `sumi.tenant_id` (non-PII opaque ID), `s
 - `tts_success_total`, `tts_fallback_total`, `tts_latency_ms`
 - `outbox_pending`, `outbox_retry_total`, `event_consumer_lag`
 
-`GET /metrics` exposes the implemented HTTP metrics and requires `METRICS_BEARER_TOKEN` when configured; production startup requires it. Provider and queue-specific metric families above remain C4 work rather than current claims.
+`GET /metrics` exposes the implemented HTTP metrics and requires `METRICS_BEARER_TOKEN` when configured; production startup requires it. Explicit application/provider/storage/transaction spans are available in manual mode and can be exported through the opt-in OTLP adapter; durable audit/outbox trace propagation and provider/queue metric families remain production observability work rather than current claims.
 
 ## Replay and incident response
 

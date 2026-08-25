@@ -1,0 +1,349 @@
+{
+  "$defs": {
+    "EmptyParams": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ErrorData": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "maxLength": 512,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SupervisorState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "ErrorObject": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "data": {
+          "$ref": "#/$defs/ErrorData"
+        },
+        "message": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "data"
+      ],
+      "type": "object"
+    },
+    "JsonRpcId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
+          "type": "integer"
+        }
+      ]
+    },
+    "JsonRpcVersion": {
+      "enum": [
+        "2.0"
+      ],
+      "type": "string"
+    },
+    "Request": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/JsonRpcId"
+            },
+            "jsonrpc": {
+              "$ref": "#/$defs/JsonRpcVersion"
+            },
+            "method": {
+              "const": "runtime.start",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/StartParams"
+            }
+          },
+          "required": [
+            "method",
+            "jsonrpc",
+            "id",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/JsonRpcId"
+            },
+            "jsonrpc": {
+              "$ref": "#/$defs/JsonRpcVersion"
+            },
+            "method": {
+              "const": "runtime.health",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "jsonrpc",
+            "id",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/JsonRpcId"
+            },
+            "jsonrpc": {
+              "$ref": "#/$defs/JsonRpcVersion"
+            },
+            "method": {
+              "const": "runtime.stop",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "jsonrpc",
+            "id",
+            "params"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Response": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "format": "int64",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "jsonrpc": {
+              "$ref": "#/$defs/JsonRpcVersion"
+            },
+            "result": {
+              "$ref": "#/$defs/ResultPayload"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/ErrorObject"
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "format": "int64",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "jsonrpc": {
+              "$ref": "#/$defs/JsonRpcVersion"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "error"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ResultPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "child_pid": {
+          "format": "uint32",
+          "minimum": 2,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "forced": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ready": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "format": "int32",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SupervisorState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "StartParams": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "maxLength": 8192,
+            "type": "string"
+          },
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"
+          },
+          "type": "object"
+        },
+        "extension_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+          "type": "string"
+        },
+        "program": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": "^/",
+          "type": "string"
+        },
+        "shutdown_grace_ms": {
+          "format": "uint64",
+          "maximum": 30000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "startup_timeout_ms": {
+          "format": "uint64",
+          "maximum": 30000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "extension_id",
+        "program",
+        "args",
+        "env",
+        "startup_timeout_ms",
+        "shutdown_grace_ms"
+      ],
+      "type": "object"
+    },
+    "SupervisorState": {
+      "enum": [
+        "created",
+        "running",
+        "stopped",
+        "failed"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.sumi.dev/runtime/supervisor-v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Response"
+    }
+  ],
+  "description": "Rust-owned NDJSON/stream message contract. The extension readiness frame is a separate lifecycle line.",
+  "title": "Sumi Runtime Supervisor JSON-RPC 2.0 Protocol"
+}

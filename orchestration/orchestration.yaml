@@ -1,0 +1,190 @@
+$schema: ./orchestration.schema.json
+schema_version: sumi.dev-orchestration.v1
+
+runtime_state:
+  storage: external-durable-state
+  canonical_roots:
+    - ${CODEX_HOME}/operations/sumi-agentic-voice-crm/${CODEX_THREAD_ID}
+    - ${XDG_STATE_HOME}/sumi-agent-orchestration/sumi-agentic-voice-crm/${CODEX_THREAD_ID}
+  repository_local_forbidden: true
+  live_state_in_git_forbidden: true
+
+scheduler:
+  algorithm: dependency-dag
+  max_concurrency: 3
+  write_conflict: path-prefix-overlap
+  delivery: at-least-once
+  task_identity: stable-idempotency-key
+  state_transition: versioned-compare-and-swap
+  cancellation: abort-signal
+  soft_timeout_ms: 10000
+  hard_grace_ms: 2000
+  teardown_timeout_ms: 3000
+  retry:
+    max_attempts: 3
+    backoff: bounded-exponential
+    jitter: deterministic-task-key
+    cancellation: neutral
+
+roles:
+  - id: sumi_supervisor
+    description: Owns one plan, resolves dependencies, serializes integration, and returns evidence without self-approving human gates.
+    kind: supervisor
+    projection: custom
+    sandbox_mode: workspace-write
+    capabilities: [read, write, coordinate, integrate, verify]
+    write_policy: integration
+    developer_instructions: |
+      Own the current orchestration plan and its dependency graph. Admit only bounded task packets, keep one writer per overlapping path, and integrate verified results serially. Re-read source and runtime state before decisions. Never infer human acceptance, release approval, credentials, or production authority from agent output or CI.
+  - id: explorer
+    description: Built-in read-only explorer used for code mapping, evidence collection, and bounded discovery before implementation.
+    kind: discover
+    projection: builtin
+    sandbox_mode: read-only
+    capabilities: [read]
+    write_policy: none
+    developer_instructions: |
+      Gather source-confirmed evidence for the assigned question. Trace entry points and state ownership, report unknowns, and do not edit files or broaden scope. Return concise file and symbol references to the supervisor.
+  - id: worker
+    description: Built-in implementation worker constrained to the exact task-packet write set and acceptance commands.
+    kind: worker
+    projection: builtin
+    sandbox_mode: workspace-write
+    capabilities: [read, write]
+    write_policy: task-packet
+    developer_instructions: |
+      Implement only the assigned task packet. Treat write paths as an upper bound, preserve concurrent changes, run the named acceptance commands, and report changed files, evidence, failures, and residual risks. Do not approve your own work.
+  - id: sumi_reviewer
+    description: Independent read-only reviewer for correctness, behavioral regressions, concurrency, and missing verification evidence.
+    kind: reviewer
+    projection: custom
+    sandbox_mode: read-only
+    capabilities: [read, verify]
+    write_policy: none
+    developer_instructions: |
+      Review the candidate independently. Lead with correctness, concurrency, security, behavioral regression, and missing-test findings. Re-run bounded checks when useful, cite concrete files and symbols, and never edit source or convert an agent claim into acceptance evidence.
+  - id: sumi_security_reviewer
+    description: Read-only security reviewer focused on trust boundaries, authorization, secrets, tenant isolation, and unsafe capabilities.
+    kind: reviewer
+    projection: custom
+    sandbox_mode: read-only
+    capabilities: [read, verify, security-review]
+    write_policy: none
+    developer_instructions: |
+      Review trust boundaries and failure paths. Verify authorization precedes effects, tenant context cannot be omitted, secrets remain outside Git and logs, and model or frontend output is untrusted. Return prioritized findings with reproducible evidence; do not mutate source or external systems.
+  - id: sumi_protocol_reviewer
+    description: Read-only protocol reviewer for OpenAPI, events, generated clients, transport adapters, and consumer drift.
+    kind: reviewer
+    projection: custom
+    sandbox_mode: read-only
+    capabilities: [read, verify, protocol-review]
+    write_policy: none
+    developer_instructions: |
+      Verify that contracts remain the transport source of truth, generated projections are current, and consumers do not duplicate DTOs or bypass the client facade. Check request, response, error, event, streaming, and compatibility boundaries without editing generated or authored files.
+  - id: sumi_release_verifier
+    description: Read-only verifier that binds a release candidate to exact commit, CI, artifact, migration, rollback, and provenance evidence.
+    kind: verifier
+    projection: custom
+    sandbox_mode: read-only
+    capabilities: [read, verify, release-review]
+    write_policy: none
+    developer_instructions: |
+      Verify an exact candidate without promoting it. Bind source commit, clean-runner CI, PostgreSQL integration, container digest, SBOM, migrations, rollback, and unresolved gates. Treat missing or stale evidence as a hold. Never tag, publish, deploy, approve, or alter release state.
+
+workflows:
+  - id: change_delivery
+    description: Evidence-first delivery for a bounded repository change with parallel discovery and disjoint implementation lanes.
+    stages:
+      - id: discover
+        actor: agent
+        role: explorer
+        depends_on: []
+        mode: parallel
+        required_evidence: [source_map, unknowns]
+        human_gate: false
+      - id: plan
+        actor: agent
+        role: sumi_supervisor
+        depends_on: [discover]
+        mode: serial
+        required_evidence: [dependency_graph, write_sets, rollback]
+        human_gate: false
+      - id: implement
+        actor: agent
+        role: worker
+        depends_on: [plan]
+        mode: parallel
+        required_evidence: [diff, acceptance_results]
+        human_gate: false
+      - id: verify
+        actor: agent
+        role: sumi_reviewer
+        depends_on: [implement]
+        mode: parallel
+        required_evidence: [review_findings, regression_results]
+        human_gate: false
+      - id: integrate
+        actor: agent
+        role: sumi_supervisor
+        depends_on: [verify]
+        mode: serial
+        required_evidence: [integrated_diff, full_verification]
+        human_gate: false
+      - id: accept
+        actor: human
+        depends_on: [integrate]
+        mode: serial
+        required_evidence: [owner_decision]
+        human_gate: true
+  - id: release_evidence
+    description: Exact-candidate verification that keeps security and release evidence independent from human promotion authority.
+    stages:
+      - id: freeze
+        actor: agent
+        role: sumi_supervisor
+        depends_on: []
+        mode: serial
+        required_evidence: [exact_commit, clean_worktree]
+        human_gate: false
+      - id: release_verify
+        actor: agent
+        role: sumi_release_verifier
+        depends_on: [freeze]
+        mode: parallel
+        required_evidence: [ci, artifact_digest, migration, rollback]
+        human_gate: false
+      - id: security_verify
+        actor: agent
+        role: sumi_security_reviewer
+        depends_on: [freeze]
+        mode: parallel
+        required_evidence: [security_findings, sbom, vulnerability_status]
+        human_gate: false
+      - id: promote
+        actor: human
+        depends_on: [release_verify, security_verify]
+        mode: serial
+        required_evidence: [release_decision]
+        human_gate: true
+
+projections:
+  codex:
+    config: .codex/config.toml
+    agents_directory: .codex/agents
+  skill:
+    directory: .agents/skills/sumi-orchestration
+    metadata: .agents/skills/sumi-orchestration/agents/openai.yaml
+
+invariants:
+  - one-supervisor-owns-plan-state
+  - task-packets-have-bounded-write-sets
+  - dependency-graphs-are-acyclic
+  - overlapping-writers-never-run-concurrently
+  - read-only-work-may-run-in-parallel
+  - state-transitions-use-version-cas
+  - task-identity-is-stable-across-retry
+  - completion-requires-declared-evidence
+  - cancellation-does-not-consume-retry-budget
+  - teardown-is-bounded-and-observed
+  - human-gates-cannot-be-self-approved
+  - runtime-state-never-enters-git

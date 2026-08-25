@@ -1,0 +1,116 @@
+{
+  "schema_version": "sumi.dev-plan.v1",
+  "workflow": "change_delivery",
+  "tasks": [
+    {
+      "schema_version": "sumi.dev-task.v1",
+      "task_id": "discover-runtime",
+      "workflow": "change_delivery",
+      "stage": "discover",
+      "role": "explorer",
+      "objective": "Map the runtime entry points and ownership boundaries.",
+      "generation": 1,
+      "idempotency_key": "change-17:discover-runtime:v1",
+      "priority": 100,
+      "read_paths": ["src"],
+      "write_paths": [],
+      "depends_on": [],
+      "acceptance_commands": [],
+      "evidence_requirements": ["source_map", "unknowns"],
+      "timeout": {
+        "soft_ms": 10000,
+        "hard_grace_ms": 2000,
+        "teardown_ms": 3000
+      },
+      "retry": { "max_attempts": 3, "base_delay_ms": 250, "max_delay_ms": 4000 }
+    },
+    {
+      "schema_version": "sumi.dev-task.v1",
+      "task_id": "plan-change",
+      "workflow": "change_delivery",
+      "stage": "plan",
+      "role": "sumi_supervisor",
+      "objective": "Compile discovery into bounded write sets and rollback evidence.",
+      "generation": 1,
+      "idempotency_key": "change-17:plan:v1",
+      "priority": 90,
+      "read_paths": ["src", "contracts"],
+      "write_paths": ["orchestration/fixtures"],
+      "depends_on": ["discover-runtime"],
+      "acceptance_commands": ["pnpm run orchestration:check"],
+      "evidence_requirements": ["dependency_graph", "write_sets", "rollback"],
+      "timeout": {
+        "soft_ms": 10000,
+        "hard_grace_ms": 2000,
+        "teardown_ms": 3000
+      },
+      "retry": { "max_attempts": 3, "base_delay_ms": 250, "max_delay_ms": 4000 }
+    },
+    {
+      "schema_version": "sumi.dev-task.v1",
+      "task_id": "implement-runtime",
+      "workflow": "change_delivery",
+      "stage": "implement",
+      "role": "worker",
+      "objective": "Implement the application runtime change.",
+      "generation": 1,
+      "idempotency_key": "change-17:implement-runtime:v1",
+      "priority": 80,
+      "read_paths": ["contracts"],
+      "write_paths": ["src/application"],
+      "depends_on": ["plan-change"],
+      "acceptance_commands": ["pnpm run typecheck:runtime"],
+      "evidence_requirements": ["diff", "acceptance_results"],
+      "timeout": {
+        "soft_ms": 10000,
+        "hard_grace_ms": 2000,
+        "teardown_ms": 3000
+      },
+      "retry": { "max_attempts": 3, "base_delay_ms": 250, "max_delay_ms": 4000 }
+    },
+    {
+      "schema_version": "sumi.dev-task.v1",
+      "task_id": "implement-contract",
+      "workflow": "change_delivery",
+      "stage": "implement",
+      "role": "worker",
+      "objective": "Implement the transport contract change.",
+      "generation": 1,
+      "idempotency_key": "change-17:implement-contract:v1",
+      "priority": 70,
+      "read_paths": ["src/application"],
+      "write_paths": ["contracts"],
+      "depends_on": ["plan-change"],
+      "acceptance_commands": ["pnpm run protocol:check"],
+      "evidence_requirements": ["diff", "acceptance_results"],
+      "timeout": {
+        "soft_ms": 10000,
+        "hard_grace_ms": 2000,
+        "teardown_ms": 3000
+      },
+      "retry": { "max_attempts": 3, "base_delay_ms": 250, "max_delay_ms": 4000 }
+    },
+    {
+      "schema_version": "sumi.dev-task.v1",
+      "task_id": "review-change",
+      "workflow": "change_delivery",
+      "stage": "verify",
+      "role": "sumi_reviewer",
+      "objective": "Review the integrated runtime and contract behavior.",
+      "generation": 1,
+      "idempotency_key": "change-17:review:v1",
+      "priority": 60,
+      "read_paths": ["src/application", "contracts"],
+      "write_paths": [],
+      "depends_on": ["implement-runtime", "implement-contract"],
+      "acceptance_commands": [],
+      "evidence_requirements": ["review_findings", "regression_results"],
+      "timeout": {
+        "soft_ms": 10000,
+        "hard_grace_ms": 2000,
+        "teardown_ms": 3000
+      },
+      "retry": { "max_attempts": 3, "base_delay_ms": 250, "max_delay_ms": 4000 }
+    }
+  ]
+}

@@ -9,10 +9,10 @@ contentVersion: 0.1.0
 
 ```powershell
 Copy-Item .env.example .env
-npm test
-npm run check
-npm run build
-npm start
+pnpm test
+pnpm run check
+pnpm run build
+pnpm start
 ```
 
 ```powershell

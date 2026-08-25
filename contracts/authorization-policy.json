@@ -1,0 +1,170 @@
+{
+  "$schema": "./authorization-policy.schema.json",
+  "schema_version": "sumi.authorization-policy.v1",
+  "policy_version": "2026-08-17.2",
+  "default_effect": "deny",
+  "roles": ["agent", "reviewer", "auditor", "tenant_admin", "workload"],
+  "actions": [
+    "interaction.ask",
+    "crm.search",
+    "crm.customer.create",
+    "crm.deal.update_stage",
+    "review.decide",
+    "media.tts.create",
+    "media.asset.read",
+    "events.read",
+    "progress.subscribe",
+    "outbox.relay"
+  ],
+  "resource_types": [
+    "interaction",
+    "customer",
+    "deal",
+    "review",
+    "media_asset",
+    "event_stream",
+    "progress_stream",
+    "outbox"
+  ],
+  "conditions": [
+    "tenant_match",
+    "resource_type_allowed",
+    "active_principal",
+    "human_principal",
+    "mfa_present",
+    "workload_principal",
+    "trusted_network"
+  ],
+  "allowed_action_wildcards": ["crm.*", "media.*"],
+  "role_actions": {
+    "agent": [
+      "interaction.ask",
+      "crm.search",
+      "crm.customer.create",
+      "crm.deal.update_stage",
+      "media.tts.create",
+      "media.asset.read",
+      "events.read",
+      "progress.subscribe"
+    ],
+    "reviewer": [
+      "crm.search",
+      "crm.customer.create",
+      "crm.deal.update_stage",
+      "review.decide",
+      "media.asset.read",
+      "events.read",
+      "progress.subscribe"
+    ],
+    "auditor": ["crm.search", "media.asset.read", "events.read"],
+    "tenant_admin": [
+      "interaction.ask",
+      "crm.*",
+      "review.decide",
+      "media.*",
+      "events.read",
+      "progress.subscribe"
+    ],
+    "workload": ["outbox.relay"]
+  },
+  "action_resources": {
+    "interaction.ask": ["interaction"],
+    "crm.search": ["customer", "deal"],
+    "crm.customer.create": ["customer"],
+    "crm.deal.update_stage": ["deal"],
+    "review.decide": ["review"],
+    "media.tts.create": ["media_asset"],
+    "media.asset.read": ["media_asset"],
+    "events.read": ["event_stream"],
+    "progress.subscribe": ["progress_stream"],
+    "outbox.relay": ["outbox"]
+  },
+  "action_conditions": {
+    "interaction.ask": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal"
+    ],
+    "crm.search": ["tenant_match", "resource_type_allowed", "active_principal"],
+    "crm.customer.create": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal",
+      "human_principal"
+    ],
+    "crm.deal.update_stage": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal",
+      "human_principal"
+    ],
+    "review.decide": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal",
+      "human_principal"
+    ],
+    "media.tts.create": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal"
+    ],
+    "media.asset.read": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal"
+    ],
+    "events.read": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal"
+    ],
+    "progress.subscribe": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal"
+    ],
+    "outbox.relay": [
+      "tenant_match",
+      "resource_type_allowed",
+      "active_principal",
+      "workload_principal",
+      "trusted_network"
+    ]
+  },
+  "allow_obligations": {
+    "interaction.ask": ["audit_log", "tenant_filter"],
+    "crm.search": ["audit_log", "tenant_filter"],
+    "crm.customer.create": [
+      "audit_log",
+      "tenant_filter",
+      "idempotency_key",
+      "human_review",
+      "outbox_write"
+    ],
+    "crm.deal.update_stage": [
+      "audit_log",
+      "tenant_filter",
+      "idempotency_key",
+      "human_review",
+      "outbox_write"
+    ],
+    "review.decide": [
+      "audit_log",
+      "tenant_filter",
+      "idempotency_key",
+      "outbox_write"
+    ],
+    "media.tts.create": [
+      "audit_log",
+      "tenant_filter",
+      "idempotency_key",
+      "encrypted_asset"
+    ],
+    "media.asset.read": ["audit_log", "tenant_filter", "no_store"],
+    "events.read": ["audit_log", "tenant_filter", "subject_filter"],
+    "progress.subscribe": ["audit_log", "tenant_filter", "subject_filter"],
+    "outbox.relay": ["audit_log", "tenant_filter", "subject_filter"]
+  },
+  "deny_obligations": ["audit_log"]
+}

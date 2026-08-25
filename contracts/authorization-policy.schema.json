@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.sumi.invalid/authorization-policy/v1/schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_version",
+    "default_effect",
+    "roles",
+    "actions",
+    "resource_types",
+    "conditions",
+    "allowed_action_wildcards",
+    "role_actions",
+    "action_resources",
+    "action_conditions",
+    "allow_obligations",
+    "deny_obligations"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "sumi.authorization-policy.v1" },
+    "policy_version": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$"
+    },
+    "default_effect": { "const": "deny" },
+    "roles": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "agent" },
+        { "const": "reviewer" },
+        { "const": "auditor" },
+        { "const": "tenant_admin" },
+        { "const": "workload" }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "actions": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "interaction.ask" },
+        { "const": "crm.search" },
+        { "const": "crm.customer.create" },
+        { "const": "crm.deal.update_stage" },
+        { "const": "review.decide" },
+        { "const": "media.tts.create" },
+        { "const": "media.asset.read" },
+        { "const": "events.read" },
+        { "const": "progress.subscribe" },
+        { "const": "outbox.relay" }
+      ],
+      "items": false,
+      "minItems": 10,
+      "maxItems": 10
+    },
+    "resource_types": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "interaction" },
+        { "const": "customer" },
+        { "const": "deal" },
+        { "const": "review" },
+        { "const": "media_asset" },
+        { "const": "event_stream" },
+        { "const": "progress_stream" },
+        { "const": "outbox" }
+      ],
+      "items": false,
+      "minItems": 8,
+      "maxItems": 8
+    },
+    "conditions": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "tenant_match" },
+        { "const": "resource_type_allowed" },
+        { "const": "active_principal" },
+        { "const": "human_principal" },
+        { "const": "mfa_present" },
+        { "const": "workload_principal" },
+        { "const": "trusted_network" }
+      ],
+      "items": false,
+      "minItems": 7,
+      "maxItems": 7
+    },
+    "allowed_action_wildcards": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["crm.*", "media.*"] }
+    },
+    "role_actions": { "$ref": "#/$defs/roleMap" },
+    "action_resources": { "$ref": "#/$defs/actionResourceMap" },
+    "action_conditions": { "$ref": "#/$defs/actionConditionMap" },
+    "allow_obligations": { "$ref": "#/$defs/actionObligationMap" },
+    "deny_obligations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/obligation" }
+    }
+  },
+  "$defs": {
+    "action": {
+      "enum": [
+        "interaction.ask",
+        "crm.search",
+        "crm.customer.create",
+        "crm.deal.update_stage",
+        "review.decide",
+        "media.tts.create",
+        "media.asset.read",
+        "events.read",
+        "progress.subscribe",
+        "outbox.relay"
+      ]
+    },
+    "grant": {
+      "anyOf": [{ "$ref": "#/$defs/action" }, { "enum": ["crm.*", "media.*"] }]
+    },
+    "resourceType": {
+      "enum": [
+        "interaction",
+        "customer",
+        "deal",
+        "review",
+        "media_asset",
+        "event_stream",
+        "progress_stream",
+        "outbox"
+      ]
+    },
+    "condition": {
+      "enum": [
+        "tenant_match",
+        "resource_type_allowed",
+        "active_principal",
+        "human_principal",
+        "mfa_present",
+        "workload_principal",
+        "trusted_network"
+      ]
+    },
+    "obligation": {
+      "enum": [
+        "audit_log",
+        "tenant_filter",
+        "idempotency_key",
+        "human_review",
+        "outbox_write",
+        "encrypted_asset",
+        "no_store",
+        "subject_filter"
+      ]
+    },
+    "grantList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/grant" }
+    },
+    "conditionList": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/condition" }
+    },
+    "resourceList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/resourceType" }
+    },
+    "obligationList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/obligation" }
+    },
+    "roleMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "reviewer", "auditor", "tenant_admin", "workload"],
+      "properties": {
+        "agent": { "$ref": "#/$defs/grantList" },
+        "reviewer": { "$ref": "#/$defs/grantList" },
+        "auditor": { "$ref": "#/$defs/grantList" },
+        "tenant_admin": { "$ref": "#/$defs/grantList" },
+        "workload": { "$ref": "#/$defs/grantList" }
+      }
+    },
+    "actionResourceMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interaction.ask",
+        "crm.search",
+        "crm.customer.create",
+        "crm.deal.update_stage",
+        "review.decide",
+        "media.tts.create",
+        "media.asset.read",
+        "events.read",
+        "progress.subscribe",
+        "outbox.relay"
+      ],
+      "properties": {
+        "interaction.ask": { "$ref": "#/$defs/resourceList" },
+        "crm.search": { "$ref": "#/$defs/resourceList" },
+        "crm.customer.create": { "$ref": "#/$defs/resourceList" },
+        "crm.deal.update_stage": { "$ref": "#/$defs/resourceList" },
+        "review.decide": { "$ref": "#/$defs/resourceList" },
+        "media.tts.create": { "$ref": "#/$defs/resourceList" },
+        "media.asset.read": { "$ref": "#/$defs/resourceList" },
+        "events.read": { "$ref": "#/$defs/resourceList" },
+        "progress.subscribe": { "$ref": "#/$defs/resourceList" },
+        "outbox.relay": { "$ref": "#/$defs/resourceList" }
+      }
+    },
+    "actionConditionMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interaction.ask",
+        "crm.search",
+        "crm.customer.create",
+        "crm.deal.update_stage",
+        "review.decide",
+        "media.tts.create",
+        "media.asset.read",
+        "events.read",
+        "progress.subscribe",
+        "outbox.relay"
+      ],
+      "properties": {
+        "interaction.ask": { "$ref": "#/$defs/conditionList" },
+        "crm.search": { "$ref": "#/$defs/conditionList" },
+        "crm.customer.create": { "$ref": "#/$defs/conditionList" },
+        "crm.deal.update_stage": { "$ref": "#/$defs/conditionList" },
+        "review.decide": { "$ref": "#/$defs/conditionList" },
+        "media.tts.create": { "$ref": "#/$defs/conditionList" },
+        "media.asset.read": { "$ref": "#/$defs/conditionList" },
+        "events.read": { "$ref": "#/$defs/conditionList" },
+        "progress.subscribe": { "$ref": "#/$defs/conditionList" },
+        "outbox.relay": { "$ref": "#/$defs/conditionList" }
+      }
+    },
+    "actionObligationMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interaction.ask",
+        "crm.search",
+        "crm.customer.create",
+        "crm.deal.update_stage",
+        "review.decide",
+        "media.tts.create",
+        "media.asset.read",
+        "events.read",
+        "progress.subscribe",
+        "outbox.relay"
+      ],
+      "properties": {
+        "interaction.ask": { "$ref": "#/$defs/obligationList" },
+        "crm.search": { "$ref": "#/$defs/obligationList" },
+        "crm.customer.create": { "$ref": "#/$defs/obligationList" },
+        "crm.deal.update_stage": { "$ref": "#/$defs/obligationList" },
+        "review.decide": { "$ref": "#/$defs/obligationList" },
+        "media.tts.create": { "$ref": "#/$defs/obligationList" },
+        "media.asset.read": { "$ref": "#/$defs/obligationList" },
+        "events.read": { "$ref": "#/$defs/obligationList" },
+        "progress.subscribe": { "$ref": "#/$defs/obligationList" },
+        "outbox.relay": { "$ref": "#/$defs/obligationList" }
+      }
+    }
+  }
+}

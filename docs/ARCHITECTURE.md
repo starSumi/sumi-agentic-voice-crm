@@ -7,6 +7,36 @@ audience: both
 contentVersion: 0.1.0
 ---
 
+## Product control philosophy
+
+Sumi is a declarative agent control plane, not a chain of prompts. Desired intent
+and observed reality are separate. Events wake controllers; durable state decides
+what happens next. Each resource has one status owner, every effect is idempotent
+or CAS-guarded, and readiness requires evidence for the currently observed
+generation.
+
+The common generation/Condition envelope applies to new public declarative
+resources. Existing internal control surfaces are explicitly classified as
+reconciled workers, state machines, governed lifecycles, or CAS commands; the
+policy does not mislabel them as already migrated. Process extensions and managed
+tasks restart only through explicit admission, never from health failure alone.
+
+The normative model is `contracts/control-plane-policy.json`:
+
+1. Declare intent; do not prescribe a fragile execution transcript.
+2. Re-observe before every effect; checkpoints and events are hints, not truth.
+3. Use small controllers with explicit resource ownership.
+4. Expect at-least-once delivery and make effects safe to repeat.
+5. Protect shared mutable state with revisions, CAS, leases, and tenant scope.
+6. Admit work through authorization, policy, budget, and human checkpoints.
+7. Finalize with bounded drain, lease release, durable terminal evidence, and
+   supervised termination only where process ownership exists.
+8. Treat model output as an untrusted proposal; only domain transactions own
+   business truth.
+
+[ADR-0007](ADR-0007-declarative-agent-control-plane.md) records the decision and
+its relationship to controller, API, lease, and finalizer conventions.
+
 ## System map
 
 ```mermaid
@@ -19,7 +49,7 @@ flowchart TB
   asr --> normalize[Normalizer + PII policy]
   context --> intent[Intent + Entity Agent\nJSON Schema + confidence]
   normalize --> intent
-  intent --> policy[Policy Decision Point\nRBAC • risk • confirmation]
+  intent --> policy[Policy Decision Point\nRBAC upper bound • ABAC • review]
   policy -->|read| crmquery[CRM Query]
   policy -->|write| command[CRM Command Service\ntransaction + idempotency]
   policy -->|ambiguous| review[Review Task Queue]
@@ -36,25 +66,53 @@ flowchart TB
 
 ## Bounded contexts
 
-| Context | Owner | Source of truth | Input | Output |
-| --- | --- | --- | --- | --- |
-| Identity & Tenant | Platform | IdP/tenant DB | JWT/request | actor, tenant, scopes |
-| Voice Media | Media Platform | object store + media metadata | bytes/MIME | asset, checksum, duration |
-| Understanding | Agent Platform | versioned inference record | transcript + CRM context | intent/entity proposal |
-| CRM Domain | CRM Team | Postgres aggregates | validated commands | committed aggregate/version |
-| Review | CRM Operations | review task store | ambiguous proposals | approve/reject/corrections |
-| Interaction | Experience Team | request/event projections | all prior results | answer, audio URL, UI events |
+| Context           | Owner           | Source of truth               | Input                    | Output                                                      |
+| ----------------- | --------------- | ----------------------------- | ------------------------ | ----------------------------------------------------------- |
+| Identity & Tenant | Platform        | IdP/tenant DB                 | JWT/request              | active principal, roles, actor/token scopes, policy version |
+| Voice Media       | Media Platform  | object store + media metadata | bytes/MIME               | asset, checksum, duration                                   |
+| Understanding     | Agent Platform  | versioned inference record    | transcript + CRM context | intent/entity proposal                                      |
+| CRM Domain        | CRM Team        | Postgres aggregates           | validated commands       | committed aggregate/version                                 |
+| Review            | CRM Operations  | review task store             | ambiguous proposals      | approve/reject/corrections                                  |
+| Interaction       | Experience Team | request/event projections     | all prior results        | answer, audio URL, UI events                                |
 
 ## Design patterns
 
+- Composition root and explicit scopes: `src/composition-root.ts` wires process
+  singletons and exposes a small ports object. Request context is immutable and
+  operation/transaction lifetimes remain explicit; no heavy DI container or
+  ambient tenant state is used.
+- Governed inversion of control: `src/extensions/` validates closed manifests,
+  grants only deployment-approved permission ports, and serializes dependency
+  startup/rollback/shutdown. Built-ins may run in process only by trusted ID;
+  external code requires a trusted process supervisor rather than dynamic import.
+  The Linux Rust supervisor owns the child process group, readiness handshake,
+  cooperative stop and bounded hard termination; Node retains orchestration and
+  application policy.
+- Control Engine: `src/control/` owns extension lifecycle and keyed epoch-aware
+  compare-and-swap circuit breakers so stale completions cannot corrupt a newer
+  half-open/recovered cycle.
+- Managed lifecycle: `src/lifecycle/managed-task-registry.ts` owns background
+  tasks, cooperative cancellation, bounded teardown and supervised termination.
+  The outbox poller is registered work rather than an unowned module loop.
+- Semantic Guardian governor: turn-level denial windows interrupt repeated
+  unsafe review cycles independently of provider availability circuits. The
+  permission-review adapter itself remains a future, fail-closed integration.
+- Conversation state: the application service is the only adapter-facing port;
+  PostgreSQL replaces encrypted state with an expected-revision CAS so stale
+  web, SSE, MCP, desktop or TUI writers cannot overwrite a newer turn.
 - Hexagonal architecture: the provider facade owns selection, deadlines, circuit isolation and error mapping; mock, OpenAI-compatible and DashScope adapters implement `transcribe`, `understand`, `synthesize`. The domain never imports provider SDKs or vendor protocols.
 - CQRS-lite: query context is separate from command path; commands return aggregate version.
 - Transactional outbox: domain mutation and event record commit atomically; relay is retryable.
 - Saga/compensation: external notification or TTS failure never silently rolls back a committed CRM transaction; status/event records describe compensation.
 - State machine: explicit request/job states; invalid transitions fail closed.
-- Policy-as-code: command risk, tenant scope, actor scope and approval requirements are deterministic before agent execution.
+- Authorization-as-code: `contracts/authorization-policy.json` defines a
+  closed RBAC ceiling and named ABAC conditions. Actor and token scopes can
+  only reduce that ceiling. Application services are the authoritative PEP;
+  PostgreSQL reloads active actor facts and rechecks mutations in the same
+  transaction as business state, audit and outbox writes.
 - Idempotent command: `(tenant_id, idempotency_key)` unique; repeated requests replay the original result.
-- Anti-corruption layer: adapters translate Saathi/Northstar concepts without importing their source model.
+- Anti-corruption layer: adapters translate external provider and import schemas
+  into owned domain contracts without importing external source models.
 
 ## Ownership rules
 
@@ -72,4 +130,14 @@ authorized CRM query tools; prompt and tool definitions are versioned artifacts.
 
 ## Failure isolation
 
-Each provider call has one end-to-end timeout, adapter-and-capability circuit state, and redacted error mapping. User/configuration errors do not open a provider circuit. The orchestrator persists encrypted interaction checkpoints, never retries a non-idempotent CRM command without its idempotency key, stores audio in private object storage, and relays transactional outbox rows independently. PostgreSQL, OIDC/JWKS, S3-compatible objects, OpenAI-compatible providers and DashScope are implemented adapters; successful staging connectivity, quality, security review and release approval remain promotion evidence rather than source-code claims.
+Each provider call has a cooperative 10-second soft deadline followed by a
+2-second hard-stop grace, adapter-and-capability CAS circuit state, and redacted
+error mapping. Caller cancellation and input/configuration rejection do not open
+a provider circuit. The orchestrator persists encrypted interaction checkpoints
+plus an append-only transition journal, reclaims only expired leases through a
+database CAS, never retries a non-idempotent CRM command without its idempotency
+key, stores audio in private object storage, and relays transactional outbox rows
+independently. PostgreSQL, OIDC/JWKS, S3-compatible objects, OpenAI-compatible
+providers and DashScope are implemented adapters; successful staging connectivity,
+quality, security review and release approval remain promotion evidence rather
+than source-code claims.

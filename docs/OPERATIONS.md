@@ -14,7 +14,7 @@ contentVersion: 0.1.0
 - `/metrics`: Prometheus request count and latency; production requires `Authorization: Bearer <METRICS_BEARER_TOKEN>`.
 - `/v1/events`: reference-only diagnostic view; production requires authenticated operator scope and pagination.
 
-Run the API and relay as separate processes from the same immutable artifact: `npm start` and `npm run start:outbox`. Relay instances use database leases, HMAC-sign each CloudEvent, retain idempotency by event ID, retry with bounded backoff, and move exhausted rows to dead letter for operator review.
+Run the API and relay as separate processes from the same immutable artifact: `pnpm start` and `pnpm run start:outbox`. Relay instances use database leases, HMAC-sign each CloudEvent, retain idempotency by event ID, retry with bounded backoff, and move exhausted rows to dead letter for operator review.
 
 ## Common incidents
 
@@ -27,4 +27,4 @@ Run the API and relay as separate processes from the same immutable artifact: `n
 | TTS failure | provider health/voice capability | keep text response; retry TTS job |
 | event lag | relay lease/dead-letter/DB | scale relay; preserve order and deduplicate |
 
-Every incident gets a timeline, affected tenant scope, trace/event IDs, decision, remediation and follow-up checkpoint.
+Every incident gets a timeline, affected tenant scope, trace/event IDs, decision, remediation, owner and follow-up action.

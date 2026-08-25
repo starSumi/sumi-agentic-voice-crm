@@ -19,8 +19,6 @@ contentVersion: 0.1.0
 
 传统 CRM 把 AI 当作聊天侧边栏，业务状态仍由表单和人工操作驱动。本项目把 Agent 作为工作流编排者，但不能把自然语言推理等同于业务真相：模型会产生歧义、幻觉、重复调用和越权风险。语音又增加 MIME、时长、转码、空音源、ASR 质量、音频保留和 TTS provider 故障。
 
-固定版本的对比证据显示：Saathi 已有 ASR 到结构化 CRM 的输入链路；Northstar 已有 CRM 工具、事件投影、HITL 和测试组织。两者都没有这里要求的完整 TTS、统一 `/ask`、企业身份、租户和高可用控制面。它们是证据和灵感，而不是实现来源。
-
 ## 决策
 
 采用四平面、contract-first、provider-neutral 架构：
@@ -50,14 +48,15 @@ contentVersion: 0.1.0
 
 ## 兼容与迁移
 
-- Saathi Customer、Visit 和 Message 映射到 Customer、Activity 和 VoiceInteraction，并按保留策略保存原始转写和 AI metadata。
-- Northstar `CrmState` 映射到 CRM aggregates；全量 snapshot 仅作为迁移适配器，目标是版本化 query 和 event。
 - 现有文本 CRM 调用可经 `/v1/ask` 进入；语音能力不改变原业务 API 的安全边界。
+- 外部数据只能通过显式版本化 adapter 映射为 Customer、Activity 和
+  VoiceInteraction aggregate；导入 snapshot 不能成为运行时业务事实来源。
 
 ## 回滚
 
 应用按 image digest 回滚；数据库使用 expand、migrate、contract，不回滚已提交业务。TTS 可以由 feature flag 关闭并保留文本回答；Intent 新版本失败时按 `schema_version` 路由到上一兼容版本。不得删除未消费的 outbox、review 和 media 记录。
 
-## 检查点
+## 发布验收
 
-只有 [检查点](/checkpoints/) 的 C0-C6 证据齐全，本 ADR 才能升级为生产批准。
+实现验收不等于生产授权。升级必须通过构建与发布文档定义的 staging、安全、
+回滚、制品和人工审批门禁。

@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.runtime.json",
+  "compilerOptions": {
+    "rootDir": "."
+  },
+  "files": [],
+  "include": ["test/**/*.ts", "db/tests/**/*.ts"],
+  "exclude": [".agent", ".local", "artifacts", "dist", "node_modules"]
+}

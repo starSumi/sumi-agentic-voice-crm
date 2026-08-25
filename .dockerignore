@@ -7,12 +7,14 @@ dist
 .dist.backup-*
 artifacts
 coverage
+target
 media
 protocol/.tmp
 protocol/.cache
 packages/api-client/.tmp
 logs
 .agent/
+.local/
 .agent.local/
 .agent-runtime/
 .agent-cache/
@@ -23,6 +25,11 @@ logs
 .agent-*.json
 .agent-*.tmp
 .codex/
+.agents/
+.nx/
+orchestration/*
+!orchestration/package.json
+nx.json
 .claude/
 .vscode/
 .idea/

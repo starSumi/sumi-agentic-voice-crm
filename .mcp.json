@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "sumi-docs": {
+      "type": "stdio",
+      "command": "sumi-docs-mcp",
+      "args": [
+        "serve",
+        "docs",
+        "--openapi",
+        "protocol/schema/json/openapi.bundle.json"
+      ]
+    }
+  }
+}

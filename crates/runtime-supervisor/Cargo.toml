@@ -1,0 +1,15 @@
+[package]
+name = "sumi-runtime-supervisor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+libc.workspace = true
+schemars = { version = "=1.2.2", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
+ts-rs = "=12.0.1"

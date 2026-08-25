@@ -1,4 +1,5 @@
-import type { AskData, AskRequest, SynthesizeData } from "./generated/index";
+import type { AskData, SynthesizeData } from "./api";
+import type { AskRequest } from "./protocol";
 
 const text: AskRequest = {
   input: { type: "text", text: "把 Acme 商机推进到方案阶段" },

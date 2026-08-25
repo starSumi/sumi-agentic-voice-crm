@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.sumi.invalid/agent-crm/action/v1/schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action_id",
+    "intent",
+    "effect",
+    "subject",
+    "target",
+    "parameters",
+    "evidence",
+    "idempotency",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "sumi.agent-crm-action.v1"
+    },
+    "action_id": {
+      "type": "string",
+      "pattern": "^act_[0-9a-f]{32}$"
+    },
+    "intent": {
+      "enum": [
+        "crm.search",
+        "crm.customer.create",
+        "crm.deal.update_stage"
+      ]
+    },
+    "effect": {
+      "enum": [
+        "read",
+        "write"
+      ]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_id",
+        "actor_id"
+      ],
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "actor_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_type",
+        "resource_id"
+      ],
+      "properties": {
+        "resource_type": {
+          "enum": [
+            "customer",
+            "deal"
+          ]
+        },
+        "resource_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "parameters": {
+      "type": "object"
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "request_id",
+          "digest",
+          "language",
+          "model"
+        ],
+        "properties": {
+          "kind": {
+            "const": "interaction_input"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^req_[A-Za-z0-9._:-]{1,127}$"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "language": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "idempotency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_digest",
+        "request_fingerprint"
+      ],
+      "properties": {
+        "key_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "request_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_action",
+        "requires_human_review"
+      ],
+      "properties": {
+        "authorization_action": {
+          "enum": [
+            "crm.search",
+            "crm.customer.create",
+            "crm.deal.update_stage"
+          ]
+        },
+        "requires_human_review": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "const": "crm.search"
+          }
+        },
+        "required": [
+          "intent"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "effect": {
+            "const": "read"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "resource_type": {
+                "enum": [
+                  "customer",
+                  "deal"
+                ]
+              }
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "customer": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "deal": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "authorization_action": {
+                "const": "crm.search"
+              },
+              "requires_human_review": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "const": "crm.customer.create"
+          }
+        },
+        "required": [
+          "intent"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "effect": {
+            "const": "write"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "resource_type": {
+                "enum": [
+                  "customer"
+                ]
+              }
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "customer": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "preferred_language": {
+                    "type": "string",
+                    "enum": [
+                      "zh-CN",
+                      "en-US",
+                      "hi-IN",
+                      "te-IN"
+                    ]
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "authorization_action": {
+                "const": "crm.customer.create"
+              },
+              "requires_human_review": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "const": "crm.deal.update_stage"
+          }
+        },
+        "required": [
+          "intent"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "effect": {
+            "const": "write"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "resource_type": {
+                "enum": [
+                  "deal"
+                ]
+              }
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "deal": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "expected_version": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "stage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "authorization_action": {
+                "const": "crm.deal.update_stage"
+              },
+              "requires_human_review": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

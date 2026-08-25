@@ -1,0 +1,18 @@
+{
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "name": "sumi-postgres",
+  "projectType": "application",
+  "sourceRoot": "db",
+  "tags": ["scope:data", "type:integration", "boundary:database"],
+  "targets": {
+    "test": {
+      "command": "pnpm run test:postgres",
+      "cache": false
+    },
+    "ci": {
+      "dependsOn": ["test"],
+      "command": "node -e \"console.log('PostgreSQL integration passed')\"",
+      "cache": false
+    }
+  }
+}

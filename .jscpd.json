@@ -1,0 +1,31 @@
+{
+  "minTokens": 80,
+  "minLines": 10,
+  "mode": "mild",
+  "format": ["javascript", "typescript", "tsx", "rust"],
+  "pattern": "**/*.{mjs,cjs,js,ts,tsx,rs}",
+  "ignore": [
+    "**/node_modules/**",
+    "**/packages/api-client/src/generated/**",
+    "**/src/generated/**",
+    "**/protocol/schema/json/**",
+    "**/docs/**",
+    "**/test/**",
+    "**/db/tests/**",
+    "**/dist/**",
+    "**/target/**",
+    "**/artifacts/**",
+    "**/coverage/**",
+    "**/.astro/**",
+    "**/.dist.staging-*/**",
+    "**/.dist.backup-*/**",
+    "**/*.lock"
+  ],
+  "ignorePattern": [
+    "(?s)/\\* jscpd:ignore-start \\*/.*?/\\* jscpd:ignore-end \\*/"
+  ],
+  "reporters": ["console"],
+  "exitCode": 1,
+  "noColors": true,
+  "noTips": true
+}
