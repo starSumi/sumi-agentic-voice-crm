@@ -395,7 +395,8 @@ export function createDashScopeProvider({
         output && isJsonRecord(output.audio) ? output.audio : undefined;
       const audioData = audio?.data;
       const audioUrl = audio?.url;
-      if (typeof audioData !== "string" && typeof audioUrl !== "string") {
+      const hasAudioData = typeof audioData === "string" && audioData.length > 0;
+      if (!hasAudioData && typeof audioUrl !== "string") {
         throw upstream("DashScope TTS returned no audio data or URL");
       }
       const configuredLimit = setting(
@@ -410,7 +411,7 @@ export function createDashScopeProvider({
         { max: MAX_PROVIDER_AUDIO_BYTES },
       );
       const downloaded =
-        typeof audioData === "string"
+        hasAudioData
           ? decodeAudioData(audioData, maxBytes)
           : typeof audioUrl === "string"
             ? await downloadAudio(audioUrl, { env, fetchImpl, signal })

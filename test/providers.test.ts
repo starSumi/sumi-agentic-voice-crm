@@ -319,6 +319,33 @@ test("DashScope TTS prefers bounded inline audio data", async () => {
   assert.equal(result.mime_type, "audio/wav");
 });
 
+test("DashScope TTS falls back to the URL when inline audio data is empty", async () => {
+  let calls = 0;
+  const runtime = createProviderRuntime({
+    env: dashscopeEnv(),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({
+          output: {
+            audio: {
+              data: "",
+              url: "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav",
+            },
+          },
+        });
+      }
+      return new Response(wav, { headers: { "content-type": "audio/wav" } });
+    },
+  });
+  const result = await runtime.synthesize("hello", {
+    language: "en-US",
+    format: "wav",
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.mime_type, "audio/wav");
+});
+
 test("DashScope TTS rejects untrusted result hosts, redirects and oversized audio", async () => {
   for (const scenario of ["host", "redirect", "size"]) {
     let calls = 0;
