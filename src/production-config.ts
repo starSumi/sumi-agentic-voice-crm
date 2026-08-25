@@ -88,9 +88,20 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env, {
   }
   if (env.OBJECT_STORAGE_PROVIDER !== "s3") throw new Error("OBJECT_STORAGE_PROVIDER=s3 is required in production");
   if (env.OBJECT_STORAGE_ENDPOINT) requireHttps(env, "OBJECT_STORAGE_ENDPOINT");
-  const supportedProviders = new Set(["openai-compatible", "dashscope"]);
-  for (const name of ["ASR_PROVIDER", "INTENT_PROVIDER", "TTS_PROVIDER"]) {
-    if (!supportedProviders.has(env[name] ?? "")) throw new Error(`${name} must be openai-compatible or dashscope in production`);
+  const speechProviders = new Set(["openai-compatible", "dashscope"]);
+  const intentProviders = new Set([
+    "openai-compatible",
+    "dashscope",
+    "agent-crm-http",
+  ]);
+  for (const name of ["ASR_PROVIDER", "TTS_PROVIDER"]) {
+    if (!speechProviders.has(env[name] ?? ""))
+      throw new Error(`${name} must be openai-compatible or dashscope in production`);
+  }
+  if (!intentProviders.has(env.INTENT_PROVIDER ?? "")) {
+    throw new Error(
+      "INTENT_PROVIDER must be openai-compatible, dashscope or agent-crm-http in production",
+    );
   }
   const selected = new Set([env.ASR_PROVIDER, env.INTENT_PROVIDER, env.TTS_PROVIDER]);
   if (selected.has("openai-compatible")) {
@@ -109,6 +120,11 @@ export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env, {
     if (suffixes && suffixes.split(",").some((item) => !/^\.?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(item.trim()) || !item.includes("."))) {
       throw new Error("DASHSCOPE_AUDIO_HOST_SUFFIXES must contain comma-separated DNS suffixes in production");
     }
+  }
+  if (env.INTENT_PROVIDER === "agent-crm-http") {
+    requireHttps(env, "AGENT_CRM_HTTP_URL");
+    requireValue(env, "AGENT_CRM_HTTP_MODEL");
+    requireValue(env, "AGENT_CRM_HTTP_CALLER_ID");
   }
   if (requireValue(env, "METRICS_BEARER_TOKEN").length < 32) throw new Error("METRICS_BEARER_TOKEN must contain at least 32 characters");
 }

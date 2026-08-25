@@ -192,6 +192,39 @@ test("production API configuration supports mixed providers and DashScope aliase
   );
 });
 
+test("production API configuration accepts Agent CRM HTTP for intent only", () => {
+  const agentCrmHttp: NodeJS.ProcessEnv = {
+    ...production,
+    ASR_PROVIDER: "dashscope",
+    INTENT_PROVIDER: "agent-crm-http",
+    TTS_PROVIDER: "dashscope",
+    DASHSCOPE_API_KEY: "dashscope-test-only",
+    DASHSCOPE_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    AGENT_CRM_HTTP_URL: "https://agent-crm.example.test/chat?variant=fine",
+    AGENT_CRM_HTTP_MODEL: "sumi.agent-crm-training-example.v1",
+    AGENT_CRM_HTTP_CALLER_ID: "00000000000",
+  };
+  assert.doesNotThrow(() => validateProductionConfig(agentCrmHttp));
+  for (const name of [
+    "AGENT_CRM_HTTP_URL",
+    "AGENT_CRM_HTTP_MODEL",
+    "AGENT_CRM_HTTP_CALLER_ID",
+  ]) {
+    assert.throws(
+      () => validateProductionConfig({ ...agentCrmHttp, [name]: "" }),
+      new RegExp(name),
+    );
+  }
+  assert.throws(
+    () =>
+      validateProductionConfig({
+        ...agentCrmHttp,
+        ASR_PROVIDER: "agent-crm-http",
+      }),
+    /ASR_PROVIDER/,
+  );
+});
+
 test("production outbox configuration is independently fail-closed", () => {
   const outbox = {
     ...production,

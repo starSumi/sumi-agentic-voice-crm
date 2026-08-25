@@ -52,6 +52,7 @@ const DEFAULT_RUNTIME_SOURCES = [
   "src/observability.ts",
   "src/outbox-relay.ts",
   "src/outbox-worker.ts",
+  "src/provider-agent-crm-http.ts",
   "src/provider-common.ts",
   "src/protocol-policy.ts",
   "src/provider-dashscope.ts",

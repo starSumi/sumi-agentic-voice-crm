@@ -1,4 +1,5 @@
 import { createDashScopeProvider } from "./provider-dashscope.ts";
+import { createAgentCrmHttpProvider } from "./provider-agent-crm-http.ts";
 import { createMockProvider } from "./provider-mock.ts";
 import { createOpenAiProvider } from "./provider-openai.ts";
 import {
@@ -71,6 +72,7 @@ const BUILT_IN_FACTORIES: Readonly<Record<string, ProviderFactory>> =
     mock: createMockProvider,
     "openai-compatible": createOpenAiProvider,
     dashscope: createDashScopeProvider,
+    "agent-crm-http": createAgentCrmHttpProvider,
   });
 
 function providerNames(env: ProviderEnvironment): ProviderNames {

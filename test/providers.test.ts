@@ -44,6 +44,18 @@ function validUnderstanding(extra: Readonly<Record<string, unknown>> = {}) {
   };
 }
 
+function agentCrmHttpEnv(overrides: NodeJS.ProcessEnv = {}) {
+  return {
+    ASR_PROVIDER: "mock",
+    INTENT_PROVIDER: "agent-crm-http",
+    TTS_PROVIDER: "mock",
+    AGENT_CRM_HTTP_URL: "https://agent-crm.example.test/chat?variant=fine",
+    AGENT_CRM_HTTP_MODEL: "sumi.agent-crm-training-example.v1",
+    AGENT_CRM_HTTP_CALLER_ID: "00000000000",
+    ...overrides,
+  };
+}
+
 function textBody(call: FetchCall | undefined): string {
   const body = call?.init.body;
   if (typeof body !== "string") throw new TypeError("expected text body");
@@ -131,6 +143,69 @@ test("OpenAI-compatible adapter preserves ASR, Responses JSON schema and bounded
   assert.equal(responseRequest.text.format.strict, true);
   assert.equal(JSON.parse(textBody(calls[2])).response_format, "mp3");
   assert.equal(JSON.parse(textBody(calls[3])).response_format, "opus");
+});
+
+test("Agent CRM HTTP adapter validates the double-encoded intent envelope", async () => {
+  let observedUrl = "";
+  let observedRequest: Record<string, unknown> = {};
+  const runtime = createProviderRuntime({
+    env: agentCrmHttpEnv(),
+    fetchImpl: async (input, init = {}) => {
+      observedUrl = String(input);
+      observedRequest = JSON.parse(String(init.body));
+      return jsonResponse({
+        request_id: observedRequest.request_id,
+        phone_number: observedRequest.phone_number,
+        response: JSON.stringify(
+          validUnderstanding({
+            intent: "crm.deal.update_stage",
+            entities: {
+              deal: { value: "deal-1", confidence: 0.99 },
+              stage: { value: "Negotiation", confidence: 0.98 },
+            },
+            needs_confirmation: true,
+          }),
+        ),
+      });
+    },
+  });
+  const result = await runtime.understand(
+    "确认把 deal-1 移到 Negotiation",
+    { locale: "zh-CN" },
+  );
+  assert.equal(observedUrl, agentCrmHttpEnv().AGENT_CRM_HTTP_URL);
+  assert.equal(observedRequest.phone_number, "00000000000");
+  assert.equal(observedRequest.query, "确认把 deal-1 移到 Negotiation");
+  assert.match(String(observedRequest.request_id), /^sumi-[0-9a-f-]{36}$/);
+  assert.equal(result.intent, "crm.deal.update_stage");
+  assert.equal(result.needs_confirmation, true);
+  assert.equal(result.source.model, "sumi.agent-crm-training-example.v1");
+  assert.equal(runtime.providerReadiness().ready, true);
+});
+
+test("Agent CRM HTTP adapter rejects invalid envelopes and request ID mismatches", async () => {
+  for (const body of [
+    { response: JSON.stringify(validUnderstanding()) },
+    {
+      request_id: "wrong-request",
+      phone_number: "00000000000",
+      response: JSON.stringify(validUnderstanding()),
+    },
+    {
+      request_id: "wrong-request",
+      phone_number: "00000000000",
+      response: "not-json",
+    },
+  ]) {
+    const runtime = createProviderRuntime({
+      env: agentCrmHttpEnv(),
+      fetchImpl: async () => jsonResponse(body),
+    });
+    await assert.rejects(
+      () => runtime.understand("查询客户", { locale: "zh-CN" }),
+      (error) => testError(error).code === "UPSTREAM_UNAVAILABLE",
+    );
+  }
 });
 
 test("DashScope ASR sends the MIME-aware input_audio Data URL", async () => {

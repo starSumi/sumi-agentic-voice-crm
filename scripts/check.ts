@@ -43,6 +43,7 @@ const runtimeSources = [
   "src/outbox-worker.ts",
   "src/provider-common.ts",
   "src/provider-dashscope.ts",
+  "src/provider-agent-crm-http.ts",
   "src/provider-mock.ts",
   "src/provider-openai.ts",
   "src/providers.ts",

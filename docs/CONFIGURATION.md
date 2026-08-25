@@ -11,7 +11,7 @@ Copy `.env.example` only when a launcher or deployment system loads it. Node.js 
 
 ## Effective runtime settings
 
-Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc` or `AUTH_MODE=static`, `OBJECT_STORAGE_PROVIDER=s3`, each provider selector set to `openai-compatible` or `dashscope`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token. ASR, intent and TTS may select different adapters; `mock` is rejected in production.
+Development defaults to the in-memory store, development bearer identity, memory objects, and deterministic providers. Production has no fallback: startup requires `STORE_PROVIDER=postgres`, `AUTH_MODE=oidc` or `AUTH_MODE=static`, `OBJECT_STORAGE_PROVIDER=s3`, an HTTPS `PUBLIC_BASE_URL`, and a metrics bearer token. ASR and TTS select `openai-compatible` or `dashscope`; intent may also select `agent-crm-http`. `mock` is rejected in production.
 
 | Boundary         | Required production variables                                                                                                                                                                                                    |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -32,6 +32,7 @@ Run the API with `pnpm start` and the independent transactional-outbox worker wi
 | `mock`              | None; development only                                                             | Deterministic ASR, intent and TTS fixtures                                                                        |
 | `openai-compatible` | `OPENAI_API_KEY`, HTTPS `OPENAI_BASE_URL`; `OPENAI_MODEL` when selected for intent | Audio transcriptions, strict-schema Responses intent extraction, and binary speech output                         |
 | `dashscope`         | `DASHSCOPE_API_KEY`, HTTPS `DASHSCOPE_BASE_URL`                                    | Qwen ASR and JSON Object intent over the compatible Chat Completions API; Qwen TTS over the native generation API |
+| `agent-crm-http`    | HTTPS `AGENT_CRM_HTTP_URL`, `AGENT_CRM_HTTP_MODEL`, `AGENT_CRM_HTTP_CALLER_ID`      | Intent-only adapter for a double-encoded Agent CRM JSON envelope; ASR and TTS must use another provider            |
 
 OpenAI TTS maps the public `voice=default` to `OPENAI_TTS_VOICE` (default `alloy`) and maps public `format=ogg` to the provider's `opus` response format. `OPENAI_TTS_MAX_BYTES` (or the shared `PROVIDER_TTS_MAX_BYTES`) bounds the binary response.
 
@@ -68,6 +69,8 @@ transcripts, audio, tokens, SQL parameters, or signed URL query strings.
 `DASHSCOPE_AUDIO_HOST_SUFFIXES` may extend the built-in allowlist for signed TTS audio downloads. Leave it empty for the official `dashscope-result-*.oss-*.aliyuncs.com` pattern. Every hop is upgraded or restricted to HTTPS, manually redirected, revalidated, size bounded, and checked against audio magic bytes.
 
 Existing deployments may keep `ALIYUN_BASE_APIKEY`, `ALIYUN_BASE_URL`, `ALIYUN_BASE_MODEL`, and the corresponding `ALIYUN_ASR_*`/`ALIYUN_TTS_*` variables. They are aliases; `DASHSCOPE_*` takes precedence when both namespaces are present.
+
+`agent-crm-http` sends `request_id`, an opaque non-PII caller identifier in the upstream `phone_number` compatibility field, and the transcript as `query`. It bounds and validates both JSON layers, requires the upstream request ID to be echoed, and applies the current Agent CRM output contract before returning an understanding. `AGENT_CRM_HTTP_BEARER_TOKEN` is optional. This adapter is intentionally limited to intent so an ephemeral model service cannot silently replace ASR or TTS.
 
 ## Documentation settings
 
