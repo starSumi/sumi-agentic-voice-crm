@@ -16,11 +16,11 @@ Development defaults to the in-memory store, development bearer identity, memory
 | Boundary         | Required production variables                                                                                                                                                                                                    |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Identity         | Multi-user OIDC: issuer, audience, JWKS URI and canonical action scopes. Private single-tenant: `AUTH_STATIC_BEARER_TOKEN`, `AUTH_STATIC_TENANT_ID`, `AUTH_STATIC_SUBJECT`, optional `AUTH_STATIC_ROLE` and `AUTH_STATIC_SCOPES` |
-| Database/privacy | `DATABASE_URL`, base64 32-byte `DATA_ENCRYPTION_KEY`; interaction payloads use AES-256-GCM                                                                                                                                       |
+| Database/privacy | `DATABASE_URL`; either legacy `DATA_ENCRYPTION_KEY` or `DATA_ENCRYPTION_KEYS` plus `DATA_ENCRYPTION_ACTIVE_KEY_ID`; interaction payloads use AES-256-GCM                                                                                      |
 | Media            | S3-compatible bucket, region and optional endpoint/KMS key; signed URL TTL is 15-900 seconds                                                                                                                                     |
 | Providers        | Credentials and HTTPS base URL for every selected adapter; explicit OpenAI intent model when that adapter owns intent                                                                                                            |
 | Relay            | worker-specific target, tenant list, HMAC secret, retry/lease/batch controls                                                                                                                                                     |
-| Operations       | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage, providers, and registered extensions; `OBSERVABILITY_MODE=manual` (default) or explicit `otel`                                                      |
+| Operations       | `METRICS_BEARER_TOKEN`; `GET /health/ready` probes database, object storage, providers, and registered extensions; `OBSERVABILITY_MODE=manual` (default) or explicit `otel`; bounded ingress rate settings                       |
 | Async messages   | `MESSAGE_JOB_TENANT_IDS` enables recovery polling for listed tenants; optional `MESSAGE_JOB_BATCH_SIZE`, `MESSAGE_JOB_LEASE_MS`, `MESSAGE_JOB_MAX_ATTEMPTS`, and `MESSAGE_JOB_POLL_INTERVAL_MS` tune the managed worker |
 
 Run the API with `pnpm start` and the independent transactional-outbox worker with `pnpm run start:outbox`. Give the worker only database, encryption and delivery credentials; it does not need model credentials.
@@ -46,7 +46,20 @@ a supervised process extension can be physically terminated after that grace.
 deployments. `INTERACTION_LEASE_MS` defaults to 30 seconds and is capped at 15
 minutes. `RUNTIME_TEARDOWN_MS` defaults to 3000 ms and is capped at 30 seconds;
 it bounds managed background-task cleanup and HTTP drain before forced
-connection closure. Provider audio limits are capped at 50 MiB.
+connection closure. TTS provider responses and stored audio share a 25 MiB cap.
+
+PostgreSQL uses independent connection, client query, server statement, and
+idle-in-transaction budgets. Their defaults are 5, 30, 30, and 60 seconds via
+the `DATABASE_*_TIMEOUT_MS` variables. The in-process `/v1/*` ingress limiter
+defaults to 120 requests per source per 60 seconds with at most 10,000 active
+keys. A multi-instance deployment must also enforce coordinated limits at its
+gateway.
+
+`DATA_ENCRYPTION_KEYS` is a JSON object from stable key IDs to base64-encoded
+32-byte keys; `DATA_ENCRYPTION_ACTIVE_KEY_ID` selects the key used for new
+`v2` envelopes. Keep retired keys available while their envelopes remain in
+PostgreSQL. `DATA_ENCRYPTION_KEY` continues to decrypt and write legacy `v1`
+envelopes during migration.
 
 The asynchronous ask path is opt-in through `Prefer: respond-async`. It writes
 an encrypted durable message receipt before returning; `MESSAGE_JOB_TENANT_IDS`
@@ -60,9 +73,11 @@ the PostgreSQL migration `005_message_jobs_and_inbox.sql`.
 low-cardinality W3C-compatible trace correlation plus explicit redacted spans
 for HTTP, application, provider, storage and transaction boundaries. Set
 `OBSERVABILITY_MODE=otel` only when an OTLP/HTTP collector is available.
-`OTEL_SERVICE_NAME` accepts a short stable service name and the standard
-`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` variables
-configure the exporter. Automatic Node, HTTP, fetch, PostgreSQL and provider
+`OTEL_SERVICE_NAME` accepts a short stable service name. The standard
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, and
+`OTEL_EXPORTER_OTLP_HEADERS` variables configure trace and metric exporters;
+`OTEL_METRIC_EXPORT_INTERVAL_MS` defaults to 60 seconds. Automatic Node, HTTP,
+fetch, PostgreSQL and provider
 instrumentation is deliberately disabled; Sumi never exports request bodies,
 transcripts, audio, tokens, SQL parameters, or signed URL query strings.
 
