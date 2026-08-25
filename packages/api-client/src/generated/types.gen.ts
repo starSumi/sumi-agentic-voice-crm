@@ -65,6 +65,7 @@ export type EventStreamEnvelope = {
 export type EventStreamResponse = {
   events: Array<EventStreamEnvelope>;
   request_id: RequestId;
+  next_cursor?: string;
 };
 
 export type MessageJobResponse = {
@@ -502,6 +503,10 @@ export type DecideReviewErrors = {
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
+  429: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
   503: ErrorEnvelope;
 };
 
@@ -548,6 +553,10 @@ export type GetAssetErrors = {
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
   403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  429: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
@@ -599,6 +608,10 @@ export type GetAssetContentErrors = {
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
+  429: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
   503: ErrorEnvelope;
 };
 
@@ -624,7 +637,16 @@ export type ListEventsData = {
     "X-Tenant-Id"?: TenantId;
   };
   path?: never;
-  query?: never;
+  query?: {
+    /**
+     * Maximum number of events returned in one page.
+     */
+    limit?: number;
+    /**
+     * Opaque cursor returned by the previous page.
+     */
+    cursor?: string;
+  };
   url: "/v1/events";
 };
 
@@ -637,6 +659,10 @@ export type ListEventsErrors = {
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
   403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  429: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
@@ -676,6 +702,10 @@ export type ListMessageJobStatsErrors = {
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
   403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  429: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
@@ -726,6 +756,10 @@ export type GetMessageJobErrors = {
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */
   403: ErrorEnvelope;
+  /**
+   * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
+   */
+  429: ErrorEnvelope;
   /**
    * Stable Sumi error envelope. The request_id can be used to correlate audit and event records.
    */

@@ -172,6 +172,7 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/assets/{asset_id}:
     get:
@@ -198,6 +199,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/assets/{asset_id}/content:
     get:
@@ -227,6 +229,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/events:
     get:
@@ -239,6 +242,16 @@ paths:
       security: [{ bearerAuth: [] }]
       parameters:
         - { $ref: "#/components/parameters/TenantId" }
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of events returned in one page.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor returned by the previous page.
+          schema: { type: string, minLength: 1, maxLength: 512 }
       responses:
         "200":
           {
@@ -254,6 +267,7 @@ paths:
           }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/jobs/stats:
     get:
@@ -278,6 +292,7 @@ paths:
           }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/jobs/{job_id}:
     get:
@@ -303,6 +318,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
@@ -462,6 +478,10 @@ components:
           type: array
           items: { $ref: "#/components/schemas/EventStreamEnvelope" }
         request_id: { $ref: "#/components/schemas/RequestId" }
+        next_cursor:
+          type: string
+          minLength: 1
+          maxLength: 512
     MessageJobResponse:
       type: object
       additionalProperties: false
