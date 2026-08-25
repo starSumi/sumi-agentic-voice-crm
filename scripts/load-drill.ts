@@ -11,11 +11,14 @@ const errorRateLimit = Number(process.env.DRILL_ERROR_RATE_LIMIT || 0);
 for (const [name, value] of Object.entries({
   DRILL_REQUESTS: requests,
   DRILL_CONCURRENCY: concurrency,
-  DRILL_P95_LIMIT_MS: p95LimitMs,
 })) {
-  if (!Number.isFinite(value) || value < 1)
-    throw new Error(`${name} must be positive`);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 1_000_000)
+    throw new Error(`${name} must be an integer between 1 and 1000000`);
 }
+if (!Number.isFinite(p95LimitMs) || p95LimitMs < 1)
+  throw new Error("DRILL_P95_LIMIT_MS must be positive");
+if (!Number.isFinite(errorRateLimit) || errorRateLimit < 0 || errorRateLimit > 1)
+  throw new Error("DRILL_ERROR_RATE_LIMIT must be between 0 and 1");
 
 async function freePort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
@@ -43,6 +46,9 @@ async function startLocal() {
       ASR_PROVIDER: "mock",
       INTENT_PROVIDER: "mock",
       TTS_PROVIDER: "mock",
+      RATE_LIMIT_WINDOW_MS: "60000",
+      RATE_LIMIT_MAX_REQUESTS: String(requests),
+      RATE_LIMIT_MAX_KEYS: "1",
     }),
     stdio: ["ignore", "pipe", "pipe"],
   });

@@ -12,6 +12,7 @@ test("local drills do not inherit application configuration or credentials", () 
       DATABASE_URL: "postgresql://user:password@example.test/db",
       DRILL_AUTHORIZATION: "Bearer inherited",
       GITHUB_TOKEN: "repository-token",
+      RATE_LIMIT_MAX_REQUESTS: "999999",
     },
   );
 
@@ -23,4 +24,5 @@ test("local drills do not inherit application configuration or credentials", () 
   assert.equal("DATABASE_URL" in env, false);
   assert.equal("DRILL_AUTHORIZATION" in env, false);
   assert.equal("GITHUB_TOKEN" in env, false);
+  assert.equal("RATE_LIMIT_MAX_REQUESTS" in env, false);
 });

@@ -26,6 +26,7 @@ const APPLICATION_PREFIXES = [
   "OSS_",
   "OUTBOX_",
   "PROVIDER_",
+  "RATE_LIMIT_",
   "S3_",
   "TENCENTCLOUD_",
 ];
