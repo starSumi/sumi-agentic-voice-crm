@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AggregationTemporality,
+  InMemoryMetricExporter,
+} from "@opentelemetry/sdk-metrics";
+import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
@@ -11,6 +15,7 @@ import {
   createConfiguredTracer,
   createOtelTracer,
   createTracer,
+  OtelMetrics,
   parseTraceparent,
 } from "../src/observability.ts";
 import type { IdGenerator, SpanEvent } from "../src/observability.ts";
@@ -156,7 +161,7 @@ test("unknown names and attribute values collapse to low-cardinality fallbacks",
     .startSpan("customer.123456", {
       attributes: {
         "app.operation": "customer-123456",
-        "http.method": "CUSTOM-123456",
+        "http.request.method": "CUSTOM-123456",
         "http.route": "/customers/123456",
         "error.code": "CUSTOMER_123456",
       },
@@ -166,7 +171,7 @@ test("unknown names and attribute values collapse to low-cardinality fallbacks",
   assert.equal(events[0]?.name, "application.unknown");
   assert.deepEqual(events[0]?.attributes, {
     "app.operation": "unknown",
-    "http.method": "OTHER",
+    "http.request.method": "OTHER",
     "http.route": "OTHER:unmatched",
     "error.code": "UNKNOWN",
   });
@@ -221,6 +226,50 @@ test("sink failure is observational and runtime closes every resource once", asy
   await runtime.close();
   assert.deepEqual(closed, ["store", "objects"]);
   assert.equal(sinkCloses, 1);
+});
+
+test("manual tracing bounds pending exports and flushes accepted events", async () => {
+  const releases: Array<() => void> = [];
+  const tracer = createTracer({
+    maxPending: 2,
+    sink: () =>
+      new Promise<void>((resolve) => {
+        releases.push(resolve);
+      }),
+    idGenerator: ids(),
+  });
+  tracer.startSpan("application.ask").end();
+  tracer.startSpan("application.tts").end();
+  tracer.startSpan("application.review").end();
+  assert.equal(tracer.droppedEvents, 1);
+  for (const release of releases) release();
+  await tracer.flush();
+  assert.equal(tracer.pending.size, 0);
+  await tracer.close();
+});
+
+test("OTLP metrics export bounded HTTP and message-job dimensions", async () => {
+  const exporter = new InMemoryMetricExporter(
+    AggregationTemporality.CUMULATIVE,
+  );
+  const metrics = new OtelMetrics({
+    env: {
+      APP_ENV: "test",
+      OTEL_SERVICE_NAME: "sumi-test",
+      OTEL_METRIC_EXPORT_INTERVAL_MS: "5000",
+    },
+    exporter,
+  });
+  metrics.recordHttp("GET", "/v1/events", 200, 0.25);
+  metrics.recordMessageJob("lease_renewed");
+  metrics.recordTraceDrops(2);
+  await metrics.flush();
+  const exported = JSON.stringify(exporter.getMetrics());
+  assert.match(exported, /http\.server\.request\.duration/u);
+  assert.match(exported, /sumi\.message\.job\.events/u);
+  assert.match(exported, /lease_renewed/u);
+  assert.match(exported, /sumi\.telemetry\.trace\.events\.dropped/u);
+  await metrics.close();
 });
 
 test("configured OpenTelemetry mode exports only explicit redacted spans", async () => {

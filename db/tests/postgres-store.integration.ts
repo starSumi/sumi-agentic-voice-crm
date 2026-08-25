@@ -786,6 +786,22 @@ try {
   const duplicateJob = await store.enqueueMessageJob(messageJobInput);
   assert.equal(duplicateJob.duplicate, true);
   assert.equal(duplicateJob.job.id, queuedJob.job.id);
+  assert.equal(
+    await store.getMessageJob({
+      tenant_id: identity.tenant_id,
+      actor_id: reviewerIdentity.actor_id,
+      job_id: queuedJob.job.id,
+    }),
+    undefined,
+  );
+  assert.deepEqual(
+    await store.messageJobTransitions({
+      tenant_id: identity.tenant_id,
+      actor_id: reviewerIdentity.actor_id,
+      job_id: queuedJob.job.id,
+    }),
+    [],
+  );
   await assert.rejects(
     store.enqueueMessageJob({
       ...messageJobInput,
@@ -802,6 +818,14 @@ try {
   )[0];
   assert.equal(claimedJob.id, queuedJob.job.id);
   assert.equal(claimedJob.status, "running");
+  const renewedJob = await store.renewMessageJobLease({
+    tenant_id: identity.tenant_id,
+    job_id: claimedJob.id,
+    worker_id: "message-job-integration-worker",
+    lease_ms: 30_000,
+  });
+  assert.equal(renewedJob.status, "running");
+  assert.equal(renewedJob.worker_id, "message-job-integration-worker");
   const completedJob = await store.completeMessageJob({
     tenant_id: identity.tenant_id,
     job_id: claimedJob.id,

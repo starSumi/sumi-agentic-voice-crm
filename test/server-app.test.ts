@@ -106,6 +106,37 @@ test("createApp is transport-injectable and import does not listen", async () =>
   assert.deepEqual(closed, ["store", "runtime"]);
 });
 
+test("application ingress rate limiting returns a bounded retry hint", async () => {
+  const closed: string[] = [];
+  const runtime = {
+    ...runtimeFixture(closed),
+    env: {
+      RATE_LIMIT_WINDOW_MS: "60000",
+      RATE_LIMIT_MAX_REQUESTS: "1",
+      RATE_LIMIT_MAX_KEYS: "10",
+    },
+  };
+  const app = createApp({ runtime });
+  await new Promise<void>((resolve, reject) => {
+    app.server.once("error", reject);
+    app.listen(0, resolve);
+  });
+  try {
+    const origin = `http://127.0.0.1:${tcpPort(app.server.address())}`;
+    assert.equal((await fetch(`${origin}/v1/not-found`)).status, 404);
+    const limited = await fetch(`${origin}/v1/not-found`);
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get("retry-after"), "60");
+    assert.equal(
+      testRecord(testRecord(await limited.json()).error).code,
+      "RATE_LIMITED",
+    );
+    assert.equal((await fetch(`${origin}/health/live`)).status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
 test("client disconnect during authentication aborts before provider or store mutation", async () => {
   const closed: string[] = [];
   let releaseAuthentication: ((identity: TestIdentity) => void) | undefined;

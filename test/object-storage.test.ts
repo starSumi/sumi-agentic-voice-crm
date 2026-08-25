@@ -7,10 +7,12 @@ import {
 } from "@aws-sdk/client-s3";
 import {
   createObjectStorage,
+  MemoryObjectStorage,
   persistAudioAsset,
   persistInputAudio,
   S3ObjectStorage,
 } from "../src/object-storage.ts";
+import { MAX_STORED_AUDIO_BYTES } from "../src/media-policy.ts";
 
 const env = {
   APP_ENV: "test",
@@ -148,4 +150,28 @@ test("input audio is stored privately without returning its bytes", async () => 
   assert.ok(putCommand.input.Body instanceof Uint8Array);
   assert.equal(Buffer.from(putCommand.input.Body).toString(), "input audio");
   assert.equal("data_base64" in persisted.asset, false);
+});
+
+test("every storage adapter rejects audio above the shared lifecycle limit", async () => {
+  const oversized = Buffer.alloc(MAX_STORED_AUDIO_BYTES + 1);
+  await assert.rejects(
+    new MemoryObjectStorage().put({
+      key: "tenant-a/tts/oversized.wav",
+      body: oversized,
+      contentType: "audio/wav",
+    }),
+    /upload limit/,
+  );
+  const storage = new S3ObjectStorage({
+    env,
+    client: { send: async () => assert.fail("oversized audio was uploaded") },
+  });
+  await assert.rejects(
+    storage.put({
+      key: "tenant-a/tts/oversized.wav",
+      body: oversized,
+      contentType: "audio/wav",
+    }),
+    /upload limit/,
+  );
 });

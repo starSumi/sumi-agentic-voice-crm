@@ -138,7 +138,7 @@ test("production API configuration supports mixed providers and DashScope aliase
     () =>
       validateProductionConfig({
         ...dashscopeOnly,
-        DASHSCOPE_TTS_MAX_BYTES: String(51 * 1024 * 1024),
+        DASHSCOPE_TTS_MAX_BYTES: String(26 * 1024 * 1024),
       }),
     /no greater than/,
   );

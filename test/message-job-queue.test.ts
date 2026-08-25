@@ -40,6 +40,38 @@ test("message jobs persist inbound and job_queued transitions and deduplicate by
   );
 });
 
+test("message job reads are scoped to the actor that submitted the job", () => {
+  const queue = createMemoryMessageJobQueue();
+  const { job } = queue.enqueueMessageJob({
+    ...base,
+    idempotency_key: "job-key-actor-scope",
+  });
+  assert.equal(
+    queue.getMessageJob({
+      tenant_id: base.tenant_id,
+      actor_id: "actor-b",
+      job_id: job.id,
+    }),
+    undefined,
+  );
+  assert.equal(
+    queue.getMessageJob({
+      tenant_id: base.tenant_id,
+      actor_id: base.actor_id,
+      job_id: job.id,
+    })?.id,
+    job.id,
+  );
+  assert.deepEqual(
+    queue.messageJobTransitions({
+      tenant_id: base.tenant_id,
+      actor_id: "actor-b",
+      job_id: job.id,
+    }),
+    [],
+  );
+});
+
 test("message job leases recover, retry, and dead-letter without duplicate completion", () => {
   let clock = 1_000;
   const queue = createMemoryMessageJobQueue({
@@ -161,4 +193,141 @@ test("managed message worker completes queued jobs and releases on close", async
       tenant_id: base.tenant_id,
     },
   ]);
+});
+
+test("managed message worker treats result observers as non-critical", async () => {
+  const queue = createMemoryMessageJobQueue({ leaseMs: 100 });
+  queue.enqueueMessageJob({ ...base, idempotency_key: "job-key-observer" });
+  const worker = createMessageJobWorker({
+    queue,
+    workerId: "worker-observer",
+    tenantIds: [base.tenant_id],
+    pollIntervalMs: 5,
+    processJob: async () => ({ accepted: true }),
+    onResult: () => {
+      throw new Error("observer unavailable");
+    },
+  });
+  worker.start();
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (queue.messageJobStats({ tenant_id: base.tenant_id }).succeeded === 1)
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await worker.close();
+  assert.equal(
+    queue.messageJobStats({ tenant_id: base.tenant_id }).succeeded,
+    1,
+  );
+});
+
+test("managed message worker dead-letters protocol errors that are not retryable", async () => {
+  const queue = createMemoryMessageJobQueue({ leaseMs: 100 });
+  queue.enqueueMessageJob({
+    ...base,
+    idempotency_key: "job-key-terminal-error",
+  });
+  const worker = createMessageJobWorker({
+    queue,
+    workerId: "worker-terminal-error",
+    tenantIds: [base.tenant_id],
+    pollIntervalMs: 5,
+    processJob: async () => {
+      throw Object.assign(new Error("invalid input"), {
+        code: "INVALID_REQUEST",
+      });
+    },
+  });
+  worker.start();
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (queue.messageJobStats({ tenant_id: base.tenant_id }).dead_letter === 1)
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await worker.close();
+  const job = queue.getMessageJob({
+    tenant_id: base.tenant_id,
+    idempotency_key: "job-key-terminal-error",
+  });
+  assert.equal(job?.status, "dead_letter");
+  assert.equal(job?.attempts, 1);
+});
+
+test("managed message worker rotates the first tenant when the batch size is one", async () => {
+  const queue = createMemoryMessageJobQueue({ leaseMs: 100 });
+  for (const [tenant_id, suffix] of [
+    ["tenant-a", "a1"],
+    ["tenant-a", "a2"],
+    ["tenant-b", "b1"],
+  ] as const) {
+    queue.enqueueMessageJob({
+      ...base,
+      tenant_id,
+      idempotency_key: `job-key-fair-${suffix}`,
+    });
+  }
+  const processed: string[] = [];
+  const worker = createMessageJobWorker({
+    queue,
+    workerId: "worker-fair",
+    tenantIds: ["tenant-a", "tenant-b"],
+    batchSize: 1,
+    pollIntervalMs: 5,
+    processJob: async (job) => {
+      processed.push(job.tenant_id);
+      return { accepted: true };
+    },
+  });
+  worker.start();
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (processed.length >= 2) break;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await worker.close();
+  assert.deepEqual(processed.slice(0, 2), ["tenant-a", "tenant-b"]);
+});
+
+test("managed message worker renews a lease while a long job is active", async () => {
+  const queue = createMemoryMessageJobQueue({ leaseMs: 30 });
+  queue.enqueueMessageJob({
+    ...base,
+    idempotency_key: "job-key-heartbeat",
+  });
+  let resolveRenewed: (() => void) | undefined;
+  const renewed = new Promise<void>((resolve) => {
+    resolveRenewed = resolve;
+  });
+  let renewals = 0;
+  const workerQueue = {
+    ...queue,
+    renewMessageJobLease(input: Parameters<typeof queue.renewMessageJobLease>[0]) {
+      renewals += 1;
+      const job = queue.renewMessageJobLease(input);
+      resolveRenewed?.();
+      return job;
+    },
+  };
+  const worker = createMessageJobWorker({
+    queue: workerQueue,
+    workerId: "worker-heartbeat",
+    tenantIds: [base.tenant_id],
+    leaseMs: 30,
+    pollIntervalMs: 5,
+    processJob: async () => {
+      await renewed;
+      return { accepted: true };
+    },
+  });
+  worker.start();
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (queue.messageJobStats({ tenant_id: base.tenant_id }).succeeded === 1)
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await worker.close();
+  assert.equal(
+    queue.messageJobStats({ tenant_id: base.tenant_id }).succeeded,
+    1,
+  );
+  assert.ok(renewals >= 1);
 });
