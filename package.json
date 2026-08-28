@@ -51,9 +51,9 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
-    "@astrojs/starlight": "^0.41.7",
+    "@astrojs/starlight": "^0.41.9",
     "@hey-api/openapi-ts": "0.99.0",
-    "astro": "^7.2.2",
+    "astro": "^7.2.6",
     "sharp": "^0.35.3",
     "typescript": "^5.9.3",
     "yaml": "^2.9.0"
